@@ -1,0 +1,42 @@
+---
+description: Update BOTS.md when adding new test bots
+globs:
+alwaysApply: true
+---
+
+# Update Test Bots Documentation
+
+When creating a new test bot in `test_bots/`, you MUST update `test_bots/BOTS.md`.
+
+## Required Documentation
+
+Add a new section with:
+
+1. **Bot name** as heading (### bot_name.py)
+2. **Purpose** - What framework features it tests
+3. **Features tested** - Bullet list of specific classes/methods
+4. **Commands** - Table of available commands
+5. **Events** - Description of any events (if applicable)
+6. **Run command** - How to execute the bot
+
+## Template
+
+```markdown
+### new_bot.py
+
+**Purpose:** Tests [feature description].
+
+**Features tested:**
+- `ClassName` - what aspect
+- `MethodName` - what it validates
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/cmd` | What it does |
+
+**Run:**
+\`\`\`bash
+python test_bots/new_bot.py
+\`\`\`
+```

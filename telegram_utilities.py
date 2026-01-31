@@ -67,7 +67,7 @@ class TelegramTextMessage(TelegramMessage):
                     text=chunk,
                     parse_mode=ParseMode.HTML,
                 )
-                await asyncio.sleep(0.25)
+                await asyncio.sleep(0.05)
 
             logger.info(
                 'message_sent event="%s" chunks=%d message="%s"',

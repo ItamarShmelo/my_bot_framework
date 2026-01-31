@@ -1,0 +1,122 @@
+"""Condition bot testing ActivateOnConditionEvent and EditableField.
+
+Tests:
+- ActivateOnConditionEvent with polling
+- EditableField for runtime parameter changes
+- Condition function integration
+"""
+
+import asyncio
+import logging
+import os
+import random
+import sys
+from pathlib import Path
+
+# Add grandparent directory to path for imports (to find my_bot_framework package)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from my_bot_framework import (
+    BotApplication,
+    SimpleCommand,
+    ActivateOnConditionEvent,
+    EditableField,
+)
+
+
+def get_credentials():
+    """Get bot credentials from environment variables."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    
+    if not token or not chat_id:
+        raise RuntimeError(
+            "Missing environment variables. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"
+        )
+    return token, chat_id
+
+
+# Simulated sensor value
+_sensor_value = 50
+
+
+def get_sensor_value() -> int:
+    """Simulate a sensor reading that occasionally spikes."""
+    global _sensor_value
+    # Random walk with occasional spikes
+    _sensor_value += random.randint(-5, 5)
+    if random.random() < 0.1:  # 10% chance of spike
+        _sensor_value += random.randint(20, 40)
+    _sensor_value = max(0, min(100, _sensor_value))
+    return _sensor_value
+
+
+def check_threshold(threshold: int = 80) -> bool:
+    """Check if sensor value exceeds threshold."""
+    value = get_sensor_value()
+    return value > threshold
+
+
+def build_alert_message(threshold: int = 80) -> str:
+    """Build alert message with current value."""
+    return f"⚠️ Alert! Sensor value ({_sensor_value}) exceeded threshold ({threshold})!"
+
+
+def main():
+    # Setup logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    logger = logging.getLogger("condition_bot")
+    
+    token, chat_id = get_credentials()
+    
+    # Initialize the bot
+    app = BotApplication.initialize(
+        token=token,
+        chat_id=chat_id,
+        logger=logger,
+    )
+    
+    # Create editable threshold field
+    threshold_field = EditableField(
+        name="threshold",
+        field_type=int,
+        initial_value=80,
+        parse=int,
+        validator=lambda v: (0 <= v <= 100, "Threshold must be between 0 and 100"),
+    )
+    
+    # Register condition event with editable field
+    condition_event = ActivateOnConditionEvent(
+        title="sensor_alert",
+        condition_func=check_threshold,
+        condition_kwargs={"threshold": threshold_field.value},
+        message_builder=build_alert_message,
+        message_builder_kwargs={"threshold": threshold_field.value},
+        editable_fields=[threshold_field],
+        poll_seconds=10.0,  # Check every 10 seconds
+    )
+    app.register_event(condition_event)
+    
+    # Command to check current sensor value
+    app.register_command(SimpleCommand(
+        command="/sensor",
+        description="Show current sensor value",
+        message_builder=lambda: f"Current sensor value: {_sensor_value}",
+    ))
+    
+    # Command to show current threshold
+    app.register_command(SimpleCommand(
+        command="/threshold",
+        description="Show current alert threshold",
+        message_builder=lambda: f"Current threshold: {threshold_field.value}",
+    ))
+    
+    logger.info("Starting condition_bot...")
+    asyncio.run(app.run())
+
+
+if __name__ == "__main__":
+    main()

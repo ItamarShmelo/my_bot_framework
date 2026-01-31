@@ -1,0 +1,73 @@
+---
+description: Create test bot when adding new framework functionality
+globs:
+alwaysApply: true
+---
+
+# Create Test Bot for New Features
+
+When adding significant new functionality to the framework, create a test bot to validate it.
+
+## When to Create a New Test Bot
+
+Create a new test bot when adding:
+- New Event types (like `TimeEvent`, `ActivateOnConditionEvent`)
+- New Command types (like `SimpleCommand`, `DialogCommand`)
+- New Dialog patterns or states
+- New TelegramMessage types
+- Major new utilities or patterns
+
+## Test Bot Requirements
+
+1. **File location:** `test_bots/new_feature_bot.py`
+2. **Credentials:** Use environment variables via `get_credentials()` pattern
+3. **Imports:** Add parent directory to path for framework imports
+4. **Documentation:** Update `test_bots/BOTS.md` with the new bot
+
+## Template
+
+```python
+"""Description of what this bot tests.
+
+Tests:
+- Feature 1
+- Feature 2
+"""
+
+import asyncio
+import logging
+import os
+import sys
+from pathlib import Path
+
+# Add grandparent directory to path for imports (to find my_bot_framework package)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from my_bot_framework import BotApplication, ...
+
+
+def get_credentials():
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        raise RuntimeError(
+            "Missing environment variables. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"
+        )
+    return token, chat_id
+
+
+def main():
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("new_feature_bot")
+    
+    token, chat_id = get_credentials()
+    app = BotApplication.initialize(token=token, chat_id=chat_id, logger=logger)
+    
+    # Register your test events/commands here
+    
+    asyncio.run(app.run())
+
+
+if __name__ == "__main__":
+    main()
+```

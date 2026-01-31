@@ -650,7 +650,5 @@ class DialogCommand(Command):
                     )
                     await warning_msg.send(bot, chat_id, "dialog", logger)
 
-            await asyncio.sleep(1.0)  # Small delay between polls
-
         logger.info("dialog_command_completed command=%s", self.command)
         return current_offset  # Return final offset for TelegramCommandsEvent to continue

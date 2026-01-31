@@ -1,0 +1,37 @@
+---
+description: Update test bots when framework API changes
+globs:
+alwaysApply: true
+---
+
+# Update Test Bots on API Change
+
+When modifying the framework's public API in these files:
+- `bot_application.py`
+- `event.py`
+- `dialog.py`
+- `telegram_utilities.py`
+- `utilities.py`
+- `__init__.py`
+
+You MUST update the test bots in `test_bots/` to reflect the changes.
+
+## Checklist
+
+- [ ] Check if any test bot uses the modified API
+- [ ] Update method signatures, parameters, or imports
+- [ ] Ensure test bots still demonstrate correct usage
+- [ ] Run the bots to verify they work (if possible)
+
+## Examples
+
+```python
+# If BotApplication.initialize() signature changes:
+# Update all test bots that call it
+
+# If TimeEvent adds a new required parameter:
+# Update basic_bot.py
+
+# If Dialog.handle_callback() return type changes:
+# Update dialog_bot.py
+```
