@@ -145,26 +145,50 @@ class ComplexBuilder(CallUpdatesInternalState):
         return f"Threshold: {self.threshold}"
 ```
 
-### 5. State Machine Pattern - Dialogs
+### 5. Composite Pattern - Dialogs
 
-Dialogs use explicit state transitions:
+Dialogs use the Composite pattern to build complex flows from simple components.
 
+**Leaf Dialogs** (one question each):
+- `ChoiceDialog` - User selects from keyboard options
+- `UserInputDialog` - User enters text with optional validation
+- `ConfirmDialog` - Yes/No prompt
+
+**Composite Dialogs** (orchestrate children):
+- `SequenceDialog` - Run dialogs in order with named values
+- `BranchDialog` - Condition-based branching
+- `ChoiceBranchDialog` - User selects branch via keyboard
+- `LoopDialog` - Repeat until exit condition
+
+```mermaid
+classDiagram
+    Dialog <|-- ChoiceDialog
+    Dialog <|-- UserInputDialog
+    Dialog <|-- ConfirmDialog
+    Dialog <|-- SequenceDialog
+    Dialog <|-- BranchDialog
+    Dialog <|-- LoopDialog
+    BranchDialog <|-- ChoiceBranchDialog
 ```
-                    start()
-    INACTIVE ─────────────────────► ACTIVE
-                                      │
-                                      │ handle_callback()
-                                      │ (may loop back)
-                                      ▼
-                              ┌───► AWAITING_TEXT
-                              │       │
-                              │       │ _process_text_value()
-                              │       │
-                              └───────┘
-                                      │
-                                      │ done()
-                                      ▼
-                                   COMPLETE
+
+**Shared Context**: All dialogs share a `context` dict for cross-dialog communication:
+
+```python
+# Values flow through context automatically
+dialog = SequenceDialog([
+    ("name", UserInputDialog("Enter name:")),
+    ("tool", ChoiceDialog(
+        prompt="Select tool:",
+        choices=lambda ctx: [("Python", "py")] if ctx.get("name") else [],
+    )),
+])
+```
+
+**State Machine**:
+```
+INACTIVE ──start()──► ACTIVE/AWAITING_TEXT ──complete──► COMPLETE
+                              │
+                              └──cancel()──► COMPLETE (value=None)
 ```
 
 ```python
@@ -190,14 +214,17 @@ await app.run()
 
 ```
 1. Register built-in commands (/terminate, /commands)
-2. Create TelegramCommandsEvent with all commands
-3. Start message sender worker task
-4. Start all event tasks concurrently
-5. Wait for stop_event to be set
-6. Drain message queue
-7. Cancel all tasks
-8. Return exit code
+2. Flush pending updates (ignore messages sent before startup)
+3. Create TelegramCommandsEvent with initial offset
+4. Start message sender worker task
+5. Start all event tasks concurrently
+6. Wait for stop_event to be set
+7. Drain message queue
+8. Cancel all tasks
+9. Return exit code
 ```
+
+**Fresh Start:** The bot calls `flush_pending_updates()` on startup to clear any old messages. This ensures the bot only processes commands sent after it started.
 
 ### 2. Event Loop Flow
 

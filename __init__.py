@@ -36,6 +36,7 @@ from .event import (
     Command,
     SimpleCommand,
     DialogCommand,
+    flush_pending_updates,
     poll_updates,
     get_chat_id_from_update,
 )
@@ -46,11 +47,19 @@ from .telegram_utilities import (
     TelegramOptionsMessage,
     TelegramEditMessage,
     TelegramCallbackAnswerMessage,
+    TelegramRemoveKeyboardMessage,
 )
 from .dialog import (
     Dialog,
     DialogState,
     DialogResponse,
+    ChoiceDialog,
+    UserInputDialog,
+    ConfirmDialog,
+    SequenceDialog,
+    BranchDialog,
+    ChoiceBranchDialog,
+    LoopDialog,
 )
 from .utilities import (
     CallUpdatesInternalState,
@@ -86,14 +95,23 @@ __all__ = [
     "TelegramOptionsMessage",
     "TelegramEditMessage",
     "TelegramCallbackAnswerMessage",
+    "TelegramRemoveKeyboardMessage",
     # Dialog
     "Dialog",
     "DialogState",
     "DialogResponse",
+    "ChoiceDialog",
+    "UserInputDialog",
+    "ConfirmDialog",
+    "SequenceDialog",
+    "BranchDialog",
+    "ChoiceBranchDialog",
+    "LoopDialog",
     # Utilities
     "CallUpdatesInternalState",
     "divide_message_to_chunks",
     "format_message_html",
+    "flush_pending_updates",
     "poll_updates",
     "get_chat_id_from_update",
 ]

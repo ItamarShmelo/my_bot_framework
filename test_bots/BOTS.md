@@ -70,25 +70,43 @@ python test_bots/condition_bot.py
 
 ### dialog_bot.py
 
-**Purpose:** Tests interactive dialog system.
+**Purpose:** Tests the new Dialog Composite system.
 
 **Features tested:**
-- `DialogCommand` registration
-- `Dialog` state machine (INACTIVE → ACTIVE → COMPLETE)
-- `DialogState.AWAITING_TEXT` for text input
-- Inline keyboard button handling
-- Message editing in dialogs
+- `ChoiceDialog` - Keyboard selection with static and dynamic choices
+- `UserInputDialog` - Text input with optional validation
+- `ConfirmDialog` - Yes/No prompts
+- `SequenceDialog` - Sequential dialogs with named values
+- `BranchDialog` - Condition-based branching
+- `ChoiceBranchDialog` - Keyboard-driven branching
+- `LoopDialog` - Repeat until exit condition
+- Shared context across all dialogs
 
 **Commands:**
 | Command | Description |
 |---------|-------------|
-| `/settings` | Opens settings dialog with toggle buttons |
-| `/greet` | Opens greeting dialog that accepts text input |
+| `/simple` | SequenceDialog: name + mood selection |
+| `/confirm` | ConfirmDialog with custom labels |
+| `/validated` | UserInputDialog with validation (1-100) |
+| `/dynamic` | Dynamic choices based on previous selection |
+| `/branch` | ChoiceBranchDialog (quick vs full setup) |
+| `/condition` | BranchDialog with age-based condition |
+| `/loop` | LoopDialog until 'done' entered |
+| `/loopvalid` | LoopDialog until valid email (max 5) |
+| `/full` | Complete onboarding: all dialog types |
 | `/info` | Shows what this bot tests |
 
-**Dialogs:**
-- **SettingsDialog:** Toggle notifications and theme with buttons
-- **InputDialog:** Accept user's name as text input
+**Dialog Types Tested:**
+
+| Dialog Type | Description |
+|-------------|-------------|
+| `ChoiceDialog` | Static/dynamic keyboard options |
+| `UserInputDialog` | Text input with validator |
+| `ConfirmDialog` | Yes/No with custom labels |
+| `SequenceDialog` | Named dialogs in sequence |
+| `BranchDialog` | Condition function branching |
+| `ChoiceBranchDialog` | User-driven branching |
+| `LoopDialog` | Exit by value/condition/max |
 
 **Run:**
 ```bash

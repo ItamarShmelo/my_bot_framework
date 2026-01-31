@@ -114,7 +114,7 @@ class BotApplication:
         Returns:
             Exit code (0 for success).
         """
-        from .event import SimpleCommand, TelegramCommandsEvent
+        from .event import SimpleCommand, TelegramCommandsEvent, flush_pending_updates
         
         # Register built-in commands
         self.commands.insert(0, SimpleCommand(
@@ -128,12 +128,16 @@ class BotApplication:
             message_builder=self.list_commands,
         ))
         
+        # Flush pending updates to only process new messages
+        initial_offset = await flush_pending_updates(self.bot)
+        
         # Create the commands event
         commands_event = TelegramCommandsEvent(
             title="commands",
             bot=self.bot,
             allowed_chat_id=self.chat_id,
             commands=self.commands,
+            initial_offset=initial_offset,
         )
         self.events.append(commands_event)
         

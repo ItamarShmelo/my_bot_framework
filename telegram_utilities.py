@@ -223,6 +223,38 @@ class TelegramCallbackAnswerMessage(TelegramMessage):
             logger.error("telegram_callback_answer_failed error=%s", exc)
 
 
+class TelegramRemoveKeyboardMessage(TelegramMessage):
+    """Remove inline keyboard from an existing message."""
+
+    def __init__(self, message_id: int) -> None:
+        """Create a remove keyboard payload.
+        
+        Args:
+            message_id: The ID of the message to remove keyboard from.
+        """
+        self.message_id = message_id
+
+    async def send(
+        self,
+        bot: Bot,
+        chat_id: str,
+        title: str,
+        logger: logging.Logger,
+    ) -> None:
+        """Remove the inline keyboard from a message."""
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=self.message_id,
+                reply_markup=None,
+            )
+            logger.debug('keyboard_removed message_id=%d', self.message_id)
+        except Exception as exc:
+            # Ignore "message not modified" errors (keyboard already removed)
+            if "message is not modified" not in str(exc).lower():
+                logger.error("telegram_remove_keyboard_failed error=%s", exc)
+
+
 async def _try_send_error_message(
     bot: Bot,
     chat_id: str,

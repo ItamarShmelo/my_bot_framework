@@ -14,13 +14,42 @@ from .telegram_utilities import (
     TelegramOptionsMessage,
     TelegramEditMessage,
     TelegramCallbackAnswerMessage,
+    TelegramRemoveKeyboardMessage,
 )
 from .bot_application import get_bot, get_chat_id, get_logger
 
 if TYPE_CHECKING:
-    from .dialog import Dialog
+    from .dialog import Dialog, DialogResponse
 
 MINIMAL_TIME_BETWEEN_MESSAGES = 5.0 / 60.0
+
+
+async def flush_pending_updates(bot: Bot) -> int:
+    """Flush all pending updates and return the next offset.
+    
+    Call this when the bot starts to ignore old messages and only
+    process messages sent after startup.
+    
+    Args:
+        bot: The Telegram Bot instance.
+        
+    Returns:
+        The update offset to use for subsequent polling.
+    """
+    logger = get_logger()
+    
+    # Use offset=-1 to get the latest update and mark all as read
+    updates = await bot.get_updates(offset=-1, timeout=0)
+    
+    if updates:
+        # Return offset after the latest update
+        new_offset = updates[-1].update_id + 1
+        logger.info("flush_pending_updates cleared=%d next_offset=%d", len(updates), new_offset)
+        return new_offset
+    
+    # No pending updates, start from 0
+    logger.info("flush_pending_updates no_pending_updates")
+    return 0
 
 
 async def poll_updates(
@@ -339,13 +368,14 @@ class TelegramCommandsEvent(Event):
         allowed_chat_id: str,
         commands: List["Command"],
         poll_seconds: float = 2.0,
+        initial_offset: Optional[int] = None,
     ) -> None:
         super().__init__(title)
         self.bot = bot
         self.allowed_chat_id = str(allowed_chat_id)
         self.commands = commands
         self.poll_seconds = poll_seconds
-        self._update_offset: Optional[int] = None
+        self._update_offset: Optional[int] = initial_offset
 
     async def submit(
         self,
@@ -380,6 +410,12 @@ class TelegramCommandsEvent(Event):
                         text="No active session.",
                     )
                     await callback_answer.send(self.bot, self.allowed_chat_id, "callback", logger)
+                    
+                    # Remove keyboard from stale message
+                    if update.callback_query.message:
+                        clicked_msg_id = update.callback_query.message.message_id
+                        remove_kb = TelegramRemoveKeyboardMessage(clicked_msg_id)
+                        await remove_kb.send(self.bot, self.allowed_chat_id, "callback", logger)
                     continue
 
                 if not update.message or not update.message.text:
@@ -551,23 +587,22 @@ class DialogCommand(Command):
         Returns:
             The final update_offset after the dialog completes.
         """
-        from .dialog import DialogState
-
         logger = get_logger()
         bot = get_bot()
         chat_id = get_chat_id()
         
         logger.info("dialog_command_started command=%s", self.command)
 
-        # Send initial message with keyboard using TelegramOptionsMessage
-        response = self.dialog.start()
-        options_msg = TelegramOptionsMessage(response.text, response.keyboard)
-        await options_msg.send(bot, chat_id, "dialog", logger)
-        last_message_id = options_msg.sent_message.message_id if options_msg.sent_message else None
+        # Reset dialog to ensure fresh state
+        self.dialog.reset()
+
+        # Send initial message with keyboard (passing empty context)
+        response = self.dialog.start({})
+        last_message_id = await self._send_response(response, bot, chat_id, logger, None)
 
         # Dialog fully takes over update listening from TelegramCommandsEvent
         current_offset = update_offset
-        while self.dialog.state != DialogState.COMPLETE:
+        while not self.dialog.is_complete:
             updates, current_offset = await poll_updates(
                 bot, chat_id, current_offset
             )
@@ -582,6 +617,12 @@ class DialogCommand(Command):
                     # Answer callback using TelegramCallbackAnswerMessage
                     callback_answer = TelegramCallbackAnswerMessage(update.callback_query.id)
                     await callback_answer.send(bot, chat_id, "callback", logger)
+                    
+                    # Remove keyboard from clicked message to prevent stale clicks
+                    if update.callback_query.message:
+                        clicked_msg_id = update.callback_query.message.message_id
+                        remove_kb = TelegramRemoveKeyboardMessage(clicked_msg_id)
+                        await remove_kb.send(bot, chat_id, "dialog", logger)
 
                     callback_data = update.callback_query.data
                     response = self.dialog.handle_callback(callback_data)
@@ -593,62 +634,64 @@ class DialogCommand(Command):
                         await warning_msg.send(bot, chat_id, "dialog", logger)
                         continue
                     
-                    if response.edit_message and last_message_id:
-                        # Edit message using TelegramEditMessage
-                        edit_msg = TelegramEditMessage(last_message_id, response.text, response.keyboard)
-                        await edit_msg.send(bot, chat_id, "dialog", logger)
-                    else:
-                        if response.text:
-                            if response.keyboard:
-                                # Send new options message
-                                options_msg = TelegramOptionsMessage(response.text, response.keyboard)
-                                await options_msg.send(bot, chat_id, "dialog", logger)
-                                if options_msg.sent_message:
-                                    last_message_id = options_msg.sent_message.message_id
-                            else:
-                                # Send plain text message
-                                text_msg = TelegramTextMessage(response.text)
-                                await text_msg.send(bot, chat_id, "dialog", logger)
+                    last_message_id = await self._send_response(response, bot, chat_id, logger, last_message_id)
 
                 elif update.message and update.message.text:
                     user_text = update.message.text.strip()
                     response = self.dialog.handle_text_input(user_text)
                     
-                    if response and response.text:
-                        # Dialog handled the text input - send response with optional keyboard
-                        if response.keyboard:
-                            options_msg = TelegramOptionsMessage(response.text, response.keyboard)
-                            await options_msg.send(bot, chat_id, "dialog", logger)
-                            if options_msg.sent_message:
-                                last_message_id = options_msg.sent_message.message_id
-                        else:
-                            text_msg = TelegramTextMessage(response.text)
-                            await text_msg.send(bot, chat_id, "dialog", logger)
-                    elif response is None and self.dialog.is_active:
-                        # User sent text when they should have clicked a button
-                        logger.info("dialog_unexpected_text_input text=%s", user_text[:50])
-                        
-                        # Send clarifying message first
-                        clarify_msg = TelegramTextMessage(self.dialog.get_unexpected_text_message())
-                        await clarify_msg.send(bot, chat_id, "dialog", logger)
-                        
-                        # Re-send the keyboard so it appears below the clarifying message
-                        keyboard_response = self.dialog.get_current_keyboard_response()
-                        if keyboard_response and keyboard_response.keyboard:
-                            options_msg = TelegramOptionsMessage(
-                                keyboard_response.text, keyboard_response.keyboard
+                    if response is None:
+                        # Dialog doesn't accept text - send clarifying message
+                        if self.dialog.is_active:
+                            logger.info("dialog_unexpected_text_input text=%s", user_text[:50])
+                            clarify_msg = TelegramTextMessage(
+                                "Please use the buttons to make a selection."
                             )
-                            await options_msg.send(bot, chat_id, "dialog", logger)
-                            if options_msg.sent_message:
-                                last_message_id = options_msg.sent_message.message_id
+                            await clarify_msg.send(bot, chat_id, "dialog", logger)
+                        continue
+                    
+                    last_message_id = await self._send_response(response, bot, chat_id, logger, last_message_id)
                 
                 elif update.message:
                     # Non-text message (photo, sticker, etc.) - warn user
                     logger.info("dialog_unexpected_message_type update_id=%d", update.update_id)
                     warning_msg = TelegramTextMessage(
-                        "Please use the buttons below or type a text response."
+                        "Please use the buttons or type a text response."
                     )
                     await warning_msg.send(bot, chat_id, "dialog", logger)
 
-        logger.info("dialog_command_completed command=%s", self.command)
+        logger.info("dialog_command_completed command=%s value=%s", self.command, self.dialog.value)
         return current_offset  # Return final offset for TelegramCommandsEvent to continue
+
+    async def _send_response(
+        self,
+        response: "DialogResponse",
+        bot: "Bot",
+        chat_id: str,
+        logger: "logging.Logger",
+        last_message_id: Optional[int],
+    ) -> Optional[int]:
+        """Send a dialog response and return the new message ID if applicable."""
+        from .dialog import DialogResponse
+        
+        # Check for NO_CHANGE sentinel
+        if response is DialogResponse.NO_CHANGE or not response.text:
+            return last_message_id
+        
+        if response.edit_message and last_message_id:
+            # Edit existing message
+            edit_msg = TelegramEditMessage(last_message_id, response.text, response.keyboard)
+            await edit_msg.send(bot, chat_id, "dialog", logger)
+            return last_message_id
+        
+        # Send new message
+        if response.keyboard:
+            options_msg = TelegramOptionsMessage(response.text, response.keyboard)
+            await options_msg.send(bot, chat_id, "dialog", logger)
+            if options_msg.sent_message:
+                return options_msg.sent_message.message_id
+        else:
+            text_msg = TelegramTextMessage(response.text)
+            await text_msg.send(bot, chat_id, "dialog", logger)
+        
+        return last_message_id
