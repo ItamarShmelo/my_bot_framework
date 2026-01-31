@@ -98,7 +98,7 @@ Events (Producers)          Queue              Sender (Consumer)
 ```
 
 The queue decouples message generation from sending, enabling:
-- Rate limiting (0.2s delay between sends)
+- Rate limiting (0.05s delay between sends)
 - Graceful shutdown (drain queue before exit)
 - Non-blocking event loops
 

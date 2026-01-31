@@ -185,7 +185,7 @@ class BotApplication:
                 )
             finally:
                 self.queue.task_done()
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.05)
     
     async def send_message(self, message: "EventMessage") -> None:
         """Enqueue a message for sending."""

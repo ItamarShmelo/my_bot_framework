@@ -1,0 +1,28 @@
+---
+description: Keep README.md and IMPLEMENTATION.md in sync with code changes
+globs: **/*.py
+alwaysApply: true
+---
+
+# Documentation Update Requirement
+
+When modifying any Python code in this project, you MUST update the documentation files to reflect the changes:
+
+## Files to Update
+
+1. **README.md** - Explains how to use the bot
+   - Update usage instructions if behavior changes
+   - Add/remove/modify examples as needed
+   - Update configuration options if applicable
+
+2. **IMPLEMENTATION.md** - Explains the implementation, design, and flow
+   - Update design descriptions if architecture changes
+   - Modify flow diagrams or explanations if logic changes
+   - Document new classes, methods, or patterns introduced
+
+## Checklist
+
+After every code change:
+- [ ] Review if README.md needs updates (user-facing changes)
+- [ ] Review if IMPLEMENTATION.md needs updates (internal changes)
+- [ ] Ensure documentation matches the current state of the code
