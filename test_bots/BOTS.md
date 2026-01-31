@@ -28,6 +28,7 @@ export TELEGRAM_CHAT_ID="your_chat_id"
 |---------|-------------|
 | `/hello` | Returns a greeting message |
 | `/status` | Shows bot status |
+| `/info` | Shows what this bot tests |
 | `/commands` | Lists all commands (built-in) |
 | `/terminate` | Shuts down the bot (built-in) |
 
@@ -55,6 +56,7 @@ python test_bots/basic_bot.py
 |---------|-------------|
 | `/sensor` | Shows current simulated sensor value |
 | `/threshold` | Shows current alert threshold |
+| `/info` | Shows what this bot tests |
 
 **Events:**
 - Sensor alert when value exceeds threshold (polls every 10 seconds)
@@ -82,7 +84,7 @@ python test_bots/condition_bot.py
 |---------|-------------|
 | `/settings` | Opens settings dialog with toggle buttons |
 | `/greet` | Opens greeting dialog that accepts text input |
-| `/info` | Shows bot info |
+| `/info` | Shows what this bot tests |
 
 **Dialogs:**
 - **SettingsDialog:** Toggle notifications and theme with buttons

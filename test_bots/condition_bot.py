@@ -114,6 +114,20 @@ def main():
         message_builder=lambda: f"Current threshold: {threshold_field.value}",
     ))
     
+    # Register info command
+    app.register_command(SimpleCommand(
+        command="/info",
+        description="Show what this bot tests",
+        message_builder=lambda: (
+            "<b>Condition Bot</b>\n\n"
+            "Tests condition-based events:\n"
+            "• ActivateOnConditionEvent with polling\n"
+            "• EditableField for runtime parameter changes\n"
+            "• Condition function with kwargs\n\n"
+            "Simulates a sensor that triggers alerts when exceeding threshold."
+        ),
+    ))
+    
     logger.info("Starting condition_bot...")
     asyncio.run(app.run())
 

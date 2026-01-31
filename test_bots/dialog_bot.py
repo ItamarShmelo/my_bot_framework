@@ -187,11 +187,19 @@ def main():
         dialog=InputDialog(),
     ))
     
-    # Simple info command
+    # Register info command
     app.register_command(SimpleCommand(
         command="/info",
-        description="Show bot info",
-        message_builder=lambda: "Dialog Bot - Testing interactive dialogs",
+        description="Show what this bot tests",
+        message_builder=lambda: (
+            "<b>Dialog Bot</b>\n\n"
+            "Tests interactive dialog system:\n"
+            "• DialogCommand registration\n"
+            "• Dialog state machine (INACTIVE → ACTIVE → COMPLETE)\n"
+            "• DialogState.AWAITING_TEXT for text input\n"
+            "• Inline keyboard button handling\n"
+            "• Message editing in dialogs"
+        ),
     ))
     
     logger.info("Starting dialog_bot...")

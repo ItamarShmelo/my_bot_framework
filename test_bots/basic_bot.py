@@ -62,6 +62,20 @@ def main():
         message_builder=lambda: "Bot is running normally.",
     ))
     
+    # Register info command
+    app.register_command(SimpleCommand(
+        command="/info",
+        description="Show what this bot tests",
+        message_builder=lambda: (
+            "<b>Basic Bot</b>\n\n"
+            "Tests core framework functionality:\n"
+            "• BotApplication initialization and lifecycle\n"
+            "• TimeEvent with fire_on_first_check\n"
+            "• SimpleCommand registration\n"
+            "• Built-in /terminate and /commands"
+        ),
+    ))
+    
     # Register a time-based event (every 5 minutes, fire immediately)
     app.register_event(TimeEvent(
         title="heartbeat",
