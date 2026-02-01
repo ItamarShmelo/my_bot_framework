@@ -2,14 +2,14 @@
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
 from telegram import Bot
 
 from .telegram_utilities import TelegramMessage
-
-if TYPE_CHECKING:
-    from .event import Command, Event
+from .accessors import _set_instance
+from .event import Command, Event, SimpleCommand, TelegramCommandsEvent
+from .polling import flush_pending_updates
 
 
 class BotApplication:
@@ -82,6 +82,7 @@ class BotApplication:
         
         bot = Bot(token=token)
         cls._instance = cls(bot, chat_id, logger)
+        _set_instance(cls._instance)  # Set the accessor singleton
         logger.info("bot_application_initialized chat_id=%s", chat_id)
         return cls._instance
     
@@ -116,8 +117,6 @@ class BotApplication:
         Returns:
             Exit code (0 for success).
         """
-        from .event import SimpleCommand, TelegramCommandsEvent, flush_pending_updates
-        
         # Register built-in commands
         self.commands.insert(0, SimpleCommand(
             command="/terminate",
@@ -197,32 +196,12 @@ class BotApplication:
         await self.queue.put(message)
 
 
-# Module-level accessor functions
-def get_app() -> BotApplication:
-    """Get the BotApplication singleton instance."""
-    return BotApplication.get_instance()
-
-
-def get_bot() -> Bot:
-    """Get the Bot instance from the singleton."""
-    return BotApplication.get_instance().bot
-
-
-def get_chat_id() -> str:
-    """Get the chat_id from the singleton."""
-    return BotApplication.get_instance().chat_id
-
-
-def get_queue() -> asyncio.Queue:
-    """Get the message queue from the singleton."""
-    return BotApplication.get_instance().queue
-
-
-def get_stop_event() -> asyncio.Event:
-    """Get the stop event from the singleton."""
-    return BotApplication.get_instance().stop_event
-
-
-def get_logger() -> logging.Logger:
-    """Get the logger from the singleton."""
-    return BotApplication.get_instance().logger
+# Re-export accessor functions from accessors module for backward compatibility
+from .accessors import (
+    get_app,
+    get_bot,
+    get_chat_id,
+    get_queue,
+    get_stop_event,
+    get_logger,
+)

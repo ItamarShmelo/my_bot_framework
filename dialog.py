@@ -15,18 +15,24 @@ Composite dialogs:
 - LoopDialog: Repeat until exit condition
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 
-from .bot_application import get_bot, get_chat_id, get_logger
-
-if TYPE_CHECKING:
-    from .telegram_utilities import TelegramMessage
+from .accessors import get_bot, get_chat_id, get_logger
+from .polling import UpdatePollerMixin
+from .telegram_utilities import (
+    TelegramMessage,
+    TelegramTextMessage,
+    TelegramOptionsMessage,
+    TelegramCallbackAnswerMessage,
+    TelegramRemoveKeyboardMessage,
+)
 
 
 # Sentinel for cancelled dialogs - distinct from None which could be a valid value
@@ -51,78 +57,6 @@ def set_dialog_debug(enabled: bool) -> None:
 
 # Type alias for dialog results - nested dictionary mirroring dialog structure
 DialogResult = Union[Any, Dict[str, "DialogResult"]]
-
-
-class UpdatePollerMixin(ABC):
-    """Mixin providing Telegram update polling with Template Method Pattern.
-    
-    Subclasses implement:
-    - should_stop_polling(): when to exit the poll loop
-    - handle_callback_update(update): process callback queries
-    - handle_text_update(update): process text messages
-    - _get_bot(), _get_chat_id(), _get_logger(): dependency getters
-    """
-    
-    @abstractmethod
-    def should_stop_polling(self) -> bool:
-        """Return True when polling should stop."""
-        ...
-    
-    @abstractmethod
-    async def handle_callback_update(self, update: Update) -> None:
-        """Handle a callback query update."""
-        ...
-    
-    @abstractmethod
-    async def handle_text_update(self, update: Update) -> None:
-        """Handle a text message update."""
-        ...
-    
-    @abstractmethod
-    def _get_bot(self) -> Bot:
-        """Return the bot instance to use for polling."""
-        ...
-    
-    @abstractmethod
-    def _get_chat_id(self) -> str:
-        """Return the chat ID to filter updates."""
-        ...
-    
-    @abstractmethod
-    def _get_logger(self) -> logging.Logger:
-        """Return the logger instance."""
-        ...
-    
-    async def poll(self, update_offset: int = 0) -> Tuple[Any, int]:
-        """Template method: poll updates and route to handlers.
-        
-        Returns (result, final_offset). Result meaning is subclass-specific.
-        """
-        # Late import to avoid circular dependency
-        from .event import poll_updates, get_chat_id_from_update
-        
-        bot = self._get_bot()
-        chat_id = self._get_chat_id()
-        
-        current_offset = update_offset
-        while not self.should_stop_polling():
-            updates, current_offset = await poll_updates(bot, chat_id, current_offset)
-            
-            for update in updates:
-                update_chat_id = get_chat_id_from_update(update)
-                if update_chat_id is None or str(update_chat_id) != chat_id:
-                    continue
-                
-                if update.callback_query:
-                    await self.handle_callback_update(update)
-                elif update.message and update.message.text:
-                    await self.handle_text_update(update)
-        
-        return self._get_poll_result(), current_offset
-    
-    def _get_poll_result(self) -> Any:
-        """Override to customize the result returned by poll()."""
-        return None
 
 
 class DialogState(Enum):
@@ -312,8 +246,6 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
 
     async def handle_callback_update(self, update: Update) -> None:
         """Answer callback, remove keyboard, delegate to handle_callback()."""
-        from .telegram_utilities import TelegramCallbackAnswerMessage, TelegramRemoveKeyboardMessage
-        
         bot = self._get_bot()
         chat_id = self._get_chat_id()
         logger = self._get_logger()
@@ -334,8 +266,6 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
 
     async def handle_text_update(self, update: Update) -> None:
         """ChoiceDialog ignores text - clarify to user (once per activation)."""
-        from .telegram_utilities import TelegramTextMessage
-        
         if self.is_active and not self._text_reminder_sent:
             self._text_reminder_sent = True
             clarify = TelegramTextMessage("Please use the buttons to make a selection.")
@@ -350,8 +280,6 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
 
     async def _send_response(self, response: DialogResponse) -> None:
         """Send a dialog response via Telegram."""
-        from .telegram_utilities import TelegramTextMessage, TelegramOptionsMessage
-        
         if response is DialogResponse.NO_CHANGE:
             return
         
@@ -468,8 +396,6 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
 
     async def handle_callback_update(self, update: Update) -> None:
         """Answer callback, remove keyboard, delegate to handle_callback()."""
-        from .telegram_utilities import TelegramCallbackAnswerMessage, TelegramRemoveKeyboardMessage
-        
         bot = self._get_bot()
         chat_id = self._get_chat_id()
         logger = self._get_logger()
@@ -504,8 +430,6 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
 
     async def _send_response(self, response: DialogResponse) -> None:
         """Send a dialog response via Telegram."""
-        from .telegram_utilities import TelegramTextMessage, TelegramOptionsMessage
-        
         if response is DialogResponse.NO_CHANGE:
             return
         
@@ -631,8 +555,6 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
 
     async def handle_callback_update(self, update: Update) -> None:
         """Answer callback, remove keyboard, delegate to handle_callback()."""
-        from .telegram_utilities import TelegramCallbackAnswerMessage, TelegramRemoveKeyboardMessage
-        
         bot = self._get_bot()
         chat_id = self._get_chat_id()
         logger = self._get_logger()
@@ -653,8 +575,6 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
 
     async def handle_text_update(self, update: Update) -> None:
         """ConfirmDialog ignores text - clarify to user (once per activation)."""
-        from .telegram_utilities import TelegramTextMessage
-        
         if self.is_active and not self._text_reminder_sent:
             self._text_reminder_sent = True
             clarify = TelegramTextMessage("Please use the buttons to make a selection.")
@@ -669,8 +589,6 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
 
     async def _send_response(self, response: DialogResponse) -> None:
         """Send a dialog response via Telegram."""
-        from .telegram_utilities import TelegramTextMessage, TelegramOptionsMessage
-        
         if response is DialogResponse.NO_CHANGE:
             return
         
@@ -964,8 +882,6 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
 
     async def handle_callback_update(self, update: Update) -> None:
         """Answer callback, remove keyboard, delegate to handle_callback()."""
-        from .telegram_utilities import TelegramCallbackAnswerMessage, TelegramRemoveKeyboardMessage
-        
         bot = self._get_bot()
         chat_id = self._get_chat_id()
         logger = self._get_logger()
@@ -990,8 +906,6 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
 
     async def _send_response(self, response: DialogResponse) -> None:
         """Send a dialog response via Telegram."""
-        from .telegram_utilities import TelegramTextMessage, TelegramOptionsMessage
-        
         if response is DialogResponse.NO_CHANGE:
             return
         
@@ -1224,8 +1138,6 @@ class DialogHandler(Dialog):
 
     async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
         """Run inner dialog and call on_complete handler."""
-        import asyncio
-        
         # Child's start() handles reset and context internally
         result, offset = await self.dialog.start(self.context, update_offset)
         

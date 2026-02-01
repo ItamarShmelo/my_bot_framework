@@ -41,12 +41,97 @@ This document describes the internal architecture, design patterns, and code flo
 ```
 my_bot_framework/
 ├── __init__.py           # Public API exports
-├── bot_application.py    # BotApplication singleton and accessors
+├── accessors.py          # Singleton accessor functions (breaks circular deps)
+├── bot_application.py    # BotApplication singleton
+├── polling.py            # Update polling utilities and UpdatePollerMixin
 ├── event.py              # Event system and commands
 ├── dialog.py             # Interactive dialog system
 ├── telegram_utilities.py # Message type wrappers
 └── utilities.py          # Helper functions
 ```
+
+## Module Dependency Graph
+
+The framework is organized to avoid circular imports. All imports are at the
+top of each file (no late/inline imports needed).
+
+```mermaid
+graph TD
+    subgraph core [Core Modules]
+        ACC[accessors.py]
+        TU[telegram_utilities.py]
+        UTIL[utilities.py]
+    end
+
+    subgraph polling_layer [Polling Layer]
+        POLL[polling.py]
+    end
+
+    subgraph business [Business Logic]
+        EVENT[event.py]
+        DIALOG[dialog.py]
+    end
+
+    subgraph app [Application]
+        BOT[bot_application.py]
+        INIT[__init__.py]
+    end
+
+    %% Core has no internal dependencies
+    ACC --> |no internal deps| ACC
+    TU --> UTIL
+
+    %% Polling depends only on accessors
+    POLL --> ACC
+
+    %% Business logic depends on core and polling
+    EVENT --> ACC
+    EVENT --> POLL
+    EVENT --> TU
+
+    DIALOG --> ACC
+    DIALOG --> POLL
+    DIALOG --> TU
+
+    %% Application depends on everything
+    BOT --> ACC
+    BOT --> TU
+    BOT --> POLL
+    BOT --> EVENT
+
+    INIT --> BOT
+    INIT --> EVENT
+    INIT --> DIALOG
+    INIT --> POLL
+    INIT --> TU
+    INIT --> UTIL
+```
+
+### Dependency Table
+
+| Module | Imports From |
+|--------|--------------|
+| `accessors.py` | *(no internal dependencies)* |
+| `utilities.py` | *(no internal dependencies)* |
+| `telegram_utilities.py` | `utilities` |
+| `polling.py` | `accessors` |
+| `event.py` | `accessors`, `polling`, `telegram_utilities` |
+| `dialog.py` | `accessors`, `polling`, `telegram_utilities` |
+| `bot_application.py` | `accessors`, `polling`, `event`, `telegram_utilities` |
+| `__init__.py` | all modules (re-exports public API) |
+
+### Why This Structure?
+
+1. **`accessors.py`** - Holds the singleton reference and accessor functions.
+   Other modules import these instead of importing from `bot_application.py`,
+   breaking the circular dependency chain.
+
+2. **`polling.py`** - Contains `UpdatePollerMixin` and polling functions.
+   Both `event.py` and `dialog.py` need these, so extracting them to a
+   separate module prevents circular imports between event and dialog.
+
+3. **All imports at top** - No late/inline imports are needed. This makes
+   the code cleaner and dependencies explicit.
 
 ## Core Design Patterns
 
@@ -72,15 +157,25 @@ class BotApplication:
         return cls._instance
 ```
 
-Module-level accessors provide convenient access:
+Module-level accessors in `accessors.py` provide convenient access and break
+circular dependencies:
 
 ```python
+# accessors.py - no internal module dependencies
+_instance: BotApplication | None = None
+
+def _set_instance(app: BotApplication) -> None:
+    global _instance
+    _instance = app
+
 def get_app() -> BotApplication:
-    return BotApplication.get_instance()
+    return _instance
 
 def get_bot() -> Bot:
-    return BotApplication.get_instance().bot
+    return _instance.bot
 ```
+
+The `BotApplication.initialize()` calls `_set_instance()` to register itself.
 
 ### 2. Producer-Consumer Pattern - Message Queue
 
@@ -487,7 +582,8 @@ async def _try_send_error_message(bot, chat_id, title, logger, exc):
 
 ## UpdatePollerMixin Pattern
 
-The `UpdatePollerMixin` provides a standardized polling pattern using the Template Method:
+The `UpdatePollerMixin` (defined in `polling.py`) provides a standardized polling
+pattern using the Template Method:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -612,6 +708,8 @@ The framework provides built-in dialog types. If you need a custom leaf dialog
 that handles its own polling, inherit from both `Dialog` and `UpdatePollerMixin`:
 
 ```python
+from my_bot_framework import Dialog, UpdatePollerMixin
+
 class CustomDialog(Dialog, UpdatePollerMixin):
     async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
         # Send initial UI

@@ -15,72 +15,18 @@ from .telegram_utilities import (
     TelegramCallbackAnswerMessage,
     TelegramRemoveKeyboardMessage,
 )
-from .bot_application import get_bot, get_chat_id, get_logger
+from .accessors import get_bot, get_chat_id, get_logger
+from .polling import (
+    UpdatePollerMixin,
+    flush_pending_updates,
+    poll_updates,
+    get_chat_id_from_update,
+)
 
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogResponse
 
-from .dialog import UpdatePollerMixin
-
 MINIMAL_TIME_BETWEEN_MESSAGES = 5.0 / 60.0
-
-
-async def flush_pending_updates(bot: Bot) -> int:
-    """Flush all pending updates and return the next offset.
-    
-    Call this when the bot starts to ignore old messages and only
-    process messages sent after startup.
-    
-    Args:
-        bot: The Telegram Bot instance.
-        
-    Returns:
-        The update offset to use for subsequent polling.
-    """
-    logger = get_logger()
-    
-    # Use offset=-1 to get the latest update and mark all as read
-    updates = await bot.get_updates(offset=-1, timeout=0)
-    
-    if updates:
-        # Return offset after the latest update
-        new_offset = updates[-1].update_id + 1
-        logger.info("flush_pending_updates cleared=%d next_offset=%d", len(updates), new_offset)
-        return new_offset
-    
-    # No pending updates, start from 0
-    logger.info("flush_pending_updates no_pending_updates")
-    return 0
-
-
-async def poll_updates(
-    bot: Bot,
-    allowed_chat_id: str,
-    update_offset: int,
-    timeout: int = 5,
-) -> Tuple[List[Update], int]:
-    """Poll for updates and return (updates, new_offset)."""
-    updates = await bot.get_updates(
-        offset=update_offset,
-        timeout=timeout,
-        allowed_updates=["message", "callback_query"],
-    )
-    new_offset = update_offset
-    for update in updates:
-        new_offset = update.update_id + 1
-    if updates:
-        logger = get_logger()
-        logger.debug("poll_updates_received count=%d", len(updates))
-    return updates, new_offset
-
-
-def get_chat_id_from_update(update: Update) -> Optional[int]:
-    """Extract chat_id from update."""
-    if update.callback_query and update.callback_query.message:
-        return update.callback_query.message.chat_id
-    if update.message:
-        return update.message.chat_id
-    return None
 
 
 class EditableField:

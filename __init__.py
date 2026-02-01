@@ -35,6 +35,9 @@ from .event import (
     Command,
     SimpleCommand,
     DialogCommand,
+)
+from .polling import (
+    UpdatePollerMixin,
     flush_pending_updates,
     poll_updates,
     get_chat_id_from_update,
@@ -61,7 +64,6 @@ from .dialog import (
     BranchDialog,
     ChoiceBranchDialog,
     LoopDialog,
-    UpdatePollerMixin,
     CANCELLED,
     is_cancelled,
     DIALOG_DEBUG,
