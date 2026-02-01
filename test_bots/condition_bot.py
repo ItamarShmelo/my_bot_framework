@@ -90,7 +90,7 @@ def main():
     
     # Register condition event with editable field
     condition_event = ActivateOnConditionEvent(
-        title="sensor_alert",
+        event_name="sensor_alert",
         condition_func=check_threshold,
         condition_kwargs={"threshold": threshold_field.value},
         message_builder=build_alert_message,

@@ -152,6 +152,43 @@ python test_bots/dialog_handler_bot.py
 
 ---
 
+### editable_bot.py
+
+**Purpose:** Tests runtime-editable parameters via dialogs.
+
+**Features tested:**
+- `EditableField` - Type parsing and validation
+- `EditableMixin` - The `edited` flag for immediate re-check
+- `DialogCommand` with `DialogHandler` for editing
+- Dynamic kwargs from editable fields to message builders
+- `ActivateOnConditionEvent` with editable parameters
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/sensor` | Show current simulated sensor value |
+| `/settings` | Show current threshold and alert level |
+| `/edit_threshold` | Edit threshold via UserInputDialog |
+| `/edit_level` | Edit alert level via ChoiceDialog |
+| `/edit_all` | Edit all settings via SequenceDialog |
+| `/info` | Shows what this bot tests |
+
+**Events:**
+- Sensor alert when value exceeds editable threshold (polls every 15 seconds)
+
+**Editable Fields:**
+| Field | Type | Range | Default |
+|-------|------|-------|---------|
+| `threshold` | int | 0-100 | 80 |
+| `alert_level` | str | info/warning/critical | warning |
+
+**Run:**
+```bash
+python test_bots/editable_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:

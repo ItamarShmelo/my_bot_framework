@@ -359,8 +359,10 @@ class TelegramCommandsEvent(Event, UpdatePollerMixin):
         if command:
             logger = self._get_logger()
             logger.info("command_matched command=%s", command.command)
+            # Consume this update before running command, so it won't see the command as input
+            command_offset = update.update_id + 1
             # Command takes over - run it and update offset
-            result, self._current_offset = await command.run(self._queue, self._current_offset)
+            result, self._current_offset = await command.run(self._queue, command_offset)
         else:
             logger = self._get_logger()
             logger.info("unknown_command text=%s", text)
@@ -449,7 +451,7 @@ class Command(ABC):
         self.description = description
 
     @abstractmethod
-    async def run(self, queue: asyncio.Queue, update_offset: int = 0) -> int:
+    async def run(self, queue: asyncio.Queue, update_offset: int = 0) -> Tuple[Any, int]:
         """Run the command until completion.
         
         Args:
@@ -457,7 +459,7 @@ class Command(ABC):
             update_offset: Current Telegram update offset to continue from.
             
         Returns:
-            The final update_offset after the command completes.
+            Tuple of (result, final_update_offset). Result is command-specific.
         """
         ...
 
@@ -481,7 +483,7 @@ class SimpleCommand(Command):
         self.message_builder_args = message_builder_args
         self.message_builder_kwargs = message_builder_kwargs or {}
 
-    async def run(self, queue: asyncio.Queue, update_offset: int = 0) -> int:
+    async def run(self, queue: asyncio.Queue, update_offset: int = 0) -> Tuple[Any, int]:
         """Execute message builder and enqueue result, then complete."""
         logger = get_logger()
         logger.info("simple_command_executed command=%s", self.command)
@@ -491,7 +493,7 @@ class SimpleCommand(Command):
         )
         logger.info("command_message_queued command=%s", self.command)
         await _enqueue_message(queue, result)
-        return update_offset  # No updates consumed, return same offset
+        return None, update_offset  # No result, no updates consumed
 
 
 class DialogCommand(Command):
