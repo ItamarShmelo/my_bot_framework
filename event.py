@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, List, Optional, Tuple, Union
 
 from telegram import Bot, Update
@@ -82,17 +81,6 @@ def get_chat_id_from_update(update: Update) -> Optional[int]:
     if update.message:
         return update.message.chat_id
     return None
-
-
-@dataclass
-class EventMessage:
-    """Payload for a single user-facing message.
-
-    message_title is used as the Telegram title, while message_body contains
-    the formatted content (HTML in this project).
-    """
-    message_title: str
-    message_body: TelegramMessage
 
 
 class EditableField:
@@ -195,15 +183,15 @@ class EditableMixin(ABC):
 
 class Event:
     """Base class for monitoring events."""
-    def __init__(self, title: str) -> None:
-        self.title = title
+    def __init__(self, event_name: str) -> None:
+        self.event_name = event_name
 
     async def submit(
         self,
-        queue: "asyncio.Queue[EventMessage]",
+        queue: "asyncio.Queue[TelegramMessage]",
         stop_event: asyncio.Event,
     ) -> None:
-        """Run the event loop and enqueue EventMessage objects."""
+        """Run the event loop and enqueue TelegramMessage objects."""
         raise NotImplementedError
 
 
@@ -211,11 +199,11 @@ class TimeEvent(Event):
     """Emit a message periodically using a provided message_builder."""
     def __init__(
         self,
-        title: str,
+        event_name: str,
         interval_hours: float,
         message_builder: Callable[
             [...],
-            Union[None, EventMessage, TelegramMessage, str, List[EventMessage]],
+            Union[None, TelegramMessage, str, List[TelegramMessage]],
         ],
         message_builder_args: tuple[Any, ...] = (),
         message_builder_kwargs: Optional[dict[str, Any]] = None,
@@ -226,7 +214,7 @@ class TimeEvent(Event):
         interval_hours controls the minimum delay between emissions. If
         fire_on_first_check is True, the first check can emit immediately.
         """
-        super().__init__(title)
+        super().__init__(event_name)
         assert (
             interval_hours >= MINIMAL_TIME_BETWEEN_MESSAGES
         ), "interval_hours must be at least 5 minutes"
@@ -238,28 +226,30 @@ class TimeEvent(Event):
 
     async def submit(
         self,
-        queue: "asyncio.Queue[EventMessage]",
+        queue: "asyncio.Queue[TelegramMessage]",
         stop_event: asyncio.Event,
     ) -> None:
         """Run the interval gating and enqueue messages when due."""
         interval_seconds = self.interval_hours * 3600.0
         if self.fire_on_first_check and not stop_event.is_set():
-            await self._enqueue_message(queue)
+            await self._enqueue_and_log(queue)
 
         while not stop_event.is_set():
             # Sleep in a cancel-friendly way; honors stop_event.
             await _wait_or_stop(stop_event, max(interval_seconds, 0.1))
             if stop_event.is_set():
                 break
-            await self._enqueue_message(queue)
+            await self._enqueue_and_log(queue)
 
-    async def _enqueue_message(
+    async def _enqueue_and_log(
         self,
-        queue: "asyncio.Queue[EventMessage]",
+        queue: "asyncio.Queue[TelegramMessage]",
     ) -> None:
-        """Normalize message builder output to EventMessage and enqueue."""
+        """Build message, log event_name, and enqueue."""
         message = self.message_builder(*self.message_builder_args, **self.message_builder_kwargs)
-        await _enqueue_from_message(queue, self.title, message)
+        logger = get_logger()
+        logger.info("event_message_queued event_name=%s", self.event_name)
+        await _enqueue_message(queue, message)
 
 
 class ActivateOnConditionEvent(Event, EditableMixin):
@@ -270,17 +260,17 @@ class ActivateOnConditionEvent(Event, EditableMixin):
 
     def __init__(
         self,
-        title: str,
+        event_name: str,
         condition_func: Callable[..., Any],
         condition_args: tuple[Any, ...] = (),
         condition_kwargs: Optional[dict[str, Any]] = None,
-        message_builder: Callable[..., Union[None, EventMessage, TelegramMessage, str, List[EventMessage]]] = None,
+        message_builder: Callable[..., Union[None, TelegramMessage, str, List[TelegramMessage]]] = None,
         message_builder_args: tuple[Any, ...] = (),
         message_builder_kwargs: Optional[dict[str, Any]] = None,
         editable_fields: Optional[List[EditableField]] = None,
         poll_seconds: float = 5.0,
     ) -> None:
-        super().__init__(title)
+        super().__init__(event_name)
         self.condition_func = condition_func
         self.condition_args = condition_args
         self.condition_kwargs = condition_kwargs or {}
@@ -294,7 +284,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
     @property
     def editable_name(self) -> str:
         """Human-readable name for display."""
-        return self.title
+        return self.event_name
 
     @property
     def editable_fields(self) -> List[EditableField]:
@@ -313,14 +303,14 @@ class ActivateOnConditionEvent(Event, EditableMixin):
 
     async def submit(
         self,
-        queue: "asyncio.Queue[EventMessage]",
+        queue: "asyncio.Queue[TelegramMessage]",
         stop_event: asyncio.Event,
     ) -> None:
         logger = get_logger()
-        logger.info("[%s] event_started poll_seconds=%.1f", self.title, self.poll_seconds)
+        logger.info("[%s] event_started poll_seconds=%.1f", self.event_name, self.poll_seconds)
         
         while not stop_event.is_set():
-            logger.debug("[%s] checking_condition", self.title)
+            logger.debug("[%s] checking_condition", self.event_name)
             
             was_edited = self.edited
             if was_edited:
@@ -333,24 +323,24 @@ class ActivateOnConditionEvent(Event, EditableMixin):
             )
             if condition_result or was_edited:
                 if self.message_builder is None:
-                    logger.error("[%s] missing_message_builder", self.title)
+                    logger.error("[%s] missing_message_builder", self.event_name)
                 else:
                     # Use merged kwargs (base + editable values)
                     merged_kwargs = self._get_message_builder_kwargs()
-                    logger.debug("[%s] building_message kwargs=%s", self.title, merged_kwargs)
+                    logger.debug("[%s] building_message kwargs=%s", self.event_name, merged_kwargs)
                     message = await _maybe_await(
                         self.message_builder,
                         *self.message_builder_args,
                         **merged_kwargs,
                     )
                     if message:
-                        logger.info("[%s] message_built_successfully", self.title)
-                        await _enqueue_from_message(queue, self.title, message)
+                        logger.info("event_message_queued event_name=%s", self.event_name)
+                        await _enqueue_message(queue, message)
                     else:
-                        logger.warning("[%s] message_builder_returned_none", self.title)
+                        logger.warning("[%s] message_builder_returned_none", self.event_name)
             await _wait_or_stop(stop_event, self.poll_seconds)
         
-        logger.info("[%s] event_stopped", self.title)
+        logger.info("[%s] event_stopped", self.event_name)
 
 
 class TelegramCommandsEvent(Event, UpdatePollerMixin):
@@ -367,21 +357,21 @@ class TelegramCommandsEvent(Event, UpdatePollerMixin):
 
     def __init__(
         self,
-        title: str,
+        event_name: str,
         bot: Bot,
         allowed_chat_id: str,
         commands: List["Command"],
         poll_seconds: float = 2.0,
         initial_offset: Optional[int] = None,
     ) -> None:
-        super().__init__(title)
+        super().__init__(event_name)
         self.bot = bot
         self.allowed_chat_id = str(allowed_chat_id)
         self.commands = commands
         self.poll_seconds = poll_seconds
         self._update_offset: Optional[int] = initial_offset
         self._stop_event: Optional[asyncio.Event] = None
-        self._queue: Optional["asyncio.Queue[EventMessage]"] = None
+        self._queue: Optional["asyncio.Queue[TelegramMessage]"] = None
         self._current_offset: int = 0
 
     # UpdatePollerMixin abstract methods
@@ -406,11 +396,11 @@ class TelegramCommandsEvent(Event, UpdatePollerMixin):
             update.callback_query.id,
             text="No active session.",
         )
-        await callback_answer.send(self._get_bot(), self._get_chat_id(), "callback", logger)
+        await callback_answer.send(self._get_bot(), self._get_chat_id(), logger)
         
         if update.callback_query.message:
             remove_kb = TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
-            await remove_kb.send(self._get_bot(), self._get_chat_id(), "callback", logger)
+            await remove_kb.send(self._get_bot(), self._get_chat_id(), logger)
 
     async def handle_text_update(self, update: Update) -> None:
         """Handle '/' commands, ignore non-commands."""
@@ -428,15 +418,15 @@ class TelegramCommandsEvent(Event, UpdatePollerMixin):
         else:
             logger = self._get_logger()
             logger.info("unknown_command text=%s", text)
-            await _enqueue_from_message(
+            logger.info("event_message_queued event_name=%s", self.event_name)
+            await _enqueue_message(
                 self._queue,
-                self.title,
                 TelegramTextMessage(self._commands_help_text(text)),
             )
 
     async def submit(
         self,
-        queue: "asyncio.Queue[EventMessage]",
+        queue: "asyncio.Queue[TelegramMessage]",
         stop_event: asyncio.Event,
     ) -> None:
         """Event interface: delegates to poll()."""
@@ -475,30 +465,22 @@ async def _wait_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
         return
 
 
-async def _enqueue_from_message(
-    queue: "asyncio.Queue[EventMessage]",
-    title: str,
-    message: Union[None, EventMessage, TelegramMessage, str, List[EventMessage]],
+async def _enqueue_message(
+    queue: "asyncio.Queue[TelegramMessage]",
+    message: Union[None, TelegramMessage, str, List[TelegramMessage]],
 ) -> None:
-    """Normalize a message-like object into EventMessage instances and put into the queue."""
+    """Queue TelegramMessage instances."""
     if not message:
         return
     if isinstance(message, list):
-        messages: List[EventMessage] = message
-    elif isinstance(message, EventMessage):
-        messages = [message]
+        messages = message
     elif isinstance(message, TelegramMessage):
-        messages = [EventMessage(message_title=title, message_body=message)]
+        messages = [message]
     else:
-        messages = [
-            EventMessage(
-                message_title=title,
-                message_body=TelegramTextMessage(str(message)),
-            )
-        ]
+        messages = [TelegramTextMessage(str(message))]
 
-    for event_message in messages:
-        await queue.put(event_message)
+    for msg in messages:
+        await queue.put(msg)
 
 
 async def _maybe_await(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -543,7 +525,7 @@ class SimpleCommand(Command):
         description: str,
         message_builder: Callable[
             ...,
-            Union[None, EventMessage, TelegramMessage, str, List[EventMessage]],
+            Union[None, TelegramMessage, str, List[TelegramMessage]],
         ],
         message_builder_args: tuple[Any, ...] = (),
         message_builder_kwargs: Optional[dict[str, Any]] = None,
@@ -561,7 +543,8 @@ class SimpleCommand(Command):
             *self.message_builder_args,
             **self.message_builder_kwargs,
         )
-        await _enqueue_from_message(queue, "command", result)
+        logger.info("command_message_queued command=%s", self.command)
+        await _enqueue_message(queue, result)
         return update_offset  # No updates consumed, return same offset
 
 

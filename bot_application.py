@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, List, Optional
 
 from telegram import Bot
 
+from .telegram_utilities import TelegramMessage
+
 if TYPE_CHECKING:
-    from .event import Command, Event, EventMessage
+    from .event import Command, Event
 
 
 class BotApplication:
@@ -39,7 +41,7 @@ class BotApplication:
         self.bot = bot
         self.chat_id = chat_id
         self.logger = logger
-        self.queue: asyncio.Queue["EventMessage"] = asyncio.Queue()
+        self.queue: asyncio.Queue[TelegramMessage] = asyncio.Queue()
         self.stop_event = asyncio.Event()
         self.events: List["Event"] = []
         self.commands: List["Command"] = []
@@ -86,7 +88,7 @@ class BotApplication:
     def register_event(self, event: "Event") -> None:
         """Register an event to be run when the bot starts."""
         self.events.append(event)
-        self.logger.debug("event_registered title=%s", event.title)
+        self.logger.debug("event_registered event_name=%s", event.event_name)
     
     def register_command(self, command: "Command") -> None:
         """Register a command to be available to users."""
@@ -133,7 +135,7 @@ class BotApplication:
         
         # Create the commands event
         commands_event = TelegramCommandsEvent(
-            title="commands",
+            event_name="commands",
             bot=self.bot,
             allowed_chat_id=self.chat_id,
             commands=self.commands,
@@ -181,17 +183,16 @@ class BotApplication:
             except asyncio.TimeoutError:
                 continue
             try:
-                await message.message_body.send(
+                await message.send(
                     bot=self.bot,
                     chat_id=self.chat_id,
-                    title=message.message_title,
                     logger=self.logger,
                 )
             finally:
                 self.queue.task_done()
             await asyncio.sleep(0.05)
     
-    async def send_message(self, message: "EventMessage") -> None:
+    async def send_message(self, message: TelegramMessage) -> None:
         """Enqueue a message for sending."""
         await self.queue.put(message)
 

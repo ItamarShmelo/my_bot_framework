@@ -320,12 +320,12 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
         
         # Answer callback
         callback_answer = TelegramCallbackAnswerMessage(update.callback_query.id)
-        await callback_answer.send(bot, chat_id, "callback", logger)
+        await callback_answer.send(bot, chat_id, logger)
         
         # Remove keyboard from clicked message (scoped to this message only)
         if update.callback_query.message:
             remove_kb = TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
-            await remove_kb.send(bot, chat_id, "dialog", logger)
+            await remove_kb.send(bot, chat_id, logger)
         
         # Delegate to dialog's handle_callback
         response = self.handle_callback(update.callback_query.data)
@@ -339,7 +339,7 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
         if self.is_active and not self._text_reminder_sent:
             self._text_reminder_sent = True
             clarify = TelegramTextMessage("Please use the buttons to make a selection.")
-            await clarify.send(self._get_bot(), self._get_chat_id(), "dialog", self._get_logger())
+            await clarify.send(self._get_bot(), self._get_chat_id(), self._get_logger())
 
     def _get_poll_result(self) -> Any:
         return self.build_result()
@@ -363,7 +363,7 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
             msg = TelegramOptionsMessage(response.text, response.keyboard)
         else:
             msg = TelegramTextMessage(response.text)
-        await msg.send(bot, chat_id, "dialog", logger)
+        await msg.send(bot, chat_id, logger)
 
     async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
         """Send prompt with keyboard, then poll until selection made."""
@@ -476,12 +476,12 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         
         # Answer callback
         callback_answer = TelegramCallbackAnswerMessage(update.callback_query.id)
-        await callback_answer.send(bot, chat_id, "callback", logger)
+        await callback_answer.send(bot, chat_id, logger)
         
         # Remove keyboard from clicked message
         if update.callback_query.message:
             remove_kb = TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
-            await remove_kb.send(bot, chat_id, "dialog", logger)
+            await remove_kb.send(bot, chat_id, logger)
         
         # Delegate to dialog's handle_callback
         response = self.handle_callback(update.callback_query.data)
@@ -517,7 +517,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             msg = TelegramOptionsMessage(response.text, response.keyboard)
         else:
             msg = TelegramTextMessage(response.text)
-        await msg.send(bot, chat_id, "dialog", logger)
+        await msg.send(bot, chat_id, logger)
 
     async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
         """Show prompt and poll until text input received."""
@@ -639,12 +639,12 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
         
         # Answer callback
         callback_answer = TelegramCallbackAnswerMessage(update.callback_query.id)
-        await callback_answer.send(bot, chat_id, "callback", logger)
+        await callback_answer.send(bot, chat_id, logger)
         
         # Remove keyboard from clicked message
         if update.callback_query.message:
             remove_kb = TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
-            await remove_kb.send(bot, chat_id, "dialog", logger)
+            await remove_kb.send(bot, chat_id, logger)
         
         # Delegate to dialog's handle_callback
         response = self.handle_callback(update.callback_query.data)
@@ -658,7 +658,7 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
         if self.is_active and not self._text_reminder_sent:
             self._text_reminder_sent = True
             clarify = TelegramTextMessage("Please use the buttons to make a selection.")
-            await clarify.send(self._get_bot(), self._get_chat_id(), "dialog", self._get_logger())
+            await clarify.send(self._get_bot(), self._get_chat_id(), self._get_logger())
 
     def _get_poll_result(self) -> Any:
         return self.build_result()
@@ -682,7 +682,7 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
             msg = TelegramOptionsMessage(response.text, response.keyboard)
         else:
             msg = TelegramTextMessage(response.text)
-        await msg.send(bot, chat_id, "dialog", logger)
+        await msg.send(bot, chat_id, logger)
 
     async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
         """Show prompt with Yes/No buttons, then poll until selection made."""
@@ -972,12 +972,12 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
         
         # Answer callback
         callback_answer = TelegramCallbackAnswerMessage(update.callback_query.id)
-        await callback_answer.send(bot, chat_id, "callback", logger)
+        await callback_answer.send(bot, chat_id, logger)
         
         # Remove keyboard from clicked message
         if update.callback_query.message:
             remove_kb = TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
-            await remove_kb.send(bot, chat_id, "dialog", logger)
+            await remove_kb.send(bot, chat_id, logger)
         
         # Delegate to dialog's handle_callback
         response = self.handle_callback(update.callback_query.data)
@@ -1003,7 +1003,7 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
             msg = TelegramOptionsMessage(response.text, response.keyboard)
         else:
             msg = TelegramTextMessage(response.text)
-        await msg.send(bot, chat_id, "dialog", logger)
+        await msg.send(bot, chat_id, logger)
 
     def build_result(self) -> DialogResult:
         """Choice branch returns {selected_key: branch_result}."""

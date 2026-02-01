@@ -44,7 +44,7 @@ app.register_command(SimpleCommand(
 
 # Register a time-based event (runs every hour)
 app.register_event(TimeEvent(
-    title="hourly_update",
+    event_name="hourly_update",
     interval_hours=1.0,
     message_builder=lambda: "Hourly ping!",
     fire_on_first_check=True,
@@ -88,7 +88,7 @@ Emits messages at a fixed interval:
 from my_bot_framework import TimeEvent
 
 event = TimeEvent(
-    title="status_check",
+    event_name="status_check",
     interval_hours=0.5,  # Every 30 minutes (minimum 5 minutes)
     message_builder=get_status,
     fire_on_first_check=True,  # Emit immediately on start
@@ -107,7 +107,7 @@ def check_disk_full():
     return disk_usage() > 90
 
 event = ActivateOnConditionEvent(
-    title="disk_alert",
+    event_name="disk_alert",
     condition_func=check_disk_full,
     message_builder=lambda: "Disk usage critical!",
     poll_seconds=60.0,
@@ -271,8 +271,7 @@ Message builders are callables that return message content. They can return:
 
 - `str` - Plain text message
 - `TelegramMessage` - Any message type
-- `EventMessage` - Message with custom title
-- `List[EventMessage]` - Multiple messages
+- `List[TelegramMessage]` - Multiple messages
 - `None` - No message sent
 
 ```python

@@ -66,7 +66,7 @@ async def on_feedback_complete(result):
         logger.info("feedback_handler: Got feedback result=%s", result)
         msg = TelegramTextMessage(f"Thank you for your feedback: {result}")
     
-    await msg.send(bot, chat_id, "feedback", logger)
+    await msg.send(bot, chat_id, logger)
 
 feedback_dialog = DialogHandler(
     ChoiceDialog("How was your experience?", [
@@ -101,7 +101,7 @@ async def on_survey_complete(result):
         else:
             msg = TelegramTextMessage(f"Survey complete: {result}")
     
-    await msg.send(bot, chat_id, "survey", logger)
+    await msg.send(bot, chat_id, logger)
 
 survey_dialog = DialogHandler(
     SequenceDialog([
@@ -129,7 +129,7 @@ async def on_order_complete(result):
     if is_cancelled(result):
         logger.info("order_handler: Order cancelled")
         msg = TelegramTextMessage("Order cancelled.")
-        await msg.send(bot, chat_id, "order", logger)
+        await msg.send(bot, chat_id, logger)
         return
     
     logger.info("order_handler: Processing order...")
@@ -146,7 +146,7 @@ async def on_order_complete(result):
     else:
         msg = TelegramTextMessage(f"Order processed: {result}")
     
-    await msg.send(bot, chat_id, "order", logger)
+    await msg.send(bot, chat_id, logger)
 
 order_dialog = DialogHandler(
     SequenceDialog([
@@ -176,7 +176,7 @@ async def on_inner_complete(result):
     else:
         msg = TelegramTextMessage(f"Inner handler received: {result}")
     
-    await msg.send(bot, chat_id, "nested", logger)
+    await msg.send(bot, chat_id, logger)
 
 async def on_outer_complete(result):
     """Callback for outer dialog - sends Telegram message."""
@@ -191,7 +191,7 @@ async def on_outer_complete(result):
     else:
         msg = TelegramTextMessage(f"🎨 Outer handler final result: {result}")
     
-    await msg.send(bot, chat_id, "nested", logger)
+    await msg.send(bot, chat_id, logger)
 
 nested_dialog = DialogHandler(
     DialogHandler(
@@ -217,12 +217,12 @@ async def on_cancel_test_complete(result):
     if is_cancelled(result):
         logger.info("cancel_test: Dialog was cancelled (detected via is_cancelled)")
         msg = TelegramTextMessage("❌ Dialog was cancelled!")
-        await msg.send(bot, chat_id, "cancel_test", logger)
+        await msg.send(bot, chat_id, logger)
         return
     
     logger.info("cancel_test: Dialog completed with result=%s", result)
     msg = TelegramTextMessage(f"✅ Dialog completed with: {result}")
-    await msg.send(bot, chat_id, "cancel_test", logger)
+    await msg.send(bot, chat_id, logger)
 
 cancel_test_dialog = DialogHandler(
     ConfirmDialog(

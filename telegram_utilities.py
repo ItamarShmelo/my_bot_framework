@@ -18,7 +18,6 @@ class TelegramMessage:
         self,
         bot: Bot,
         chat_id: str,
-        title: str,
         logger: logging.Logger,
     ) -> None:
         """Send this message via a provided bot and chat id."""
@@ -38,26 +37,21 @@ class TelegramTextMessage(TelegramMessage):
         self,
         bot: Bot,
         chat_id: str,
-        title: str,
         logger: logging.Logger,
     ) -> None:
-        """Send a chunked text message with a title prefix."""
+        """Send a chunked text message."""
         try:
             max_chunk_size: Final[int] = MessageLimit.MAX_TEXT_LENGTH
-            base_prefix = f"<b>{title}</b>:\n"
-            prefix_margin = len(base_prefix) + 32
-            content_size = max(1, max_chunk_size - prefix_margin)
-            chunks = divide_message_to_chunks(self.message, content_size)
+            chunks = divide_message_to_chunks(self.message, max_chunk_size)
 
             if not chunks:
                 chunks = [""]
 
-            if len(chunks) == 1 and len(base_prefix) + len(self.message) <= max_chunk_size:
-                chunks = [base_prefix + chunks[0]]
-            else:
+            # Add part numbers for multi-chunk messages
+            if len(chunks) > 1:
                 total = len(chunks)
                 chunks = [
-                    f"<b>{title}</b> ({index}/{total}):\n{chunk}"
+                    f"({index}/{total}):\n{chunk}"
                     for index, chunk in enumerate(chunks, start=1)
                 ]
 
@@ -70,14 +64,13 @@ class TelegramTextMessage(TelegramMessage):
                 await asyncio.sleep(0.05)
 
             logger.info(
-                'message_sent event="%s" chunks=%d message="%s"',
-                title,
+                'message_sent chunks=%d message="%s"',
                 len(chunks),
                 self.message[:200],
             )
         except Exception as exc:
             logger.error("telegram_send_message_failed error=%s", exc)
-            await _try_send_error_message(bot, chat_id, title, logger, exc)
+            await _try_send_error_message(bot, chat_id, logger, exc)
 
 
 class TelegramImageMessage(TelegramMessage):
@@ -95,25 +88,24 @@ class TelegramImageMessage(TelegramMessage):
         self,
         bot: Bot,
         chat_id: str,
-        title: str,
         logger: logging.Logger,
     ) -> None:
-        """Send a PNG image with a bold title caption."""
+        """Send an image with optional caption."""
         try:
             image_path = Path(self.image_path)
-            logger.debug('image_send_start event="%s" path="%s"', title, image_path)
+            logger.debug('image_send_start path="%s"', image_path)
             with image_path.open("rb") as handle:
-                caption_text = self.caption or f"<b>{title}</b>"
+                caption_text = self.caption or ""
                 await bot.send_photo(
                     chat_id=chat_id,
                     photo=handle,
-                    caption=caption_text,
-                    parse_mode=ParseMode.HTML,
+                    caption=caption_text if caption_text else None,
+                    parse_mode=ParseMode.HTML if caption_text else None,
                 )
-            logger.info('image_sent event="%s" path="%s"', title, image_path)
+            logger.info('image_sent path="%s"', image_path)
         except Exception as exc:
             logger.error("telegram_send_photo_failed error=%s", exc)
-            await _try_send_error_message(bot, chat_id, title, logger, exc)
+            await _try_send_error_message(bot, chat_id, logger, exc)
 
 
 class TelegramOptionsMessage(TelegramMessage):
@@ -134,7 +126,6 @@ class TelegramOptionsMessage(TelegramMessage):
         self,
         bot: Bot,
         chat_id: str,
-        title: str,
         logger: logging.Logger,
     ) -> None:
         """Send a message with inline keyboard buttons."""
@@ -145,10 +136,10 @@ class TelegramOptionsMessage(TelegramMessage):
                 reply_markup=self.reply_markup,
                 parse_mode=ParseMode.HTML,
             )
-            logger.info('options_message_sent event="%s"', title)
+            logger.info('options_message_sent')
         except Exception as exc:
             logger.error("telegram_options_message_failed error=%s", exc)
-            await _try_send_error_message(bot, chat_id, title, logger, exc)
+            await _try_send_error_message(bot, chat_id, logger, exc)
 
 
 class TelegramEditMessage(TelegramMessage):
@@ -175,7 +166,6 @@ class TelegramEditMessage(TelegramMessage):
         self,
         bot: Bot,
         chat_id: str,
-        title: str,
         logger: logging.Logger,
     ) -> None:
         """Edit an existing message's text and/or keyboard."""
@@ -187,7 +177,7 @@ class TelegramEditMessage(TelegramMessage):
                 reply_markup=self.reply_markup,
                 parse_mode=ParseMode.HTML,
             )
-            logger.info('message_edited event="%s" message_id=%d', title, self.message_id)
+            logger.info('message_edited message_id=%d', self.message_id)
         except Exception as exc:
             logger.error("telegram_edit_message_failed error=%s", exc)
 
@@ -209,7 +199,6 @@ class TelegramCallbackAnswerMessage(TelegramMessage):
         self,
         bot: Bot,
         chat_id: str,
-        title: str,
         logger: logging.Logger,
     ) -> None:
         """Answer a callback query to acknowledge button press."""
@@ -238,7 +227,6 @@ class TelegramRemoveKeyboardMessage(TelegramMessage):
         self,
         bot: Bot,
         chat_id: str,
-        title: str,
         logger: logging.Logger,
     ) -> None:
         """Remove the inline keyboard from a message."""
@@ -258,7 +246,6 @@ class TelegramRemoveKeyboardMessage(TelegramMessage):
 async def _try_send_error_message(
     bot: Bot,
     chat_id: str,
-    title: str,
     logger: logging.Logger,
     exc: Exception,
 ) -> None:
@@ -266,7 +253,7 @@ async def _try_send_error_message(
     try:
         await bot.send_message(
             chat_id=chat_id,
-            text=f"Error while sending '{title}': {exc}",
+            text=f"Error while sending message: {exc}",
         )
     except Exception as error_exc:
         logger.error("telegram_error_message_failed error=%s", error_exc)

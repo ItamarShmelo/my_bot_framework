@@ -14,13 +14,13 @@ This document describes the internal architecture, design patterns, and code flo
 │  │  TimeEvent   │    │ Condition    │    │ TelegramCommands │   │
 │  │              │    │    Event     │    │      Event       │   │
 │  └──────┬───────┘    └──────┬───────┘    └────────┬─────────┘   │
-│         │                   │                     │            │
-│         └───────────────────┼─────────────────────┘            │
+│         │                   │                     │             │
+│         └───────────────────┼─────────────────────┘             │
 │                             ▼                                   │
-│                    ┌────────────────┐                           │
-│                    │  Message Queue │                           │
-│                    │  (EventMessage)│                           │
-│                    └────────┬───────┘                           │
+│                    ┌─────────────────┐                          │
+│                    │  Message Queue  │                          │
+│                    │(TelegramMessage)│                          │
+│                    └────────┬────────┘                          │
 │                             │                                   │
 │                             ▼                                   │
 │                    ┌────────────────┐                           │
@@ -84,12 +84,12 @@ def get_bot() -> Bot:
 
 ### 2. Producer-Consumer Pattern - Message Queue
 
-Events produce `EventMessage` objects, the sender worker consumes them:
+Events produce `TelegramMessage` objects (with logging at call site), the sender worker consumes them:
 
 ```
 Events (Producers)          Queue              Sender (Consumer)
        │                      │                       │
-       ├──EventMessage───────►│                       │
+       ├──TelegramMessage────►│                       │
        │                      │◄──────get()───────────┤
        │                      │                       │
        │                      │───────message────────►│
@@ -131,7 +131,7 @@ Message builders are pluggable callables that generate content:
 
 ```python
 # Strategy interface: Callable[..., MessageLike]
-# where MessageLike = str | TelegramMessage | EventMessage | List[EventMessage] | None
+# where MessageLike = str | TelegramMessage | List[TelegramMessage] | None
 
 def simple_builder():
     return "Hello!"
@@ -235,7 +235,8 @@ Each event runs its own async loop:
 while not stop_event.is_set():
     if fire_on_first_check or not first_iteration:
         message = message_builder(*args, **kwargs)
-        await queue.put(EventMessage(title, message))
+        logger.info("event_message_queued event_name=%s", event_name)
+        await _enqueue_message(queue, message)  # TelegramMessage directly
     await _wait_or_stop(stop_event, interval_seconds)
 ```
 
@@ -250,7 +251,8 @@ while not stop_event.is_set():
     if condition_result or was_edited:
         merged_kwargs = {**base_kwargs, **editable_field_values}
         message = message_builder(*args, **merged_kwargs)
-        await queue.put(EventMessage(title, message))
+        logger.info("event_message_queued event_name=%s", event_name)
+        await _enqueue_message(queue, message)  # TelegramMessage directly
 
     await _wait_or_stop(stop_event, poll_seconds)
 ```
@@ -312,22 +314,20 @@ async def run(queue, update_offset):
 ### 4. Message Sending Flow
 
 ```
-queue.get() ──► EventMessage
-                    │
-                    ├── message_title: str
-                    │
-                    └── message_body: TelegramMessage
-                              │
-                              ▼
-                    message_body.send(bot, chat_id, title, logger)
-                              │
-                    ┌─────────┴─────────────┐
-                    │  TelegramTextMessage  │
-                    │  - Chunk if > 4096    │
-                    │  - Add title prefix   │
-                    │  - Send each chunk    │
-                    └───────────────────────┘
+queue.get() ──► TelegramMessage
+                        │
+                        ▼
+                message.send(bot, chat_id, logger)
+                        │
+              ┌─────────┴─────────────┐
+              │  TelegramTextMessage  │
+              │  - Chunk if > 4096    │
+              │  - Send each chunk    │
+              └───────────────────────┘
 ```
+
+Note: Event logging (event_name) happens at the call site before enqueueing,
+not during message sending.
 
 ## Key Classes
 
@@ -338,7 +338,7 @@ queue.get() ──► EventMessage
 | `bot` | `Bot` | Telegram Bot instance |
 | `chat_id` | `str` | Allowed chat ID |
 | `logger` | `Logger` | Application logger |
-| `queue` | `Queue[EventMessage]` | Outgoing message queue |
+| `queue` | `Queue[TelegramMessage]` | Outgoing message queue |
 | `stop_event` | `asyncio.Event` | Shutdown signal |
 | `events` | `List[Event]` | Registered events |
 | `commands` | `List[Command]` | Registered commands |
@@ -362,7 +362,7 @@ queue.get() ──► EventMessage
 
 | Class | Content | Features |
 |-------|---------|----------|
-| `TelegramTextMessage` | Plain text | Auto-chunking, title prefix |
+| `TelegramTextMessage` | Plain text | Auto-chunking for long messages |
 | `TelegramImageMessage` | Image file | Caption support |
 | `TelegramOptionsMessage` | Text + keyboard | Inline buttons |
 | `TelegramEditMessage` | Edit existing | Update text/keyboard |
