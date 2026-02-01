@@ -121,16 +121,32 @@ survey_dialog = DialogHandler(
 
 # /async_handler - Tests DialogHandler with async on_complete callback
 async def on_order_complete(result):
-    """Async callback when order dialog completes."""
+    """Async callback when order dialog completes - sends Telegram message."""
     logger = get_logger()
+    bot = get_bot()
+    chat_id = get_chat_id()
+    
     if is_cancelled(result):
         logger.info("order_handler: Order cancelled")
+        msg = TelegramTextMessage("Order cancelled.")
+        await msg.send(bot, chat_id, "order", logger)
         return
     
     logger.info("order_handler: Processing order...")
     # Simulate async processing
     await asyncio.sleep(1)
     logger.info("order_handler: Order processed! result=%s", result)
+    
+    # Build order confirmation message
+    if isinstance(result, dict):
+        lines = ["🛒 Order Confirmed!", ""]
+        for key, value in result.items():
+            lines.append(f"• {key}: {value}")
+        msg = TelegramTextMessage("\n".join(lines))
+    else:
+        msg = TelegramTextMessage(f"Order processed: {result}")
+    
+    await msg.send(bot, chat_id, "order", logger)
 
 order_dialog = DialogHandler(
     SequenceDialog([
@@ -147,15 +163,35 @@ order_dialog = DialogHandler(
 
 
 # /nested_handler - Tests nested DialogHandlers
-def on_inner_complete(result):
-    """Callback for inner dialog."""
+async def on_inner_complete(result):
+    """Callback for inner dialog - sends Telegram message."""
     logger = get_logger()
+    bot = get_bot()
+    chat_id = get_chat_id()
+    
     logger.info("inner_handler: Got result=%s", result)
+    
+    if is_cancelled(result):
+        msg = TelegramTextMessage("Inner handler: Cancelled")
+    else:
+        msg = TelegramTextMessage(f"Inner handler received: {result}")
+    
+    await msg.send(bot, chat_id, "nested", logger)
 
-def on_outer_complete(result):
-    """Callback for outer dialog."""
+async def on_outer_complete(result):
+    """Callback for outer dialog - sends Telegram message."""
     logger = get_logger()
+    bot = get_bot()
+    chat_id = get_chat_id()
+    
     logger.info("outer_handler: Final result=%s", result)
+    
+    if is_cancelled(result):
+        msg = TelegramTextMessage("Outer handler: Cancelled")
+    else:
+        msg = TelegramTextMessage(f"🎨 Outer handler final result: {result}")
+    
+    await msg.send(bot, chat_id, "nested", logger)
 
 nested_dialog = DialogHandler(
     DialogHandler(
@@ -171,21 +207,22 @@ nested_dialog = DialogHandler(
 
 
 # /cancel_test - Tests cancellation handling
-def on_cancel_test_complete(result):
-    """Callback demonstrating CANCELLED sentinel usage."""
+async def on_cancel_test_complete(result):
+    """Callback demonstrating CANCELLED sentinel usage - sends Telegram message."""
     logger = get_logger()
+    bot = get_bot()
+    chat_id = get_chat_id()
     
     # Using the is_cancelled() helper
     if is_cancelled(result):
         logger.info("cancel_test: Dialog was cancelled (detected via is_cancelled)")
-        return
-    
-    # Alternative: direct comparison with CANCELLED
-    if result is CANCELLED:
-        logger.info("cancel_test: Dialog was cancelled (detected via direct comparison)")
+        msg = TelegramTextMessage("❌ Dialog was cancelled!")
+        await msg.send(bot, chat_id, "cancel_test", logger)
         return
     
     logger.info("cancel_test: Dialog completed with result=%s", result)
+    msg = TelegramTextMessage(f"✅ Dialog completed with: {result}")
+    await msg.send(bot, chat_id, "cancel_test", logger)
 
 cancel_test_dialog = DialogHandler(
     ConfirmDialog(

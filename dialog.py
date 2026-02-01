@@ -342,7 +342,7 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
             await clarify.send(self._get_bot(), self._get_chat_id(), "dialog", self._get_logger())
 
     def _get_poll_result(self) -> Any:
-        return self.value
+        return self.build_result()
 
     def build_result(self) -> DialogResult:
         """Leaf returns raw value."""
@@ -496,7 +496,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             await self._send_response(response)
 
     def _get_poll_result(self) -> Any:
-        return self.value
+        return self.build_result()
 
     def build_result(self) -> DialogResult:
         """Leaf returns raw value."""
@@ -661,7 +661,7 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
             await clarify.send(self._get_bot(), self._get_chat_id(), "dialog", self._get_logger())
 
     def _get_poll_result(self) -> Any:
-        return self.value
+        return self.build_result()
 
     def build_result(self) -> DialogResult:
         """Leaf returns raw value."""
@@ -1011,6 +1011,10 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
             return {self._active_key: self._active_branch.build_result()}
         return None
 
+    def _get_poll_result(self) -> Any:
+        """Return the value after polling (for cancel detection)."""
+        return self.value  # Don't use build_result() - only need raw value for cancel check
+
     async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
         """Show choice, poll for selection, then run selected branch."""
         self.state = DialogState.ACTIVE
@@ -1026,9 +1030,9 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
         await self._send_response(response)
         
         # Poll until user selects a branch
-        _, current_offset = await self.poll(update_offset)
+        poll_result, current_offset = await self.poll(update_offset)
         
-        if self._value is CANCELLED:
+        if poll_result is CANCELLED:
             self.state = DialogState.COMPLETE
             return CANCELLED, current_offset
         
@@ -1225,7 +1229,8 @@ class DialogHandler(Dialog):
         # Child's start() handles reset and context internally
         result, offset = await self.dialog.start(self.context, update_offset)
         
-        if result is not CANCELLED and self.on_complete:
+        # Always call on_complete, even if cancelled - let the callback decide how to handle it
+        if self.on_complete:
             maybe_awaitable = self.on_complete(result)
             if asyncio.iscoroutine(maybe_awaitable):
                 await maybe_awaitable
