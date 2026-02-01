@@ -8,7 +8,7 @@ from telegram import Bot
 
 from .telegram_utilities import TelegramMessage
 from .accessors import _set_instance
-from .event import Command, Event, SimpleCommand, TelegramCommandsEvent
+from .event import Command, Event, SimpleCommand, CommandsEvent
 from .polling import flush_pending_updates
 
 
@@ -133,7 +133,7 @@ class BotApplication:
         initial_offset = await flush_pending_updates(self.bot)
         
         # Create the commands event
-        commands_event = TelegramCommandsEvent(
+        commands_event = CommandsEvent(
             event_name="commands",
             bot=self.bot,
             allowed_chat_id=self.chat_id,

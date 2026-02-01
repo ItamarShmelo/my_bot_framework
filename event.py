@@ -289,7 +289,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         logger.info("[%s] event_stopped", self.event_name)
 
 
-class TelegramCommandsEvent(Event, UpdatePollerMixin):
+class CommandsEvent(Event, UpdatePollerMixin):
     """Listen for Telegram commands and enqueue responses.
     
     Inherits UpdatePollerMixin to use the standardized polling pattern.

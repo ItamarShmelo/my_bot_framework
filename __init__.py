@@ -29,7 +29,7 @@ from .event import (
     Event,
     TimeEvent,
     ActivateOnConditionEvent,
-    TelegramCommandsEvent,
+    CommandsEvent,
     EditableField,
     EditableMixin,
     Command,
@@ -88,7 +88,7 @@ __all__ = [
     "Event",
     "TimeEvent",
     "ActivateOnConditionEvent",
-    "TelegramCommandsEvent",
+    "CommandsEvent",
     "EditableField",
     "EditableMixin",
     # Commands

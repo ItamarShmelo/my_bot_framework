@@ -310,7 +310,7 @@ await app.run()
 ```
 1. Register built-in commands (/terminate, /commands)
 2. Flush pending updates (ignore messages sent before startup)
-3. Create TelegramCommandsEvent with initial offset
+3. Create CommandsEvent with initial offset
 4. Start message sender worker task
 5. Start all event tasks concurrently
 6. Wait for stop_event to be set
@@ -354,7 +354,7 @@ while not stop_event.is_set():
 
 ### 3. Command Processing Flow
 
-**TelegramCommandsEvent polling:**
+**CommandsEvent polling:**
 ```
 while not stop_event.is_set():
     updates = await bot.get_updates(offset, timeout)
@@ -444,7 +444,7 @@ not during message sending.
 |-------|---------|----------|
 | `TimeEvent` | Fixed interval | Periodic status updates |
 | `ActivateOnConditionEvent` | Condition becomes truthy | Alert systems |
-| `TelegramCommandsEvent` | User sends "/" command | Command routing |
+| `CommandsEvent` | User sends "/" command | Command routing |
 
 ### Command Types
 
@@ -613,7 +613,7 @@ pattern using the Template Method:
 Classes that inherit `UpdatePollerMixin`:
 - **Leaf Dialogs**: `ChoiceDialog`, `UserInputDialog`, `ConfirmDialog`
 - **Hybrid Dialogs**: `ChoiceBranchDialog` (polls for selection, then delegates)
-- **Events**: `TelegramCommandsEvent`
+- **Events**: `CommandsEvent`
 
 Composite dialogs (`SequenceDialog`, `BranchDialog`, `LoopDialog`, `DialogHandler`)
 do NOT inherit `UpdatePollerMixin` - they delegate to children.
