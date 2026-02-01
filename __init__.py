@@ -32,7 +32,7 @@ from .event import (
     TelegramCommandsEvent,
     EventMessage,
     EditableField,
-    Editable,
+    EditableMixin,
     Command,
     SimpleCommand,
     DialogCommand,
@@ -53,6 +53,8 @@ from .dialog import (
     Dialog,
     DialogState,
     DialogResponse,
+    DialogResult,
+    DialogHandler,
     ChoiceDialog,
     UserInputDialog,
     ConfirmDialog,
@@ -60,6 +62,11 @@ from .dialog import (
     BranchDialog,
     ChoiceBranchDialog,
     LoopDialog,
+    UpdatePollerMixin,
+    CANCELLED,
+    is_cancelled,
+    DIALOG_DEBUG,
+    set_dialog_debug,
 )
 from .utilities import (
     CallUpdatesInternalState,
@@ -83,7 +90,7 @@ __all__ = [
     "TelegramCommandsEvent",
     "EventMessage",
     "EditableField",
-    "Editable",
+    "EditableMixin",
     # Commands
     "Command",
     "SimpleCommand",
@@ -100,6 +107,8 @@ __all__ = [
     "Dialog",
     "DialogState",
     "DialogResponse",
+    "DialogResult",
+    "DialogHandler",
     "ChoiceDialog",
     "UserInputDialog",
     "ConfirmDialog",
@@ -107,6 +116,13 @@ __all__ = [
     "BranchDialog",
     "ChoiceBranchDialog",
     "LoopDialog",
+    # Mixins
+    "UpdatePollerMixin",
+    # Sentinels and Debug
+    "CANCELLED",
+    "is_cancelled",
+    "DIALOG_DEBUG",
+    "set_dialog_debug",
     # Utilities
     "CallUpdatesInternalState",
     "divide_message_to_chunks",

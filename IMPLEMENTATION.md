@@ -14,8 +14,8 @@ This document describes the internal architecture, design patterns, and code flo
 │  │  TimeEvent   │    │ Condition    │    │ TelegramCommands │   │
 │  │              │    │    Event     │    │      Event       │   │
 │  └──────┬───────┘    └──────┬───────┘    └────────┬─────────┘   │
-│         │                   │                      │            │
-│         └───────────────────┼──────────────────────┘            │
+│         │                   │                     │            │
+│         └───────────────────┼─────────────────────┘            │
 │                             ▼                                   │
 │                    ┌────────────────┐                           │
 │                    │  Message Queue │                           │
@@ -375,7 +375,7 @@ The `Editable` mixin and `EditableField` class enable runtime parameter modifica
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                  ActivateOnConditionEvent                   │
-│                       (implements Editable)                 │
+│                       (implements EditableMixin)            │
 ├─────────────────────────────────────────────────────────────┤
 │  editable_fields: [                                         │
 │      EditableField(name="threshold", ...)                   │
@@ -485,6 +485,105 @@ async def _try_send_error_message(bot, chat_id, title, logger, exc):
 7. Return exit code
 ```
 
+## UpdatePollerMixin Pattern
+
+The `UpdatePollerMixin` provides a standardized polling pattern using the Template Method:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    UpdatePollerMixin                        │
+│              (Template Method Pattern)                      │
+├─────────────────────────────────────────────────────────────┤
+│  poll(update_offset) -> (result, final_offset):             │
+│      while not should_stop_polling():                       │
+│          updates = poll_updates(bot, chat_id, offset)       │
+│          for update in updates:                             │
+│              if callback_query:                             │
+│                  handle_callback_update(update)             │
+│              elif text_message:                             │
+│                  handle_text_update(update)                 │
+│      return _get_poll_result(), offset                      │
+├─────────────────────────────────────────────────────────────┤
+│  Abstract methods (subclasses implement):                   │
+│    • should_stop_polling() -> bool                          │
+│    • handle_callback_update(update) -> None                 │
+│    • handle_text_update(update) -> None                     │
+│    • _get_bot() -> Bot                                      │
+│    • _get_chat_id() -> str                                  │
+│    • _get_logger() -> Logger                                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Classes that inherit `UpdatePollerMixin`:
+- **Leaf Dialogs**: `ChoiceDialog`, `UserInputDialog`, `ConfirmDialog`
+- **Hybrid Dialogs**: `ChoiceBranchDialog` (polls for selection, then delegates)
+- **Events**: `TelegramCommandsEvent`
+
+Composite dialogs (`SequenceDialog`, `BranchDialog`, `LoopDialog`, `DialogHandler`)
+do NOT inherit `UpdatePollerMixin` - they delegate to children.
+
+## Dialog System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       Dialog (ABC)                          │
+│         start(context, offset) -> (DialogResult, int)       │
+├─────────────────────────────────────────────────────────────┤
+│  Template method:                                           │
+│    start():                                                 │
+│      1. reset() - clean state                               │
+│      2. Set context                                         │
+│      3. _run_dialog() - delegate to subclass                │
+│                                                             │
+│  Abstract:                                                  │
+│    • _run_dialog(offset) -> (DialogResult, int)             │
+│    • build_result() -> DialogResult                         │
+│    • handle_callback(data) -> DialogResponse                │
+│    • handle_text_input(text) -> DialogResponse              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+          ▼                   ▼                   ▼
+   ┌────────────┐    ┌─────────────────┐   ┌──────────────┐
+   │Leaf Dialogs│    │Composite Dialogs│   │DialogHandler │
+   │(+ Mixin)   │    │                 │   │              │
+   ├────────────┤    ├─────────────────┤   ├──────────────┤
+   │ Choice     │    │ Sequence        │   │ Wrap dialog  │
+   │ UserInput  │    │ Branch          │   │ Call callback│
+   │ Confirm    │    │ ChoiceBranch*   │   │ on complete  │
+   └────────────┘    │ Loop            │   └──────────────┘
+                     └─────────────────┘
+                     (* hybrid - has Mixin)
+```
+
+### Cancellation with CANCELLED Sentinel
+
+Use `CANCELLED` sentinel instead of `None` for unambiguous cancellation:
+
+```python
+from my_bot_framework import CANCELLED, is_cancelled
+
+# Detect cancellation
+if is_cancelled(result):
+    # Handle cancelled dialog
+    pass
+
+# Or direct comparison
+if result is CANCELLED:
+    pass
+```
+
+### DialogResult and build_result()
+
+Each dialog implements `build_result()` to create standardized nested dictionaries:
+
+- **Leaf dialogs**: Return raw `value`
+- **SequenceDialog**: Return `{name: child.build_result()}`
+- **BranchDialog/ChoiceBranchDialog**: Return `{selected_key: branch.build_result()}`
+- **LoopDialog**: Return final `value`
+- **DialogHandler**: Return inner dialog's `build_result()`
+
 ## Extension Points
 
 ### Custom Event
@@ -509,11 +608,39 @@ class CustomCommand(Command):
 
 ### Custom Dialog
 
+The framework provides built-in dialog types. If you need a custom leaf dialog
+that handles its own polling, inherit from both `Dialog` and `UpdatePollerMixin`:
+
 ```python
-class CustomDialog(Dialog):
-    def start(self) -> DialogResponse: ...
-    def handle_callback(self, data) -> DialogResponse: ...
-    def _process_text_value(self, text) -> DialogResponse: ...
+class CustomDialog(Dialog, UpdatePollerMixin):
+    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+        # Send initial UI
+        await self._send_response(response)
+        # Poll until complete
+        return await self.poll(update_offset)
+    
+    def build_result(self) -> DialogResult:
+        return self.value
+    
+    def should_stop_polling(self) -> bool:
+        return self.is_complete
+    
+    def _get_bot(self) -> Bot:
+        return get_bot()
+    
+    def _get_chat_id(self) -> str:
+        return get_chat_id()
+    
+    def _get_logger(self) -> logging.Logger:
+        return get_logger()
+    
+    async def handle_callback_update(self, update: Update) -> None:
+        # Handle callback queries
+        pass
+    
+    async def handle_text_update(self, update: Update) -> None:
+        # Handle text input
+        pass
 ```
 
 ### Custom Message Type

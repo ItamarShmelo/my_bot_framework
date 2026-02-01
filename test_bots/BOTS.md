@@ -115,6 +115,43 @@ python test_bots/dialog_bot.py
 
 ---
 
+### dialog_handler_bot.py
+
+**Purpose:** Tests the new DialogHandler and cancellation features.
+
+**Features tested:**
+- `DialogHandler` - Wrap dialogs with on_complete callback
+- `CANCELLED` sentinel - Unambiguous cancellation detection
+- `is_cancelled()` - Helper function for checking cancellation
+- Nested `DialogHandler` - Multiple handlers in a chain
+- `DialogResult` - Standardized result structure
+- Async `on_complete` callbacks
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/handler` | Basic DialogHandler with on_complete callback |
+| `/sequence_handler` | DialogHandler wrapping SequenceDialog |
+| `/async_handler` | DialogHandler with async on_complete callback |
+| `/nested_handler` | Nested DialogHandlers |
+| `/cancel_test` | Cancellation handling with CANCELLED sentinel |
+
+**New Features Demonstrated:**
+
+| Feature | Description |
+|---------|-------------|
+| `DialogHandler` | Composite that runs a dialog and calls on_complete |
+| `CANCELLED` | Sentinel object for unambiguous cancellation |
+| `is_cancelled()` | Helper to check if result is CANCELLED |
+| `build_result()` | Polymorphic method for standardized results |
+
+**Run:**
+```bash
+python test_bots/dialog_handler_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:

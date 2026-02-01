@@ -1,0 +1,258 @@
+"""Dialog Handler bot testing the new DialogHandler and cancellation features.
+
+Tests:
+- DialogHandler: Wrap dialogs with on_complete callback
+- CANCELLED sentinel: Unambiguous cancellation detection
+- is_cancelled(): Helper function for checking cancellation
+- Nested DialogHandlers: Multiple handlers in a chain
+- DialogResult: Standardized result structure from build_result()
+"""
+
+import asyncio
+import logging
+import os
+import sys
+from pathlib import Path
+
+# Add grandparent directory to path for imports (to find my_bot_framework package)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from my_bot_framework import (
+    BotApplication,
+    DialogCommand,
+    # Dialog types
+    ChoiceDialog,
+    UserInputDialog,
+    ConfirmDialog,
+    SequenceDialog,
+    # New features
+    DialogHandler,
+    CANCELLED,
+    is_cancelled,
+    get_logger,
+    get_bot,
+    get_chat_id,
+    TelegramTextMessage,
+)
+
+
+def get_credentials():
+    """Get bot credentials from environment variables."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    
+    if not token or not chat_id:
+        raise RuntimeError(
+            "Missing environment variables. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"
+        )
+    return token, chat_id
+
+
+# =============================================================================
+# DIALOG DEFINITIONS
+# =============================================================================
+
+# /handler - Tests basic DialogHandler with on_complete callback
+async def on_feedback_complete(result):
+    """Callback when feedback dialog completes - sends Telegram message."""
+    logger = get_logger()
+    bot = get_bot()
+    chat_id = get_chat_id()
+    
+    if is_cancelled(result):
+        logger.info("feedback_handler: User cancelled")
+        msg = TelegramTextMessage("Feedback cancelled.")
+    else:
+        logger.info("feedback_handler: Got feedback result=%s", result)
+        msg = TelegramTextMessage(f"Thank you for your feedback: {result}")
+    
+    await msg.send(bot, chat_id, "feedback", logger)
+
+feedback_dialog = DialogHandler(
+    ChoiceDialog("How was your experience?", [
+        ("Excellent", "excellent"),
+        ("Good", "good"),
+        ("Fair", "fair"),
+        ("Poor", "poor"),
+    ]),
+    on_complete=on_feedback_complete,
+)
+
+
+# /sequence_handler - Tests DialogHandler wrapping a SequenceDialog
+async def on_survey_complete(result):
+    """Callback when survey dialog completes - sends Telegram message."""
+    logger = get_logger()
+    bot = get_bot()
+    chat_id = get_chat_id()
+    
+    if is_cancelled(result):
+        logger.info("survey_handler: User cancelled the survey")
+        msg = TelegramTextMessage("Survey cancelled.")
+    else:
+        logger.info("survey_handler: Survey complete result=%s", result)
+        # Build summary message
+        if isinstance(result, dict):
+            lines = ["📊 Survey Complete!", ""]
+            for key, value in result.items():
+                logger.info("  %s = %s", key, value)
+                lines.append(f"• {key}: {value}")
+            msg = TelegramTextMessage("\n".join(lines))
+        else:
+            msg = TelegramTextMessage(f"Survey complete: {result}")
+    
+    await msg.send(bot, chat_id, "survey", logger)
+
+survey_dialog = DialogHandler(
+    SequenceDialog([
+        ("name", UserInputDialog("What is your name?")),
+        ("rating", ChoiceDialog("Rate our service:", [
+            ("5 Stars", "5"),
+            ("4 Stars", "4"),
+            ("3 Stars", "3"),
+            ("2 Stars", "2"),
+            ("1 Star", "1"),
+        ])),
+        ("recommend", ConfirmDialog("Would you recommend us?")),
+    ]),
+    on_complete=on_survey_complete,
+)
+
+
+# /async_handler - Tests DialogHandler with async on_complete callback
+async def on_order_complete(result):
+    """Async callback when order dialog completes."""
+    logger = get_logger()
+    if is_cancelled(result):
+        logger.info("order_handler: Order cancelled")
+        return
+    
+    logger.info("order_handler: Processing order...")
+    # Simulate async processing
+    await asyncio.sleep(1)
+    logger.info("order_handler: Order processed! result=%s", result)
+
+order_dialog = DialogHandler(
+    SequenceDialog([
+        ("product", ChoiceDialog("Select product:", [
+            ("Widget", "widget"),
+            ("Gadget", "gadget"),
+            ("Gizmo", "gizmo"),
+        ])),
+        ("quantity", UserInputDialog("Enter quantity (1-10):")),
+        ("confirm", ConfirmDialog("Confirm order?")),
+    ]),
+    on_complete=on_order_complete,
+)
+
+
+# /nested_handler - Tests nested DialogHandlers
+def on_inner_complete(result):
+    """Callback for inner dialog."""
+    logger = get_logger()
+    logger.info("inner_handler: Got result=%s", result)
+
+def on_outer_complete(result):
+    """Callback for outer dialog."""
+    logger = get_logger()
+    logger.info("outer_handler: Final result=%s", result)
+
+nested_dialog = DialogHandler(
+    DialogHandler(
+        ChoiceDialog("Pick a color:", [
+            ("Red", "red"),
+            ("Green", "green"),
+            ("Blue", "blue"),
+        ]),
+        on_complete=on_inner_complete,
+    ),
+    on_complete=on_outer_complete,
+)
+
+
+# /cancel_test - Tests cancellation handling
+def on_cancel_test_complete(result):
+    """Callback demonstrating CANCELLED sentinel usage."""
+    logger = get_logger()
+    
+    # Using the is_cancelled() helper
+    if is_cancelled(result):
+        logger.info("cancel_test: Dialog was cancelled (detected via is_cancelled)")
+        return
+    
+    # Alternative: direct comparison with CANCELLED
+    if result is CANCELLED:
+        logger.info("cancel_test: Dialog was cancelled (detected via direct comparison)")
+        return
+    
+    logger.info("cancel_test: Dialog completed with result=%s", result)
+
+cancel_test_dialog = DialogHandler(
+    ConfirmDialog(
+        "Try pressing Cancel to see cancellation handling.",
+        include_cancel=True,
+    ),
+    on_complete=on_cancel_test_complete,
+)
+
+
+def main():
+    """Run the dialog handler test bot."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    logger = logging.getLogger("dialog_handler_bot")
+
+    token, chat_id = get_credentials()
+
+    app = BotApplication.initialize(
+        token=token,
+        chat_id=chat_id,
+        logger=logger,
+    )
+
+    # Register commands
+    app.register_command(DialogCommand(
+        "/handler",
+        "Test basic DialogHandler with on_complete callback",
+        feedback_dialog,
+    ))
+    
+    app.register_command(DialogCommand(
+        "/sequence_handler",
+        "Test DialogHandler wrapping SequenceDialog",
+        survey_dialog,
+    ))
+    
+    app.register_command(DialogCommand(
+        "/async_handler",
+        "Test DialogHandler with async on_complete callback",
+        order_dialog,
+    ))
+    
+    app.register_command(DialogCommand(
+        "/nested_handler",
+        "Test nested DialogHandlers",
+        nested_dialog,
+    ))
+    
+    app.register_command(DialogCommand(
+        "/cancel_test",
+        "Test cancellation handling with CANCELLED sentinel",
+        cancel_test_dialog,
+    ))
+
+    logger.info("Starting DialogHandler test bot...")
+    logger.info("Available commands:")
+    logger.info("  /handler - Basic DialogHandler test")
+    logger.info("  /sequence_handler - DialogHandler with SequenceDialog")
+    logger.info("  /async_handler - DialogHandler with async callback")
+    logger.info("  /nested_handler - Nested DialogHandlers")
+    logger.info("  /cancel_test - Cancellation handling demonstration")
+
+    asyncio.run(app.run())
+
+
+if __name__ == "__main__":
+    main()

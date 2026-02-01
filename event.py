@@ -21,6 +21,8 @@ from .bot_application import get_bot, get_chat_id, get_logger
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogResponse
 
+from .dialog import UpdatePollerMixin
+
 MINIMAL_TIME_BETWEEN_MESSAGES = 5.0 / 60.0
 
 
@@ -153,7 +155,7 @@ class EditableField:
         self._value = new_value
 
 
-class Editable(ABC):
+class EditableMixin(ABC):
     """Mixin for objects with runtime-editable parameters.
     
     The `edited` property allows signaling that parameters have changed,
@@ -260,7 +262,7 @@ class TimeEvent(Event):
         await _enqueue_from_message(queue, self.title, message)
 
 
-class ActivateOnConditionEvent(Event, Editable):
+class ActivateOnConditionEvent(Event, EditableMixin):
     """Poll a condition and enqueue messages when it becomes truthy.
     
     Implements Editable mixin for runtime parameter editing.
@@ -351,14 +353,16 @@ class ActivateOnConditionEvent(Event, Editable):
         logger.info("[%s] event_stopped", self.title)
 
 
-class TelegramCommandsEvent(Event):
+class TelegramCommandsEvent(Event, UpdatePollerMixin):
     """Listen for Telegram commands and enqueue responses.
     
+    Inherits UpdatePollerMixin to use the standardized polling pattern.
     This is a simple router that:
-    1. Polls for updates and matches "/" commands
-    2. Awaits command.run() which blocks until the command completes
-    3. Shows help for unknown "/" commands
-    4. Ignores non-command messages (no "/" prefix)
+    1. Polls for updates using UpdatePollerMixin.poll()
+    2. Handles stale callbacks with "No active session"
+    3. Matches "/" commands and delegates to command.run()
+    4. Shows help for unknown "/" commands
+    5. Ignores non-command messages (no "/" prefix)
     """
 
     def __init__(
@@ -376,72 +380,71 @@ class TelegramCommandsEvent(Event):
         self.commands = commands
         self.poll_seconds = poll_seconds
         self._update_offset: Optional[int] = initial_offset
+        self._stop_event: Optional[asyncio.Event] = None
+        self._queue: Optional["asyncio.Queue[EventMessage]"] = None
+        self._current_offset: int = 0
+
+    # UpdatePollerMixin abstract methods
+    def should_stop_polling(self) -> bool:
+        return self._stop_event.is_set() if self._stop_event else True
+
+    def _get_bot(self) -> Bot:
+        return self.bot  # Uses instance attribute
+
+    def _get_chat_id(self) -> str:
+        return self.allowed_chat_id  # Uses instance attribute
+
+    def _get_logger(self) -> logging.Logger:
+        return get_logger()
+
+    async def handle_callback_update(self, update: Update) -> None:
+        """Handle stale callbacks with 'No active session'."""
+        logger = self._get_logger()
+        logger.debug("stale_callback_received id=%s", update.callback_query.id)
+        
+        callback_answer = TelegramCallbackAnswerMessage(
+            update.callback_query.id,
+            text="No active session.",
+        )
+        await callback_answer.send(self._get_bot(), self._get_chat_id(), "callback", logger)
+        
+        if update.callback_query.message:
+            remove_kb = TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
+            await remove_kb.send(self._get_bot(), self._get_chat_id(), "callback", logger)
+
+    async def handle_text_update(self, update: Update) -> None:
+        """Handle '/' commands, ignore non-commands."""
+        text = update.message.text.strip()
+        
+        if not text.startswith("/"):
+            return
+        
+        command = self._match_command(text)
+        if command:
+            logger = self._get_logger()
+            logger.info("command_matched command=%s", command.command)
+            # Command takes over - run it and update offset
+            result, self._current_offset = await command.run(self._queue, self._current_offset)
+        else:
+            logger = self._get_logger()
+            logger.info("unknown_command text=%s", text)
+            await _enqueue_from_message(
+                self._queue,
+                self.title,
+                TelegramTextMessage(self._commands_help_text(text)),
+            )
 
     async def submit(
         self,
         queue: "asyncio.Queue[EventMessage]",
         stop_event: asyncio.Event,
     ) -> None:
-        """Poll Telegram updates and route commands."""
-        logger = get_logger()
-        while not stop_event.is_set():
-            try:
-                updates, new_offset = await poll_updates(
-                    self.bot,
-                    self.allowed_chat_id,
-                    self._update_offset or 0,
-                )
-                self._update_offset = new_offset
-            except Exception as exc:
-                logger.error("command_poll_failed error=%s", exc)
-                await _wait_or_stop(stop_event, self.poll_seconds)
-                continue
-
-            for update in updates:
-                chat_id = get_chat_id_from_update(update)
-                if chat_id is None or str(chat_id) != self.allowed_chat_id:
-                    continue
-
-                # Handle stale callbacks when no command is running
-                if update.callback_query:
-                    logger.debug("stale_callback_received id=%s", update.callback_query.id)
-                    callback_answer = TelegramCallbackAnswerMessage(
-                        update.callback_query.id,
-                        text="No active session.",
-                    )
-                    await callback_answer.send(self.bot, self.allowed_chat_id, "callback", logger)
-                    
-                    # Remove keyboard from stale message
-                    if update.callback_query.message:
-                        clicked_msg_id = update.callback_query.message.message_id
-                        remove_kb = TelegramRemoveKeyboardMessage(clicked_msg_id)
-                        await remove_kb.send(self.bot, self.allowed_chat_id, "callback", logger)
-                    continue
-
-                if not update.message or not update.message.text:
-                    continue
-
-                text = update.message.text.strip()
-
-                # Only process commands (starting with "/")
-                if not text.startswith("/"):
-                    continue
-
-                command = self._match_command(text)
-                if command:
-                    # Await command.run() - blocks until command completes
-                    # DialogCommand fully takes over update listening
-                    logger.info("command_matched command=%s", command.command)
-                    self._update_offset = await command.run(queue, self._update_offset)
-                else:
-                    logger.info("unknown_command text=%s", text)
-                    await _enqueue_from_message(
-                        queue,
-                        self.title,
-                        TelegramTextMessage(self._commands_help_text(text)),
-                    )
-
-            await _wait_or_stop(stop_event, self.poll_seconds)
+        """Event interface: delegates to poll()."""
+        self._queue = queue
+        self._stop_event = stop_event
+        self._current_offset = self._update_offset or 0
+        
+        await self.poll(self._current_offset)
 
     def _match_command(self, text: str) -> Optional["Command"]:
         """Match the first token against known commands."""
@@ -563,7 +566,11 @@ class SimpleCommand(Command):
 
 
 class DialogCommand(Command):
-    """Command that runs an interactive dialog with its own update loop."""
+    """Command that runs an interactive dialog.
+    
+    The dialog handles its own update polling via UpdatePollerMixin.
+    DialogCommand simply calls dialog.start() and returns the final offset.
+    """
 
     def __init__(
         self,
@@ -574,124 +581,23 @@ class DialogCommand(Command):
         super().__init__(command, description)
         self.dialog = dialog
 
-    async def run(self, queue: asyncio.Queue, update_offset: int = 0) -> int:
-        """Run dialog's update loop until dialog completes.
+    async def run(self, queue: asyncio.Queue, update_offset: int = 0) -> Tuple[Any, int]:
+        """Run the dialog until complete.
         
-        The dialog fully owns the conversation - TelegramCommandsEvent stops
-        listening while this runs. All updates are handled here.
+        The dialog handles its own polling via start().
         
         Args:
             queue: Message queue (not used directly, dialog sends via bot).
             update_offset: Current Telegram update offset to continue from.
             
         Returns:
-            The final update_offset after the dialog completes.
+            Tuple of (DialogResult, final_update_offset).
         """
         logger = get_logger()
-        bot = get_bot()
-        chat_id = get_chat_id()
-        
         logger.info("dialog_command_started command=%s", self.command)
-
-        # Reset dialog to ensure fresh state
-        self.dialog.reset()
-
-        # Send initial message with keyboard (passing empty context)
-        response = self.dialog.start({})
-        last_message_id = await self._send_response(response, bot, chat_id, logger, None)
-
-        # Dialog fully takes over update listening from TelegramCommandsEvent
-        current_offset = update_offset
-        while not self.dialog.is_complete:
-            updates, current_offset = await poll_updates(
-                bot, chat_id, current_offset
-            )
-
-            for update in updates:
-                update_chat_id = get_chat_id_from_update(update)
-                if update_chat_id is None or str(update_chat_id) != chat_id:
-                    logger.debug("dialog_ignoring_update_wrong_chat update_id=%d", update.update_id)
-                    continue
-
-                if update.callback_query:
-                    # Answer callback using TelegramCallbackAnswerMessage
-                    callback_answer = TelegramCallbackAnswerMessage(update.callback_query.id)
-                    await callback_answer.send(bot, chat_id, "callback", logger)
-                    
-                    # Remove keyboard from clicked message to prevent stale clicks
-                    if update.callback_query.message:
-                        clicked_msg_id = update.callback_query.message.message_id
-                        remove_kb = TelegramRemoveKeyboardMessage(clicked_msg_id)
-                        await remove_kb.send(bot, chat_id, "dialog", logger)
-
-                    callback_data = update.callback_query.data
-                    response = self.dialog.handle_callback(callback_data)
-                    
-                    if response is None:
-                        # Unexpected callback - send warning
-                        logger.warning("dialog_unexpected_callback data=%s", callback_data)
-                        warning_msg = TelegramTextMessage("Unexpected button press. Please try again.")
-                        await warning_msg.send(bot, chat_id, "dialog", logger)
-                        continue
-                    
-                    last_message_id = await self._send_response(response, bot, chat_id, logger, last_message_id)
-
-                elif update.message and update.message.text:
-                    user_text = update.message.text.strip()
-                    response = self.dialog.handle_text_input(user_text)
-                    
-                    if response is None:
-                        # Dialog doesn't accept text - send clarifying message
-                        if self.dialog.is_active:
-                            logger.info("dialog_unexpected_text_input text=%s", user_text[:50])
-                            clarify_msg = TelegramTextMessage(
-                                "Please use the buttons to make a selection."
-                            )
-                            await clarify_msg.send(bot, chat_id, "dialog", logger)
-                        continue
-                    
-                    last_message_id = await self._send_response(response, bot, chat_id, logger, last_message_id)
-                
-                elif update.message:
-                    # Non-text message (photo, sticker, etc.) - warn user
-                    logger.info("dialog_unexpected_message_type update_id=%d", update.update_id)
-                    warning_msg = TelegramTextMessage(
-                        "Please use the buttons or type a text response."
-                    )
-                    await warning_msg.send(bot, chat_id, "dialog", logger)
-
-        logger.info("dialog_command_completed command=%s value=%s", self.command, self.dialog.value)
-        return current_offset  # Return final offset for TelegramCommandsEvent to continue
-
-    async def _send_response(
-        self,
-        response: "DialogResponse",
-        bot: "Bot",
-        chat_id: str,
-        logger: "logging.Logger",
-        last_message_id: Optional[int],
-    ) -> Optional[int]:
-        """Send a dialog response and return the new message ID if applicable."""
-        from .dialog import DialogResponse
         
-        # Check for NO_CHANGE sentinel
-        if response is DialogResponse.NO_CHANGE or not response.text:
-            return last_message_id
+        # start() handles reset internally - no need to call reset() explicitly
+        result, final_offset = await self.dialog.start({}, update_offset)
         
-        if response.edit_message and last_message_id:
-            # Edit existing message
-            edit_msg = TelegramEditMessage(last_message_id, response.text, response.keyboard)
-            await edit_msg.send(bot, chat_id, "dialog", logger)
-            return last_message_id
-        
-        # Send new message
-        if response.keyboard:
-            options_msg = TelegramOptionsMessage(response.text, response.keyboard)
-            await options_msg.send(bot, chat_id, "dialog", logger)
-            if options_msg.sent_message:
-                return options_msg.sent_message.message_id
-        else:
-            text_msg = TelegramTextMessage(response.text)
-            await text_msg.send(bot, chat_id, "dialog", logger)
-        
-        return last_message_id
+        logger.info("dialog_command_completed command=%s result=%s", self.command, result)
+        return result, final_offset

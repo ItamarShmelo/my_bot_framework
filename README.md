@@ -160,39 +160,77 @@ app.register_command(cmd)
 
 ### Dialogs
 
-For complex multi-step interactions with inline keyboards:
+The framework provides built-in dialog types for common interactions:
+
+**Leaf Dialogs** (atomic single-step):
+- `ChoiceDialog` - User selects from keyboard options
+- `UserInputDialog` - User enters text (with optional validation)
+- `ConfirmDialog` - Yes/No prompt
+
+**Composite Dialogs** (multi-step):
+- `SequenceDialog` - Run dialogs in order
+- `BranchDialog` - Condition-based branching
+- `ChoiceBranchDialog` - User selects branch
+- `LoopDialog` - Repeat until exit condition
+- `DialogHandler` - Wrap dialog with completion callback
 
 ```python
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from my_bot_framework import Dialog, DialogState, DialogResponse
+from my_bot_framework import (
+    ChoiceDialog, UserInputDialog, ConfirmDialog,
+    SequenceDialog, DialogHandler, DialogCommand,
+    CANCELLED, is_cancelled,
+)
 
-class ConfirmDialog(Dialog):
-    def start(self) -> DialogResponse:
-        self.state = DialogState.ACTIVE
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("Yes", callback_data="confirm_yes"),
-            InlineKeyboardButton("No", callback_data="confirm_no"),
-            InlineKeyboardButton("Done", callback_data="done"),
-        ]])
-        return DialogResponse(
-            text="Are you sure?",
-            keyboard=keyboard,
-        )
+# Simple choice dialog
+color_dialog = ChoiceDialog("Pick a color:", [
+    ("Red", "red"),
+    ("Green", "green"),
+    ("Blue", "blue"),
+])
 
-    def handle_callback(self, callback_data: str) -> DialogResponse:
-        if callback_data == "done":
-            return self.done()
-        if callback_data == "confirm_yes":
-            self.state = DialogState.COMPLETE
-            return DialogResponse(text="Confirmed!", keyboard=None)
-        if callback_data == "confirm_no":
-            self.state = DialogState.COMPLETE
-            return DialogResponse(text="Cancelled.", keyboard=None)
-        return None  # Unknown callback
+# Multi-step sequence
+survey_dialog = SequenceDialog([
+    ("name", UserInputDialog("What is your name?")),
+    ("rating", ChoiceDialog("Rate our service:", [
+        ("5 Stars", "5"),
+        ("4 Stars", "4"),
+        ("3 Stars", "3"),
+    ])),
+    ("recommend", ConfirmDialog("Would you recommend us?")),
+])
 
-    def _process_text_value(self, text: str) -> DialogResponse:
-        # Handle free-text input if needed
-        return DialogResponse(text=f"Received: {text}", keyboard=None)
+# DialogHandler with completion callback
+def on_complete(result):
+    if is_cancelled(result):
+        print("User cancelled")
+    else:
+        print(f"Survey complete: {result}")
+
+handled_dialog = DialogHandler(survey_dialog, on_complete=on_complete)
+
+# Register as command
+app.register_command(DialogCommand("/survey", "Take survey", handled_dialog))
+```
+
+#### Cancellation Handling
+
+Use the `CANCELLED` sentinel for unambiguous cancellation detection:
+
+```python
+from my_bot_framework import CANCELLED, is_cancelled
+
+def on_complete(result):
+    # Using helper function
+    if is_cancelled(result):
+        print("Cancelled!")
+        return
+    
+    # Or direct comparison
+    if result is CANCELLED:
+        print("Cancelled!")
+        return
+    
+    print(f"Got result: {result}")
 ```
 
 ### Message Types
