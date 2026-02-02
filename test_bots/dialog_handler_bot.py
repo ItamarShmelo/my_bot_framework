@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from my_bot_framework import (
     BotApplication,
     DialogCommand,
+    SimpleCommand,
     # Dialog types
     ChoiceDialog,
     UserInputDialog,
@@ -280,15 +281,40 @@ def main():
         cancel_test_dialog,
     ))
 
-    logger.info("Starting DialogHandler test bot...")
-    logger.info("Available commands:")
-    logger.info("  /handler - Basic DialogHandler test")
-    logger.info("  /sequence_handler - DialogHandler with SequenceDialog")
-    logger.info("  /async_handler - DialogHandler with async callback")
-    logger.info("  /nested_handler - Nested DialogHandlers")
-    logger.info("  /cancel_test - Cancellation handling demonstration")
-
-    asyncio.run(app.run())
+    # Register info command
+    info_text = (
+        "<b>Dialog Handler Bot</b>\n\n"
+        "Tests DialogHandler and cancellation features:\n"
+        "• <code>DialogHandler</code> - Wrap dialogs with on_complete callback\n"
+        "• <code>CANCELLED</code> sentinel - Unambiguous cancellation detection\n"
+        "• <code>is_cancelled()</code> - Helper function for checking cancellation\n"
+        "• Nested DialogHandlers - Multiple handlers in a chain\n"
+        "• <code>DialogResult</code> - Standardized result structure\n\n"
+        "<b>Commands:</b>\n"
+        "/handler - Basic DialogHandler test\n"
+        "/sequence_handler - DialogHandler with SequenceDialog\n"
+        "/async_handler - DialogHandler with async callback\n"
+        "/nested_handler - Nested DialogHandlers\n"
+        "/cancel_test - Cancellation handling demonstration"
+    )
+    app.register_command(SimpleCommand(
+        command="/info",
+        description="Show what this bot tests",
+        message_builder=lambda: info_text,
+    ))
+    
+    # Send startup message and run
+    async def send_startup_and_run():
+        startup_msg = TelegramTextMessage(
+            f"🤖 <b>Dialog Handler Bot Started</b>\n\n"
+            f"{info_text}\n\n"
+            f"💡 Type /commands to see all available commands."
+        )
+        await startup_msg.send(app.bot, app.chat_id, logger)
+        logger.info("Starting dialog_handler_bot...")
+        await app.run()
+    
+    asyncio.run(send_startup_and_run())
 
 
 if __name__ == "__main__":

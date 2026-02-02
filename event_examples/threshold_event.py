@@ -49,6 +49,7 @@ class ThresholdEvent(ActivateOnConditionEvent):
         above: bool = True,
         poll_seconds: float = 10.0,
         cooldown_seconds: float = 60.0,
+        fire_when_edited: bool = False,
     ) -> None:
         """Initialize the threshold event.
         
@@ -60,6 +61,7 @@ class ThresholdEvent(ActivateOnConditionEvent):
             above: If True, fire when value > threshold. If False, when value < threshold.
             poll_seconds: How often to check the condition.
             cooldown_seconds: Minimum time between fires to prevent spam.
+            fire_when_edited: If True, fire immediately when edited (even if condition is False).
         """
         class ThresholdCondition(Condition):
             def __init__(self) -> None:
@@ -107,6 +109,7 @@ class ThresholdEvent(ActivateOnConditionEvent):
             condition=condition,
             message_builder=builder,
             poll_seconds=poll_seconds,
+            fire_when_edited=fire_when_edited,
         )
     
     @property

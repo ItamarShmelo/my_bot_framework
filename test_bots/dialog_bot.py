@@ -31,6 +31,7 @@ from my_bot_framework import (
     BranchDialog,
     ChoiceBranchDialog,
     LoopDialog,
+    TelegramTextMessage,
 )
 
 
@@ -271,26 +272,37 @@ def main():
     ))
     
     # Register info command
+    info_text = (
+        "<b>Dialog Bot</b>\n\n"
+        "Tests the new Dialog composite system:\n"
+        "• <b>/simple</b> - SequenceDialog, ChoiceDialog, UserInputDialog\n"
+        "• <b>/confirm</b> - ConfirmDialog with custom labels\n"
+        "• <b>/validated</b> - UserInputDialog with validation\n"
+        "• <b>/dynamic</b> - Dynamic choices based on context\n"
+        "• <b>/branch</b> - ChoiceBranchDialog (keyboard branching)\n"
+        "• <b>/condition</b> - BranchDialog with condition function\n"
+        "• <b>/loop</b> - LoopDialog with exit_value\n"
+        "• <b>/loopvalid</b> - LoopDialog with exit_condition\n"
+        "• <b>/full</b> - Complete onboarding flow"
+    )
     app.register_command(SimpleCommand(
         command="/info",
         description="Show what this bot tests",
-        message_builder=lambda: (
-            "<b>Dialog Bot</b>\n\n"
-            "Tests the new Dialog composite system:\n"
-            "• <b>/simple</b> - SequenceDialog, ChoiceDialog, UserInputDialog\n"
-            "• <b>/confirm</b> - ConfirmDialog with custom labels\n"
-            "• <b>/validated</b> - UserInputDialog with validation\n"
-            "• <b>/dynamic</b> - Dynamic choices based on context\n"
-            "• <b>/branch</b> - ChoiceBranchDialog (keyboard branching)\n"
-            "• <b>/condition</b> - BranchDialog with condition function\n"
-            "• <b>/loop</b> - LoopDialog with exit_value\n"
-            "• <b>/loopvalid</b> - LoopDialog with exit_condition\n"
-            "• <b>/full</b> - Complete onboarding flow"
-        ),
+        message_builder=lambda: info_text,
     ))
     
-    logger.info("Starting dialog_bot...")
-    asyncio.run(app.run())
+    # Send startup message and run
+    async def send_startup_and_run():
+        startup_msg = TelegramTextMessage(
+            f"🤖 <b>Dialog Bot Started</b>\n\n"
+            f"{info_text}\n\n"
+            f"💡 Type /commands to see all available commands."
+        )
+        await startup_msg.send(app.bot, app.chat_id, logger)
+        logger.info("Starting dialog_bot...")
+        await app.run()
+    
+    asyncio.run(send_startup_and_run())
 
 
 if __name__ == "__main__":

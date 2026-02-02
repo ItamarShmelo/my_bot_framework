@@ -124,10 +124,11 @@ event = ActivateOnConditionEvent(
     condition=condition,
     message_builder=builder,
     poll_seconds=60.0,
+    fire_when_edited=False,  # Don't fire just because threshold was edited
 )
 app.register_event(event)
 
-# Edit at runtime:
+# Edit at runtime (triggers immediate re-check, but only fires if condition is True):
 event.edit("condition.threshold", "95")
 ```
 
@@ -227,7 +228,7 @@ The framework provides built-in dialog types for common interactions:
 
 **Leaf Dialogs** (atomic single-step):
 - `ChoiceDialog` - User selects from keyboard options
-- `UserInputDialog` - User enters text (with optional validation; prompt may be callable)
+- `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input)
 - `ConfirmDialog` - Yes/No prompt
 
 **Composite Dialogs** (multi-step):

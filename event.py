@@ -230,7 +230,19 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         message_builder: MessageBuilder,
         editable_attributes: Optional[List[EditableAttribute]] = None,
         poll_seconds: float = 5.0,
+        fire_when_edited: bool = True,
     ) -> None:
+        """Initialize the condition event.
+        
+        Args:
+            event_name: Unique identifier for the event.
+            condition: Condition instance to check.
+            message_builder: MessageBuilder instance for creating messages.
+            editable_attributes: Optional list of editable attributes for the event itself.
+            poll_seconds: How often to check the condition.
+            fire_when_edited: If True, fire immediately when edited (even if condition is False).
+                If False, editing triggers an immediate re-check but only fires if condition is True.
+        """
         super().__init__(event_name)
         if condition is None or not isinstance(condition, Condition):
             raise TypeError("condition must be a Condition instance")
@@ -241,6 +253,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         self.editable_attributes = editable_attributes or []
         self._edited = False  # Initialize instance-level edited flag
         self.poll_seconds = poll_seconds
+        self.fire_when_edited = fire_when_edited
 
     def edit(self, name: str, value: Any) -> None:
         """Edit this event or its condition/builder using prefixes."""
@@ -289,7 +302,10 @@ class ActivateOnConditionEvent(Event, EditableMixin):
             condition_result = await asyncio.to_thread(
                 self.condition.check,
             )
-            if condition_result or was_edited:
+            
+            # Fire if condition is true, or if edited and fire_when_edited is enabled
+            should_fire = condition_result or (was_edited and self.fire_when_edited)
+            if should_fire:
                 message = await _maybe_await(self.message_builder.build)
                 if message:
                     logger.info("event_message_queued event_name=%s", self.event_name)

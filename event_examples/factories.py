@@ -28,6 +28,7 @@ def create_threshold_event(
     above: bool = True,
     poll_seconds: float = 10.0,
     cooldown_seconds: float = 60.0,
+    fire_when_edited: bool = False,
 ) -> ActivateOnConditionEvent:
     """Create an event that fires when a value crosses a threshold.
     
@@ -39,6 +40,7 @@ def create_threshold_event(
         above: If True, fire when value > threshold. If False, when value < threshold.
         poll_seconds: How often to check the condition.
         cooldown_seconds: Minimum time between fires to prevent spam.
+        fire_when_edited: If True, fire immediately when edited (even if condition is False).
         
     Returns:
         An ActivateOnConditionEvent configured for threshold monitoring.
@@ -102,6 +104,7 @@ def create_threshold_event(
         condition=condition,
         message_builder=builder,
         poll_seconds=poll_seconds,
+        fire_when_edited=fire_when_edited,
     )
 
 
@@ -117,6 +120,7 @@ def create_file_change_event(
     file_path: str,
     message_builder: Callable[[str], Union[None, TelegramMessage, str, List[TelegramMessage]]],
     poll_seconds: float = 30.0,
+    fire_when_edited: bool = False,
 ) -> ActivateOnConditionEvent:
     """Create an event that fires when a file is modified.
     
@@ -128,6 +132,7 @@ def create_file_change_event(
         file_path: Path to the file to monitor. Editable at runtime.
         message_builder: Callable that receives current file path and returns message content.
         poll_seconds: How often to check for changes.
+        fire_when_edited: If True, fire immediately when edited (even if condition is False).
     Returns:
         An ActivateOnConditionEvent configured for file monitoring.
         The event has an editable `file_path` field.
@@ -200,4 +205,5 @@ def create_file_change_event(
         condition=condition,
         message_builder=builder,
         poll_seconds=poll_seconds,
+        fire_when_edited=fire_when_edited,
     )

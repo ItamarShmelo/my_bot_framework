@@ -211,26 +211,37 @@ def main():
     ))
     
     # Info command
+    info_text = (
+        "<b>Threshold Bot</b>\n\n"
+        "Tests threshold-based events:\n"
+        "• <code>ThresholdEvent</code> class\n"
+        "• <code>threshold</code> property for runtime editing\n"
+        "• Cooldown mechanism (30s)\n"
+        "• Above/below detection\n\n"
+        "<b>Commands:</b>\n"
+        "/status - Show current CPU/memory values\n"
+        "/thresholds - Show current thresholds\n"
+        "/edit_cpu - Edit CPU threshold\n"
+        "/edit_memory - Edit memory threshold"
+    )
     app.register_command(SimpleCommand(
         command="/info",
         description="Show what this bot tests",
-        message_builder=lambda: (
-            "<b>Threshold Bot</b>\n\n"
-            "Tests threshold-based events:\n"
-            "• <code>ThresholdEvent</code> class\n"
-            "• <code>threshold</code> property for runtime editing\n"
-            "• Cooldown mechanism (30s)\n"
-            "• Above/below detection\n\n"
-            "<b>Commands:</b>\n"
-            "/status - Show current CPU/memory values\n"
-            "/thresholds - Show current thresholds\n"
-            "/edit_cpu - Edit CPU threshold\n"
-            "/edit_memory - Edit memory threshold"
-        ),
+        message_builder=lambda: info_text,
     ))
     
-    logger.info("Starting threshold_bot...")
-    asyncio.run(app.run())
+    # Send startup message and run
+    async def send_startup_and_run():
+        startup_msg = TelegramTextMessage(
+            f"🤖 <b>Threshold Bot Started</b>\n\n"
+            f"{info_text}\n\n"
+            f"💡 Type /commands to see all available commands."
+        )
+        await startup_msg.send(app.bot, app.chat_id, logger)
+        logger.info("Starting threshold_bot...")
+        await app.run()
+    
+    asyncio.run(send_startup_and_run())
 
 
 if __name__ == "__main__":

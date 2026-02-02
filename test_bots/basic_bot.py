@@ -16,7 +16,7 @@ from pathlib import Path
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from my_bot_framework import BotApplication, SimpleCommand, TimeEvent
+from my_bot_framework import BotApplication, SimpleCommand, TimeEvent, TelegramTextMessage
 
 
 def get_credentials():
@@ -63,17 +63,18 @@ def main():
     ))
     
     # Register info command
+    info_text = (
+        "<b>Basic Bot</b>\n\n"
+        "Tests core framework functionality:\n"
+        "• BotApplication initialization and lifecycle\n"
+        "• TimeEvent with fire_on_first_check\n"
+        "• SimpleCommand registration\n"
+        "• Built-in /terminate and /commands"
+    )
     app.register_command(SimpleCommand(
         command="/info",
         description="Show what this bot tests",
-        message_builder=lambda: (
-            "<b>Basic Bot</b>\n\n"
-            "Tests core framework functionality:\n"
-            "• BotApplication initialization and lifecycle\n"
-            "• TimeEvent with fire_on_first_check\n"
-            "• SimpleCommand registration\n"
-            "• Built-in /terminate and /commands"
-        ),
+        message_builder=lambda: info_text,
     ))
     
     # Register a time-based event (every 5 minutes, fire immediately)
@@ -84,8 +85,18 @@ def main():
         fire_on_first_check=True,
     ))
     
-    logger.info("Starting basic_bot...")
-    asyncio.run(app.run())
+    # Send startup message
+    async def send_startup_and_run():
+        startup_msg = TelegramTextMessage(
+            f"🤖 <b>Basic Bot Started</b>\n\n"
+            f"{info_text}\n\n"
+            f"💡 Type /commands to see all available commands."
+        )
+        await startup_msg.send(app.bot, app.chat_id, logger)
+        logger.info("Starting basic_bot...")
+        await app.run()
+    
+    asyncio.run(send_startup_and_run())
 
 
 if __name__ == "__main__":

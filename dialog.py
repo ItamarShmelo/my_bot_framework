@@ -381,6 +381,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         self.prompt = prompt
         self.validator = validator
         self.include_cancel = include_cancel
+        self._prompt_message_id: Optional[int] = None  # Track prompt message for keyboard removal
 
     @property
     def prompt(self) -> str:
@@ -429,9 +430,19 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             await self._send_response(response)
 
     async def handle_text_update(self, update: Update) -> None:
-        """Delegate to handle_text_input()."""
+        """Delegate to handle_text_input() and remove keyboard from previous prompt."""
         text = update.message.text.strip()
         response = self.handle_text_input(text)
+        
+        # Remove keyboard from previous prompt (whether valid or validation error)
+        if self._prompt_message_id is not None:
+            bot = self._get_bot()
+            chat_id = self._get_chat_id()
+            logger = self._get_logger()
+            remove_kb = TelegramRemoveKeyboardMessage(self._prompt_message_id)
+            await remove_kb.send(bot, chat_id, logger)
+            self._prompt_message_id = None
+        
         if response:
             await self._send_response(response)
 
@@ -453,9 +464,13 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         
         if response.keyboard:
             msg = TelegramOptionsMessage(response.text, response.keyboard)
+            await msg.send(bot, chat_id, logger)
+            # Track message ID for later keyboard removal
+            if msg.sent_message:
+                self._prompt_message_id = msg.sent_message.message_id
         else:
             msg = TelegramTextMessage(response.text)
-        await msg.send(bot, chat_id, logger)
+            await msg.send(bot, chat_id, logger)
 
     async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
         """Show prompt and poll until text input received."""
@@ -519,6 +534,11 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
                 edit_message=False,
             )
         return DialogResponse.NO_CHANGE
+
+    def reset(self) -> None:
+        """Reset dialog for reuse."""
+        super().reset()
+        self._prompt_message_id = None
 
 
 class ConfirmDialog(Dialog, UpdatePollerMixin):

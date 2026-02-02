@@ -23,6 +23,7 @@ from my_bot_framework import (
     EditableAttribute,
     Condition,
     MessageBuilder,
+    TelegramTextMessage,
 )
 
 
@@ -109,6 +110,7 @@ def main():
         condition=condition,
         message_builder=builder,
         poll_seconds=10.0,  # Check every 10 seconds
+        fire_when_edited=False,  # Don't fire just because threshold was edited
     )
     app.register_event(condition_event)
     
@@ -127,21 +129,32 @@ def main():
     ))
     
     # Register info command
+    info_text = (
+        "<b>Condition Bot</b>\n\n"
+        "Tests condition-based events:\n"
+        "• ActivateOnConditionEvent with polling\n"
+        "• EditableAttribute for runtime parameter changes\n"
+        "• Condition/MessageBuilder interfaces\n\n"
+        "Simulates a sensor that triggers alerts when exceeding threshold."
+    )
     app.register_command(SimpleCommand(
         command="/info",
         description="Show what this bot tests",
-        message_builder=lambda: (
-            "<b>Condition Bot</b>\n\n"
-            "Tests condition-based events:\n"
-            "• ActivateOnConditionEvent with polling\n"
-            "• EditableAttribute for runtime parameter changes\n"
-            "• Condition/MessageBuilder interfaces\n\n"
-            "Simulates a sensor that triggers alerts when exceeding threshold."
-        ),
+        message_builder=lambda: info_text,
     ))
     
-    logger.info("Starting condition_bot...")
-    asyncio.run(app.run())
+    # Send startup message and run
+    async def send_startup_and_run():
+        startup_msg = TelegramTextMessage(
+            f"🤖 <b>Condition Bot Started</b>\n\n"
+            f"{info_text}\n\n"
+            f"💡 Type /commands to see all available commands."
+        )
+        await startup_msg.send(app.bot, app.chat_id, logger)
+        logger.info("Starting condition_bot...")
+        await app.run()
+    
+    asyncio.run(send_startup_and_run())
 
 
 if __name__ == "__main__":

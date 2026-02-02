@@ -43,6 +43,7 @@ class TimeEvent(ActivateOnConditionEvent):
         interval_hours: float,
         message_builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
         fire_on_first_check: bool = False,
+        fire_when_edited: bool = False,
     ) -> None:
         """Initialize the time-based event.
         
@@ -51,6 +52,7 @@ class TimeEvent(ActivateOnConditionEvent):
             interval_hours: Hours between emissions (minimum 5 minutes). Editable at runtime.
             message_builder: Callable returning message content.
             fire_on_first_check: If True, fire immediately on first check.
+            fire_when_edited: If True, fire immediately when edited (even if condition is False).
         """
         assert interval_hours >= MINIMAL_INTERVAL_HOURS, (
             f"interval_hours must be at least {MINIMAL_INTERVAL_HOURS * 60:.0f} minutes"
@@ -116,6 +118,7 @@ class TimeEvent(ActivateOnConditionEvent):
             condition=condition,
             message_builder=builder,
             poll_seconds=poll_seconds,
+            fire_when_edited=fire_when_edited,
         )
     
     @property

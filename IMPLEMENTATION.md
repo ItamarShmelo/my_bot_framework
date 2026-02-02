@@ -249,7 +249,7 @@ Dialogs use the Composite pattern to build complex flows from simple components.
 
 **Leaf Dialogs** (one question each):
 - `ChoiceDialog` - User selects from keyboard options
-- `UserInputDialog` - User enters text with optional validation (prompt may be callable)
+- `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input)
 - `ConfirmDialog` - Yes/No prompt
 
 **Composite Dialogs** (orchestrate children):
@@ -334,16 +334,21 @@ while not stop_event.is_set():
     was_edited = self.edited  # Check if parameters changed
     self.edited = False
 
-    condition_result = condition_func(*args, **kwargs)
+    condition_result = condition.check()
 
-    if condition_result or was_edited:
-        merged_kwargs = {**base_kwargs, **editable_field_values}
-        message = message_builder(*args, **merged_kwargs)
+    # Fire if condition is true, or if edited AND fire_when_edited is enabled
+    should_fire = condition_result or (was_edited and self.fire_when_edited)
+    if should_fire:
+        message = message_builder.build()
         logger.info("event_message_queued event_name=%s", event_name)
         await _enqueue_message(queue, message)  # TelegramMessage directly
 
     await _wait_or_stop(stop_event, poll_seconds)
 ```
+
+**fire_when_edited behavior:**
+- `True` (default): Editing triggers immediate fire even if condition is False
+- `False`: Editing triggers immediate re-check but only fires if condition is True
 
 ### 3. Command Processing Flow
 

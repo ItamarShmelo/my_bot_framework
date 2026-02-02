@@ -136,6 +136,7 @@ def main():
         condition=condition,
         message_builder=builder,
         poll_seconds=15.0,  # Check every 15 seconds
+        fire_when_edited=False,  # Don't fire just because settings were edited
     )
     app.register_event(sensor_event)
     
@@ -309,26 +310,37 @@ def main():
     
     # --- Info command ---
     
+    info_text = (
+        "<b>Editable Bot</b>\n\n"
+        "Tests runtime-editable parameters:\n"
+        "• <code>EditableAttribute</code> - Type parsing and validation\n"
+        "• <code>EditableMixin</code> - Edited flag for immediate re-check\n"
+        "• Dialog-based editing of event parameters\n\n"
+        "<b>Commands:</b>\n"
+        "/sensor - Show current sensor value\n"
+        "/settings - Show current settings\n"
+        "/edit_threshold - Edit threshold via dialog\n"
+        "/edit_level - Edit alert level via dialog\n"
+        "/edit_all - Edit all settings at once"
+    )
     app.register_command(SimpleCommand(
         command="/info",
         description="Show what this bot tests",
-        message_builder=lambda: (
-            "<b>Editable Bot</b>\n\n"
-            "Tests runtime-editable parameters:\n"
-            "• <code>EditableAttribute</code> - Type parsing and validation\n"
-            "• <code>EditableMixin</code> - Edited flag for immediate re-check\n"
-            "• Dialog-based editing of event parameters\n\n"
-            "<b>Commands:</b>\n"
-            "/sensor - Show current sensor value\n"
-            "/settings - Show current settings\n"
-            "/edit_threshold - Edit threshold via dialog\n"
-            "/edit_level - Edit alert level via dialog\n"
-            "/edit_all - Edit all settings at once"
-        ),
+        message_builder=lambda: info_text,
     ))
     
-    logger.info("Starting editable_bot...")
-    asyncio.run(app.run())
+    # Send startup message and run
+    async def send_startup_and_run():
+        startup_msg = TelegramTextMessage(
+            f"🤖 <b>Editable Bot Started</b>\n\n"
+            f"{info_text}\n\n"
+            f"💡 Type /commands to see all available commands."
+        )
+        await startup_msg.send(app.bot, app.chat_id, logger)
+        logger.info("Starting editable_bot...")
+        await app.run()
+    
+    asyncio.run(send_startup_and_run())
 
 
 if __name__ == "__main__":

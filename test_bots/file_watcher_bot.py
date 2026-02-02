@@ -20,6 +20,7 @@ from my_bot_framework import (
     BotApplication,
     SimpleCommand,
     create_file_change_event,
+    TelegramTextMessage,
 )
 
 
@@ -121,24 +122,35 @@ def main():
     ))
     
     # Info command
+    info_text = (
+        "<b>File Watcher Bot</b>\n\n"
+        "Tests file change detection:\n"
+        "• <code>create_file_change_event</code> factory\n"
+        "• File modification time monitoring\n"
+        "• Editable <code>file_path</code> attribute\n\n"
+        "<b>Commands:</b>\n"
+        "/file - Show monitored file path\n"
+        "/touch - Touch file to trigger event\n"
+        "/contents - Show file contents"
+    )
     app.register_command(SimpleCommand(
         command="/info",
         description="Show what this bot tests",
-        message_builder=lambda: (
-            "<b>File Watcher Bot</b>\n\n"
-            "Tests file change detection:\n"
-            "• <code>create_file_change_event</code> factory\n"
-            "• File modification time monitoring\n"
-            "• Editable <code>file_path</code> attribute\n\n"
-            "<b>Commands:</b>\n"
-            "/file - Show monitored file path\n"
-            "/touch - Touch file to trigger event\n"
-            "/contents - Show file contents"
-        ),
+        message_builder=lambda: info_text,
     ))
     
-    logger.info("Starting file_watcher_bot...")
-    asyncio.run(app.run())
+    # Send startup message and run
+    async def send_startup_and_run():
+        startup_msg = TelegramTextMessage(
+            f"🤖 <b>File Watcher Bot Started</b>\n\n"
+            f"{info_text}\n\n"
+            f"💡 Type /commands to see all available commands."
+        )
+        await startup_msg.send(app.bot, app.chat_id, logger)
+        logger.info("Starting file_watcher_bot...")
+        await app.run()
+    
+    asyncio.run(send_startup_and_run())
 
 
 if __name__ == "__main__":
