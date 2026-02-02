@@ -106,6 +106,10 @@ class EditableMixin(ABC):
     @editable_attributes.setter
     def editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
         """Initialize the editable attribute mapping with validation."""
+        self._init_editable_attributes(attributes)
+
+    def _init_editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
+        """Validate and store editable attributes."""
         if not isinstance(attributes, list):
             raise TypeError("attributes must be a list of EditableAttribute")
         mapping: dict[str, EditableAttribute] = {}
@@ -254,6 +258,32 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         self._edited = False  # Initialize instance-level edited flag
         self.poll_seconds = poll_seconds
         self.fire_when_edited = fire_when_edited
+
+    @property
+    def editable_attributes(self) -> dict[str, "EditableAttribute"]:
+        """Combined editable attributes from event, condition, and builder.
+        
+        Returns a dict with:
+        - Event's own attributes (no prefix)
+        - Condition attributes with 'condition.' prefix
+        - Builder attributes with 'builder.' prefix
+        """
+        combined: dict[str, EditableAttribute] = {}
+        # Add event's own attributes
+        if hasattr(self, "_editable_attributes"):
+            combined.update(self._editable_attributes)
+        # Add condition attributes with prefix
+        for name, attr in self.condition.editable_attributes.items():
+            combined[f"condition.{name}"] = attr
+        # Add builder attributes with prefix
+        for name, attr in self.message_builder.editable_attributes.items():
+            combined[f"builder.{name}"] = attr
+        return combined
+
+    @editable_attributes.setter
+    def editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
+        """Initialize the event's own editable attributes (not condition/builder)."""
+        self._init_editable_attributes(attributes)
 
     def edit(self, name: str, value: Any) -> None:
         """Edit this event or its condition/builder using prefixes."""
