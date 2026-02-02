@@ -80,22 +80,6 @@ logger = get_logger()
 
 Events run continuously and enqueue messages based on triggers.
 
-#### TimeEvent
-
-Emits messages at a fixed interval:
-
-```python
-from my_bot_framework import TimeEvent
-
-event = TimeEvent(
-    event_name="status_check",
-    interval_hours=0.5,  # Every 30 minutes (minimum 5 minutes)
-    message_builder=get_status,
-    fire_on_first_check=True,  # Emit immediately on start
-)
-app.register_event(event)
-```
-
 #### ActivateOnConditionEvent
 
 Emits messages when a condition becomes truthy:
@@ -121,6 +105,61 @@ event = ActivateOnConditionEvent(
     ],
 )
 app.register_event(event)
+```
+
+#### TimeEvent
+
+Emits messages at regular intervals (subclass of ActivateOnConditionEvent):
+
+```python
+from my_bot_framework import TimeEvent
+
+event = TimeEvent(
+    event_name="status_check",
+    interval_hours=0.5,  # Every 30 minutes (minimum 5 minutes)
+    message_builder=get_status,
+    fire_on_first_check=True,  # Emit immediately on start
+)
+app.register_event(event)
+
+# Edit interval at runtime:
+event.interval_hours = 1.0  # Change to 1 hour
+```
+
+#### ThresholdEvent
+
+Emits messages when a value crosses a threshold (subclass of ActivateOnConditionEvent):
+
+```python
+from my_bot_framework import ThresholdEvent
+
+event = ThresholdEvent(
+    event_name="cpu_alert",
+    value_getter=lambda: get_cpu_percent(),
+    threshold=90.0,
+    message_builder=lambda: "CPU usage is high!",
+    above=True,  # Fire when value > threshold
+    cooldown_seconds=300.0,  # 5 minute cooldown
+)
+app.register_event(event)
+
+# Edit threshold at runtime:
+event.threshold = 80.0
+```
+
+#### Event Factories
+
+Factory functions for additional patterns:
+
+```python
+from my_bot_framework import create_file_change_event
+
+# File change monitoring
+event = create_file_change_event(
+    event_name="config_changed",
+    file_path="/etc/myapp/config.yaml",
+    message_builder=lambda: "Config file was modified!",
+)
 ```
 
 ### Commands

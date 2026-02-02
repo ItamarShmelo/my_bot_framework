@@ -11,7 +11,7 @@ When adding significant new functionality to the framework, create a test bot to
 ## When to Create a New Test Bot
 
 Create a new test bot when adding:
-- New Event types (like `TimeEvent`, `ActivateOnConditionEvent`)
+- New Event types (like `ActivateOnConditionEvent`, `TimeEvent`, `ThresholdEvent`)
 - New Command types (like `SimpleCommand`, `DialogCommand`)
 - New Dialog patterns or states
 - New TelegramMessage types

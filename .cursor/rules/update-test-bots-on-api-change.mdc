@@ -6,32 +6,73 @@ alwaysApply: true
 
 # Update Test Bots on API Change
 
-When modifying the framework's public API in these files:
-- `bot_application.py`
-- `event.py`
-- `dialog.py`
-- `telegram_utilities.py`
-- `utilities.py`
-- `__init__.py`
+When modifying the framework's public API, you MUST update the relevant test bots.
 
-You MUST update the test bots in `test_bots/` to reflect the changes.
+## Files That Require Test Bot Updates
+
+| Modified File | Affected Test Bots |
+|---------------|-------------------|
+| `bot_application.py` | ALL test bots (they all use BotApplication) |
+| `event.py` | basic_bot.py, condition_bot.py, editable_bot.py |
+| `event_examples/time_event.py` | basic_bot.py |
+| `event_examples/threshold_event.py` | threshold_bot.py |
+| `event_examples/factories.py` | file_watcher_bot.py |
+| `dialog.py` | dialog_bot.py, dialog_handler_bot.py, editable_bot.py |
+| `telegram_utilities.py` | ALL test bots (they all use message types) |
+| `utilities.py` | Depends on which utility is changed |
+| `__init__.py` | ALL test bots (imports may change) |
+
+## Test Bot Coverage
+
+Each test bot tests specific features:
+
+| Test Bot | Features Tested |
+|----------|-----------------|
+| `basic_bot.py` | BotApplication, SimpleCommand, TimeEvent |
+| `condition_bot.py` | ActivateOnConditionEvent, EditableField |
+| `dialog_bot.py` | All Dialog types (Choice, UserInput, Confirm, Sequence, Branch, Loop) |
+| `dialog_handler_bot.py` | DialogHandler, CANCELLED, is_cancelled, async callbacks |
+| `editable_bot.py` | EditableField editing via dialogs, EditableMixin |
+| `threshold_bot.py` | ThresholdEvent class, threshold property editing |
+| `file_watcher_bot.py` | create_file_change_event factory |
 
 ## Checklist
 
-- [ ] Check if any test bot uses the modified API
-- [ ] Update method signatures, parameters, or imports
-- [ ] Ensure test bots still demonstrate correct usage
-- [ ] Run the bots to verify they work (if possible)
+When making API changes:
+
+- [ ] Identify which test bots use the modified API (see table above)
+- [ ] Update imports if module structure changed
+- [ ] Update method signatures, parameters, or return types
+- [ ] Update class instantiation if constructor changed
+- [ ] Ensure test bots demonstrate correct usage patterns
+- [ ] Verify syntax with `python -m py_compile test_bots/*.py`
+- [ ] Update BOTS.md if features tested changed
+
+## When to Create NEW Test Bots
+
+Create a new test bot when adding:
+
+- A new Event subclass (like ThresholdEvent) → Create dedicated test bot
+- A new factory function → Create dedicated test bot
+- A new Dialog type → Add to dialog_bot.py or create new bot
+- A new Command type → Create dedicated test bot
+- Significant new pattern/feature → Create dedicated test bot
 
 ## Examples
 
 ```python
-# If BotApplication.initialize() signature changes:
-# Update all test bots that call it
+# If TimeEvent constructor changes:
+# Update basic_bot.py which uses TimeEvent
 
-# If TimeEvent adds a new required parameter:
-# Update basic_bot.py
+# If ThresholdEvent.threshold property is removed:
+# Update threshold_bot.py which uses the property
 
-# If Dialog.handle_callback() return type changes:
-# Update dialog_bot.py
+# If create_file_change_event signature changes:
+# Update file_watcher_bot.py which uses the factory
+
+# If DialogHandler callback signature changes:
+# Update dialog_handler_bot.py AND editable_bot.py
+
+# If BotApplication.register_event() is renamed:
+# Update ALL test bots
 ```

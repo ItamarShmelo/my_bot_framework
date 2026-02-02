@@ -78,7 +78,7 @@ def main():
     
     # Register a time-based event (every 5 minutes, fire immediately)
     app.register_event(TimeEvent(
-        title="heartbeat",
+        event_name="heartbeat",
         interval_hours=5.0 / 60.0,  # 5 minutes
         message_builder=lambda: "Heartbeat: Bot is alive!",
         fire_on_first_check=True,

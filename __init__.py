@@ -27,7 +27,6 @@ from .bot_application import (
 )
 from .event import (
     Event,
-    TimeEvent,
     ActivateOnConditionEvent,
     CommandsEvent,
     EditableField,
@@ -74,6 +73,12 @@ from .utilities import (
     divide_message_to_chunks,
     format_message_html,
 )
+from .event_examples import (
+    TimeEvent,
+    ThresholdEvent,
+    create_threshold_event,
+    create_file_change_event,
+)
 
 __all__ = [
     # BotApplication
@@ -86,7 +91,6 @@ __all__ = [
     "get_logger",
     # Events
     "Event",
-    "TimeEvent",
     "ActivateOnConditionEvent",
     "CommandsEvent",
     "EditableField",
@@ -130,4 +134,10 @@ __all__ = [
     "flush_pending_updates",
     "poll_updates",
     "get_chat_id_from_update",
+    # Event Factories
+    "create_threshold_event",
+    "create_file_change_event",
+    # Event Examples (subclasses of ActivateOnConditionEvent)
+    "TimeEvent",
+    "ThresholdEvent",
 ]

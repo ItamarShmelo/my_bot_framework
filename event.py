@@ -141,63 +141,6 @@ class Event:
         raise NotImplementedError
 
 
-class TimeEvent(Event):
-    """Emit a message periodically using a provided message_builder."""
-    def __init__(
-        self,
-        event_name: str,
-        interval_hours: float,
-        message_builder: Callable[
-            [...],
-            Union[None, TelegramMessage, str, List[TelegramMessage]],
-        ],
-        message_builder_args: tuple[Any, ...] = (),
-        message_builder_kwargs: Optional[dict[str, Any]] = None,
-        fire_on_first_check: bool = False,
-    ) -> None:
-        """Initialize the time-based event.
-
-        interval_hours controls the minimum delay between emissions. If
-        fire_on_first_check is True, the first check can emit immediately.
-        """
-        super().__init__(event_name)
-        assert (
-            interval_hours >= MINIMAL_TIME_BETWEEN_MESSAGES
-        ), "interval_hours must be at least 5 minutes"
-        self.interval_hours = max(interval_hours, 0.0)
-        self.message_builder = message_builder
-        self.message_builder_args = message_builder_args
-        self.message_builder_kwargs = message_builder_kwargs or {}
-        self.fire_on_first_check = fire_on_first_check
-
-    async def submit(
-        self,
-        queue: "asyncio.Queue[TelegramMessage]",
-        stop_event: asyncio.Event,
-    ) -> None:
-        """Run the interval gating and enqueue messages when due."""
-        interval_seconds = self.interval_hours * 3600.0
-        if self.fire_on_first_check and not stop_event.is_set():
-            await self._enqueue_and_log(queue)
-
-        while not stop_event.is_set():
-            # Sleep in a cancel-friendly way; honors stop_event.
-            await _wait_or_stop(stop_event, max(interval_seconds, 0.1))
-            if stop_event.is_set():
-                break
-            await self._enqueue_and_log(queue)
-
-    async def _enqueue_and_log(
-        self,
-        queue: "asyncio.Queue[TelegramMessage]",
-    ) -> None:
-        """Build message, log event_name, and enqueue."""
-        message = self.message_builder(*self.message_builder_args, **self.message_builder_kwargs)
-        logger = get_logger()
-        logger.info("event_message_queued event_name=%s", self.event_name)
-        await _enqueue_message(queue, message)
-
-
 class ActivateOnConditionEvent(Event, EditableMixin):
     """Poll a condition and enqueue messages when it becomes truthy.
     

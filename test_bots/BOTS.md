@@ -189,6 +189,63 @@ python test_bots/editable_bot.py
 
 ---
 
+### threshold_bot.py
+
+**Purpose:** Tests the ThresholdEvent class for value monitoring.
+
+**Features tested:**
+- `ThresholdEvent` class (subclass of ActivateOnConditionEvent)
+- `threshold` property for runtime editing
+- Cooldown mechanism to prevent spam
+- Above/below threshold detection
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/status` | Show current CPU and memory values |
+| `/thresholds` | Show current threshold settings |
+| `/edit_cpu` | Edit CPU threshold via dialog |
+| `/edit_memory` | Edit memory threshold via dialog |
+| `/info` | Shows what this bot tests |
+
+**Events:**
+- CPU alert when value > 80% (polls every 5s, 30s cooldown)
+- Memory alert when value > 75% (polls every 5s, 30s cooldown)
+
+**Run:**
+```bash
+python test_bots/threshold_bot.py
+```
+
+---
+
+### file_watcher_bot.py
+
+**Purpose:** Tests the create_file_change_event factory.
+
+**Features tested:**
+- `create_file_change_event` factory function
+- File modification time monitoring
+- Editable `file_path` field
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/file` | Show monitored file path |
+| `/touch` | Touch file to trigger change detection |
+| `/contents` | Show file contents |
+| `/info` | Shows what this bot tests |
+
+**Events:**
+- File change alert when monitored file is modified (polls every 5s)
+
+**Run:**
+```bash
+python test_bots/file_watcher_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:

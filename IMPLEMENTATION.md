@@ -11,8 +11,8 @@ This document describes the internal architecture, design patterns, and code flo
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
-│  │  TimeEvent   │    │ Condition    │    │ TelegramCommands │   │
-│  │              │    │    Event     │    │      Event       │   │
+│  │    Time      │    │  Condition   │    │     Commands     │   │
+│  │    Event     │    │    Event     │    │      Event       │   │
 │  └──────┬───────┘    └──────┬───────┘    └────────┬─────────┘   │
 │         │                   │                     │             │
 │         └───────────────────┼─────────────────────┘             │
@@ -45,6 +45,11 @@ my_bot_framework/
 ├── bot_application.py    # BotApplication singleton
 ├── polling.py            # Update polling utilities and UpdatePollerMixin
 ├── event.py              # Event system and commands
+├── event_examples/       # Event subclasses and factories
+│   ├── __init__.py
+│   ├── time_event.py     # TimeEvent (subclass of ActivateOnConditionEvent)
+│   ├── threshold_event.py # ThresholdEvent (subclass of ActivateOnConditionEvent)
+│   └── factories.py      # Factory functions (create_file_change_event)
 ├── dialog.py             # Interactive dialog system
 ├── telegram_utilities.py # Message type wrappers
 └── utilities.py          # Helper functions
@@ -116,6 +121,7 @@ graph TD
 | `telegram_utilities.py` | `utilities` |
 | `polling.py` | `accessors` |
 | `event.py` | `accessors`, `polling`, `telegram_utilities` |
+| `event_factories.py` | `event`, `telegram_utilities` |
 | `dialog.py` | `accessors`, `polling`, `telegram_utilities` |
 | `bot_application.py` | `accessors`, `polling`, `event`, `telegram_utilities` |
 | `__init__.py` | all modules (re-exports public API) |
@@ -206,18 +212,15 @@ class Event:
     async def submit(self, queue, stop_event) -> None:
         raise NotImplementedError
 
-class TimeEvent(Event):
-    async def submit(self, queue, stop_event) -> None:
-        while not stop_event.is_set():
-            await self._enqueue_message(queue)
-            await _wait_or_stop(stop_event, self.interval_seconds)
-
 class ActivateOnConditionEvent(Event):
     async def submit(self, queue, stop_event) -> None:
         while not stop_event.is_set():
             if self.condition_func():
                 await self._enqueue_message(queue)
             await _wait_or_stop(stop_event, self.poll_seconds)
+
+# Time-based events use the TimeEvent subclass
+event = TimeEvent(event_name="status", interval_hours=1.0, ...)
 ```
 
 ### 4. Strategy Pattern - Message Builders
@@ -325,17 +328,7 @@ await app.run()
 
 Each event runs its own async loop:
 
-**TimeEvent:**
-```
-while not stop_event.is_set():
-    if fire_on_first_check or not first_iteration:
-        message = message_builder(*args, **kwargs)
-        logger.info("event_message_queued event_name=%s", event_name)
-        await _enqueue_message(queue, message)  # TelegramMessage directly
-    await _wait_or_stop(stop_event, interval_seconds)
-```
-
-**ActivateOnConditionEvent:**
+**ActivateOnConditionEvent (base class for TimeEvent, ThresholdEvent):**
 ```
 while not stop_event.is_set():
     was_edited = self.edited  # Check if parameters changed
@@ -442,9 +435,27 @@ not during message sending.
 
 | Class | Trigger | Use Case |
 |-------|---------|----------|
-| `TimeEvent` | Fixed interval | Periodic status updates |
 | `ActivateOnConditionEvent` | Condition becomes truthy | Alert systems |
 | `CommandsEvent` | User sends "/" command | Command routing |
+
+### Event Factories
+
+Factory functions create pre-configured `ActivateOnConditionEvent` instances:
+
+### Event Subclasses (in event_examples/)
+
+| Class | Base | Use Case |
+|-------|------|----------|
+| `TimeEvent` | `ActivateOnConditionEvent` | Periodic status updates, heartbeats |
+| `ThresholdEvent` | `ActivateOnConditionEvent` | Value exceeds/drops below limit |
+
+### Event Factories
+
+| Factory | Creates | Use Case |
+|---------|---------|----------|
+| `create_file_change_event` | File watcher | Config changes, log updates |
+
+These factories encapsulate common condition patterns with internal state management.
 
 ### Command Types
 
