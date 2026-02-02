@@ -21,7 +21,6 @@ from .bot_application import (
     get_app,
     get_bot,
     get_chat_id,
-    get_queue,
     get_stop_event,
     get_logger,
 )
@@ -90,7 +89,6 @@ __all__ = [
     "get_app",
     "get_bot",
     "get_chat_id",
-    "get_queue",
     "get_stop_event",
     "get_logger",
     # Events

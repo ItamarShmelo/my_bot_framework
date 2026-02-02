@@ -30,10 +30,7 @@ from my_bot_framework import (
     SequenceDialog,
     DialogHandler,
     is_cancelled,
-    get_bot,
-    get_chat_id,
-    get_logger,
-    TelegramTextMessage,
+    get_app,
 )
 
 
@@ -162,25 +159,17 @@ def main():
     
     async def on_threshold_edited(result):
         """Handle threshold edit completion."""
-        bot = get_bot()
-        chat_id = get_chat_id()
-        log = get_logger()
-        
         if is_cancelled(result):
-            msg = TelegramTextMessage("❌ Threshold edit cancelled.")
-            await msg.send(bot, chat_id, log)
+            await get_app().send_messages("❌ Threshold edit cancelled.")
             return
         
         try:
             sensor_event.edit("condition.threshold", result)
-            
-            msg = TelegramTextMessage(
+            await get_app().send_messages(
                 f"✅ Threshold updated to <code>{sensor_event.get('condition.threshold')}</code>"
             )
-            await msg.send(bot, chat_id, log)
         except ValueError as e:
-            msg = TelegramTextMessage(f"❌ Invalid threshold: {e}")
-            await msg.send(bot, chat_id, log)
+            await get_app().send_messages(f"❌ Invalid threshold: {e}")
     
     threshold_dialog = DialogHandler(
         UserInputDialog(
@@ -206,23 +195,17 @@ def main():
     
     async def on_level_edited(result):
         """Handle alert level edit completion."""
-        bot = get_bot()
-        chat_id = get_chat_id()
-        log = get_logger()
-        
         if is_cancelled(result):
-            msg = TelegramTextMessage("❌ Alert level edit cancelled.")
-            await msg.send(bot, chat_id, log)
+            await get_app().send_messages("❌ Alert level edit cancelled.")
             return
         
         sensor_event.edit("builder.alert_level", result)
         
         icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
         icon = icons.get(sensor_event.get("builder.alert_level"), "")
-        msg = TelegramTextMessage(
+        await get_app().send_messages(
             f"✅ Alert level updated to {icon} <code>{sensor_event.get('builder.alert_level')}</code>"
         )
-        await msg.send(bot, chat_id, log)
     
     level_dialog = DialogHandler(
         ChoiceDialog("Select alert level:", [
@@ -243,13 +226,8 @@ def main():
     
     async def on_all_edited(result):
         """Handle combined settings edit."""
-        bot = get_bot()
-        chat_id = get_chat_id()
-        log = get_logger()
-        
         if is_cancelled(result):
-            msg = TelegramTextMessage("❌ Settings edit cancelled.")
-            await msg.send(bot, chat_id, log)
+            await get_app().send_messages("❌ Settings edit cancelled.")
             return
         
         # Result is a dict: {"threshold": "75", "level": "critical"}
@@ -275,14 +253,13 @@ def main():
         
         if errors:
             error_text = "\n".join(f"• {e}" for e in errors)
-            msg = TelegramTextMessage(f"⚠️ Settings updated with errors:\n{error_text}")
+            await get_app().send_messages(f"⚠️ Settings updated with errors:\n{error_text}")
         else:
-            msg = TelegramTextMessage(
+            await get_app().send_messages(
                 f"✅ <b>Settings Updated</b>\n\n"
                 f"Threshold: <code>{sensor_event.get('condition.threshold')}</code>\n"
                 f"Alert Level: {icon} <code>{sensor_event.get('builder.alert_level')}</code>"
             )
-        await msg.send(bot, chat_id, log)
     
     combined_dialog = DialogHandler(
         SequenceDialog([
@@ -331,12 +308,11 @@ def main():
     
     # Send startup message and run
     async def send_startup_and_run():
-        startup_msg = TelegramTextMessage(
+        await app.send_messages(
             f"🤖 <b>Editable Bot Started</b>\n\n"
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        await startup_msg.send(app.bot, app.chat_id, logger)
         logger.info("Starting editable_bot...")
         await app.run()
     

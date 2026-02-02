@@ -25,10 +25,7 @@ from my_bot_framework import (
     UserInputDialog,
     ThresholdEvent,
     is_cancelled,
-    get_bot,
-    get_chat_id,
-    get_logger,
-    TelegramTextMessage,
+    get_app,
 )
 
 
@@ -133,25 +130,18 @@ def main():
     # Dialog command to edit CPU threshold
     async def on_cpu_threshold_edited(result):
         """Handle CPU threshold edit."""
-        bot = get_bot()
-        chat_id_val = get_chat_id()
-        log = get_logger()
-        
         if is_cancelled(result):
-            msg = TelegramTextMessage("❌ CPU threshold edit cancelled.")
-            await msg.send(bot, chat_id_val, log)
+            await get_app().send_messages("❌ CPU threshold edit cancelled.")
             return
         
         try:
             new_value = float(result)
             cpu_event.threshold = new_value
-            msg = TelegramTextMessage(
+            await get_app().send_messages(
                 f"✅ CPU threshold updated to <code>{cpu_event.threshold}</code>"
             )
-            await msg.send(bot, chat_id_val, log)
         except ValueError as e:
-            msg = TelegramTextMessage(f"❌ Invalid value: {e}")
-            await msg.send(bot, chat_id_val, log)
+            await get_app().send_messages(f"❌ Invalid value: {e}")
     
     cpu_dialog = DialogHandler(
         UserInputDialog(
@@ -173,25 +163,18 @@ def main():
     # Dialog command to edit memory threshold
     async def on_memory_threshold_edited(result):
         """Handle memory threshold edit."""
-        bot = get_bot()
-        chat_id_val = get_chat_id()
-        log = get_logger()
-        
         if is_cancelled(result):
-            msg = TelegramTextMessage("❌ Memory threshold edit cancelled.")
-            await msg.send(bot, chat_id_val, log)
+            await get_app().send_messages("❌ Memory threshold edit cancelled.")
             return
         
         try:
             new_value = float(result)
             memory_event.threshold = new_value
-            msg = TelegramTextMessage(
+            await get_app().send_messages(
                 f"✅ Memory threshold updated to <code>{memory_event.threshold}</code>"
             )
-            await msg.send(bot, chat_id_val, log)
         except ValueError as e:
-            msg = TelegramTextMessage(f"❌ Invalid value: {e}")
-            await msg.send(bot, chat_id_val, log)
+            await get_app().send_messages(f"❌ Invalid value: {e}")
     
     memory_dialog = DialogHandler(
         UserInputDialog(
@@ -232,12 +215,11 @@ def main():
     
     # Send startup message and run
     async def send_startup_and_run():
-        startup_msg = TelegramTextMessage(
+        await app.send_messages(
             f"🤖 <b>Threshold Bot Started</b>\n\n"
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        await startup_msg.send(app.bot, app.chat_id, logger)
         logger.info("Starting threshold_bot...")
         await app.run()
     

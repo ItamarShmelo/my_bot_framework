@@ -216,7 +216,7 @@ class ActivateOnConditionEvent(Event):
     async def submit(self, queue, stop_event) -> None:
         while not stop_event.is_set():
             if self.condition_func():
-                await self._enqueue_message(queue)
+                await get_app().send_messages(self.message_builder.build())
             await _wait_or_stop(stop_event, self.poll_seconds)
 
 # Time-based events use the TimeEvent subclass
@@ -341,7 +341,7 @@ while not stop_event.is_set():
     if should_fire:
         message = message_builder.build()
         logger.info("event_message_queued event_name=%s", event_name)
-        await _enqueue_message(queue, message)  # TelegramMessage directly
+        await get_app().send_messages(message)  # Via BotApplication helper
 
     await _wait_or_stop(stop_event, poll_seconds)
 ```
@@ -371,10 +371,11 @@ while not stop_event.is_set():
 
 **SimpleCommand execution:**
 ```
-async def run(queue, update_offset):
-    result = message_builder(*args, **kwargs)
-    await queue.put(normalize(result))
-    return update_offset  # No updates consumed
+async def run(update_offset):
+    result = await _maybe_await(message_builder)  # No-arg callable
+    if result:
+        await get_app().send_messages(result)
+    return None, update_offset  # No updates consumed
 ```
 
 **DialogCommand execution:**
@@ -435,6 +436,15 @@ not during message sending.
 | `stop_event` | `asyncio.Event` | Shutdown signal |
 | `events` | `List[Event]` | Registered events |
 | `commands` | `List[Command]` | Registered commands |
+
+| Method | Description |
+|--------|-------------|
+| `initialize(token, chat_id, logger)` | Create and initialize the singleton |
+| `get_instance()` | Get the existing singleton |
+| `register_event(event)` | Register an event to run |
+| `register_command(command)` | Register a command handler |
+| `send_messages(messages)` | Enqueue message(s) (str, TelegramMessage, or list) |
+| `run()` | Start the bot (blocks until shutdown) |
 
 ### Event Types
 
@@ -611,9 +621,9 @@ pattern using the Template Method:
 │    • should_stop_polling() -> bool                          │
 │    • handle_callback_update(update) -> None                 │
 │    • handle_text_update(update) -> None                     │
-│    • _get_bot() -> Bot                                      │
-│    • _get_chat_id() -> str                                  │
-│    • _get_logger() -> Logger                                │
+│                                                             │
+│  Uses singleton accessors: get_bot(), get_chat_id(),        │
+│  get_logger() for dependencies.                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -730,14 +740,7 @@ class CustomDialog(Dialog, UpdatePollerMixin):
     def should_stop_polling(self) -> bool:
         return self.is_complete
     
-    def _get_bot(self) -> Bot:
-        return get_bot()
-    
-    def _get_chat_id(self) -> str:
-        return get_chat_id()
-    
-    def _get_logger(self) -> logging.Logger:
-        return get_logger()
+    # Uses singleton accessors: get_bot(), get_chat_id(), get_logger()
     
     async def handle_callback_update(self, update: Update) -> None:
         # Handle callback queries

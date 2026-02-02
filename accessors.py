@@ -51,11 +51,6 @@ def get_chat_id() -> str:
     return _get_instance().chat_id
 
 
-def get_queue() -> asyncio.Queue:
-    """Get the message queue from the singleton."""
-    return _get_instance().queue
-
-
 def get_stop_event() -> asyncio.Event:
     """Get the stop event from the singleton."""
     return _get_instance().stop_event

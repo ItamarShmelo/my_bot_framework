@@ -20,7 +20,6 @@ from my_bot_framework import (
     BotApplication,
     SimpleCommand,
     create_file_change_event,
-    TelegramTextMessage,
 )
 
 
@@ -141,12 +140,11 @@ def main():
     
     # Send startup message and run
     async def send_startup_and_run():
-        startup_msg = TelegramTextMessage(
+        await app.send_messages(
             f"🤖 <b>File Watcher Bot Started</b>\n\n"
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        await startup_msg.send(app.bot, app.chat_id, logger)
         logger.info("Starting file_watcher_bot...")
         await app.run()
     

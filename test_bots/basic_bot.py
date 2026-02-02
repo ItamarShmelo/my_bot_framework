@@ -16,7 +16,7 @@ from pathlib import Path
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from my_bot_framework import BotApplication, SimpleCommand, TimeEvent, TelegramTextMessage
+from my_bot_framework import BotApplication, SimpleCommand, TimeEvent
 
 
 def get_credentials():
@@ -87,12 +87,11 @@ def main():
     
     # Send startup message
     async def send_startup_and_run():
-        startup_msg = TelegramTextMessage(
+        await app.send_messages(
             f"🤖 <b>Basic Bot Started</b>\n\n"
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        await startup_msg.send(app.bot, app.chat_id, logger)
         logger.info("Starting basic_bot...")
         await app.run()
     

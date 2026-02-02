@@ -28,12 +28,9 @@ from my_bot_framework import (
     SequenceDialog,
     # New features
     DialogHandler,
-    CANCELLED,
     is_cancelled,
+    get_app,
     get_logger,
-    get_bot,
-    get_chat_id,
-    TelegramTextMessage,
 )
 
 
@@ -57,17 +54,13 @@ def get_credentials():
 async def on_feedback_complete(result):
     """Callback when feedback dialog completes - sends Telegram message."""
     logger = get_logger()
-    bot = get_bot()
-    chat_id = get_chat_id()
     
     if is_cancelled(result):
         logger.info("feedback_handler: User cancelled")
-        msg = TelegramTextMessage("Feedback cancelled.")
+        await get_app().send_messages("Feedback cancelled.")
     else:
         logger.info("feedback_handler: Got feedback result=%s", result)
-        msg = TelegramTextMessage(f"Thank you for your feedback: {result}")
-    
-    await msg.send(bot, chat_id, logger)
+        await get_app().send_messages(f"Thank you for your feedback: {result}")
 
 feedback_dialog = DialogHandler(
     ChoiceDialog("How was your experience?", [
@@ -84,12 +77,10 @@ feedback_dialog = DialogHandler(
 async def on_survey_complete(result):
     """Callback when survey dialog completes - sends Telegram message."""
     logger = get_logger()
-    bot = get_bot()
-    chat_id = get_chat_id()
     
     if is_cancelled(result):
         logger.info("survey_handler: User cancelled the survey")
-        msg = TelegramTextMessage("Survey cancelled.")
+        await get_app().send_messages("Survey cancelled.")
     else:
         logger.info("survey_handler: Survey complete result=%s", result)
         # Build summary message
@@ -98,11 +89,9 @@ async def on_survey_complete(result):
             for key, value in result.items():
                 logger.info("  %s = %s", key, value)
                 lines.append(f"• {key}: {value}")
-            msg = TelegramTextMessage("\n".join(lines))
+            await get_app().send_messages("\n".join(lines))
         else:
-            msg = TelegramTextMessage(f"Survey complete: {result}")
-    
-    await msg.send(bot, chat_id, logger)
+            await get_app().send_messages(f"Survey complete: {result}")
 
 survey_dialog = DialogHandler(
     SequenceDialog([
@@ -124,13 +113,10 @@ survey_dialog = DialogHandler(
 async def on_order_complete(result):
     """Async callback when order dialog completes - sends Telegram message."""
     logger = get_logger()
-    bot = get_bot()
-    chat_id = get_chat_id()
     
     if is_cancelled(result):
         logger.info("order_handler: Order cancelled")
-        msg = TelegramTextMessage("Order cancelled.")
-        await msg.send(bot, chat_id, logger)
+        await get_app().send_messages("Order cancelled.")
         return
     
     logger.info("order_handler: Processing order...")
@@ -143,11 +129,9 @@ async def on_order_complete(result):
         lines = ["🛒 Order Confirmed!", ""]
         for key, value in result.items():
             lines.append(f"• {key}: {value}")
-        msg = TelegramTextMessage("\n".join(lines))
+        await get_app().send_messages("\n".join(lines))
     else:
-        msg = TelegramTextMessage(f"Order processed: {result}")
-    
-    await msg.send(bot, chat_id, logger)
+        await get_app().send_messages(f"Order processed: {result}")
 
 order_dialog = DialogHandler(
     SequenceDialog([
@@ -167,32 +151,22 @@ order_dialog = DialogHandler(
 async def on_inner_complete(result):
     """Callback for inner dialog - sends Telegram message."""
     logger = get_logger()
-    bot = get_bot()
-    chat_id = get_chat_id()
-    
     logger.info("inner_handler: Got result=%s", result)
     
     if is_cancelled(result):
-        msg = TelegramTextMessage("Inner handler: Cancelled")
+        await get_app().send_messages("Inner handler: Cancelled")
     else:
-        msg = TelegramTextMessage(f"Inner handler received: {result}")
-    
-    await msg.send(bot, chat_id, logger)
+        await get_app().send_messages(f"Inner handler received: {result}")
 
 async def on_outer_complete(result):
     """Callback for outer dialog - sends Telegram message."""
     logger = get_logger()
-    bot = get_bot()
-    chat_id = get_chat_id()
-    
     logger.info("outer_handler: Final result=%s", result)
     
     if is_cancelled(result):
-        msg = TelegramTextMessage("Outer handler: Cancelled")
+        await get_app().send_messages("Outer handler: Cancelled")
     else:
-        msg = TelegramTextMessage(f"🎨 Outer handler final result: {result}")
-    
-    await msg.send(bot, chat_id, logger)
+        await get_app().send_messages(f"🎨 Outer handler final result: {result}")
 
 nested_dialog = DialogHandler(
     DialogHandler(
@@ -211,19 +185,15 @@ nested_dialog = DialogHandler(
 async def on_cancel_test_complete(result):
     """Callback demonstrating CANCELLED sentinel usage - sends Telegram message."""
     logger = get_logger()
-    bot = get_bot()
-    chat_id = get_chat_id()
     
     # Using the is_cancelled() helper
     if is_cancelled(result):
         logger.info("cancel_test: Dialog was cancelled (detected via is_cancelled)")
-        msg = TelegramTextMessage("❌ Dialog was cancelled!")
-        await msg.send(bot, chat_id, logger)
+        await get_app().send_messages("❌ Dialog was cancelled!")
         return
     
     logger.info("cancel_test: Dialog completed with result=%s", result)
-    msg = TelegramTextMessage(f"✅ Dialog completed with: {result}")
-    await msg.send(bot, chat_id, logger)
+    await get_app().send_messages(f"✅ Dialog completed with: {result}")
 
 cancel_test_dialog = DialogHandler(
     ConfirmDialog(
@@ -305,12 +275,11 @@ def main():
     
     # Send startup message and run
     async def send_startup_and_run():
-        startup_msg = TelegramTextMessage(
+        await app.send_messages(
             f"🤖 <b>Dialog Handler Bot Started</b>\n\n"
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        await startup_msg.send(app.bot, app.chat_id, logger)
         logger.info("Starting dialog_handler_bot...")
         await app.run()
     

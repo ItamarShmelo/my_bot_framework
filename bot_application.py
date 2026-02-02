@@ -2,11 +2,11 @@
 
 import asyncio
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from telegram import Bot
 
-from .telegram_utilities import TelegramMessage
+from .telegram_utilities import TelegramMessage, TelegramTextMessage
 from .accessors import _set_instance
 from .event import Command, Event, SimpleCommand, CommandsEvent
 from .polling import flush_pending_updates
@@ -15,7 +15,7 @@ from .polling import flush_pending_updates
 class BotApplication:
     """Singleton class managing the Telegram bot application.
     
-    Encapsulates the bot instance, message queue, events, and commands.
+    Encapsulates the bot instance, events, and commands.
     Provides built-in /terminate and /commands functionality.
     
     Usage:
@@ -41,7 +41,6 @@ class BotApplication:
         self.bot = bot
         self.chat_id = chat_id
         self.logger = logger
-        self.queue: asyncio.Queue[TelegramMessage] = asyncio.Queue()
         self.stop_event = asyncio.Event()
         self.events: List["Event"] = []
         self.commands: List["Command"] = []
@@ -96,11 +95,11 @@ class BotApplication:
         self.commands.append(command)
         self.logger.debug("command_registered command=%s", command.command)
     
-    def terminate(self) -> str:
-        """Built-in terminate handler - sets stop_event to shut down the bot."""
+    async def terminate(self) -> None:
+        """Built-in terminate handler - sends goodbye and sets stop_event."""
         self.logger.info("bot_terminate_requested")
+        await self.send_messages("Bot terminating. Goodbye!")
         self.stop_event.set()
-        return "Bot terminating. Goodbye!"
     
     def list_commands(self) -> str:
         """Built-in commands list handler - returns formatted list of all commands."""
@@ -110,7 +109,7 @@ class BotApplication:
     async def run(self) -> int:
         """Run the bot application.
         
-        Starts the message sender worker and all registered events.
+        Starts all registered events and the commands handler.
         Automatically registers built-in commands (/terminate, /commands).
         Blocks until stop_event is set.
         
@@ -135,19 +134,14 @@ class BotApplication:
         # Create the commands event
         commands_event = CommandsEvent(
             event_name="commands",
-            bot=self.bot,
-            allowed_chat_id=self.chat_id,
             commands=self.commands,
             initial_offset=initial_offset,
         )
         self.events.append(commands_event)
         
-        # Start message sender worker
-        sender_task = asyncio.create_task(self._message_sender())
-        
         # Start all event tasks
         event_tasks = [
-            asyncio.create_task(event.submit(self.queue, self.stop_event))
+            asyncio.create_task(event.submit(self.stop_event))
             for event in self.events
         ]
         
@@ -157,43 +151,45 @@ class BotApplication:
         # Wait for stop signal
         await self.stop_event.wait()
         
-        # Drain the queue
         self.logger.info("bot_application_stopping")
-        await self.queue.join()
         
         # Cancel all tasks
         for task in event_tasks:
             task.cancel()
-        sender_task.cancel()
         
         # Wait for cancellation
-        await asyncio.gather(*event_tasks, sender_task, return_exceptions=True)
+        await asyncio.gather(*event_tasks, return_exceptions=True)
         
         self.logger.info("bot_application_stopped")
         return 0
     
-    async def _message_sender(self) -> None:
-        """Continuously drain the queue and send messages via the bot."""
-        while True:
-            if self.stop_event.is_set() and self.queue.empty():
-                return
-            try:
-                message = await asyncio.wait_for(self.queue.get(), timeout=1.0)
-            except asyncio.TimeoutError:
-                continue
-            try:
-                await message.send(
-                    bot=self.bot,
-                    chat_id=self.chat_id,
-                    logger=self.logger,
-                )
-            finally:
-                self.queue.task_done()
-            await asyncio.sleep(0.05)
-    
-    async def send_message(self, message: TelegramMessage) -> None:
-        """Enqueue a message for sending."""
-        await self.queue.put(message)
+    async def send_messages(
+        self,
+        messages: Union[str, TelegramMessage, List[Union[str, TelegramMessage]]],
+    ) -> None:
+        """Send one or more messages immediately.
+        
+        Args:
+            messages: A single message (str or TelegramMessage) or a list of messages.
+                      Strings are automatically wrapped in TelegramTextMessage.
+        
+        Example:
+            await app.send_messages("Hello")  # Single text
+            await app.send_messages(TelegramTextMessage("Hello"))  # Explicit
+            await app.send_messages(["Hello", "World"])  # Multiple messages
+            await app.send_messages([
+                "Text message",
+                TelegramImageMessage("path/to/image.png"),
+            ])
+        """
+        # Normalize to list
+        if not isinstance(messages, list):
+            messages = [messages]
+        
+        for message in messages:
+            if isinstance(message, str):
+                message = TelegramTextMessage(message)
+            await message.send(bot=self.bot, chat_id=self.chat_id, logger=self.logger)
 
 
 # Re-export accessor functions from accessors module for backward compatibility
@@ -201,7 +197,6 @@ from .accessors import (
     get_app,
     get_bot,
     get_chat_id,
-    get_queue,
     get_stop_event,
     get_logger,
 )

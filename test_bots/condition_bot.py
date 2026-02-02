@@ -23,7 +23,6 @@ from my_bot_framework import (
     EditableAttribute,
     Condition,
     MessageBuilder,
-    TelegramTextMessage,
 )
 
 
@@ -145,12 +144,11 @@ def main():
     
     # Send startup message and run
     async def send_startup_and_run():
-        startup_msg = TelegramTextMessage(
+        await app.send_messages(
             f"🤖 <b>Condition Bot Started</b>\n\n"
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        await startup_msg.send(app.bot, app.chat_id, logger)
         logger.info("Starting condition_bot...")
         await app.run()
     

@@ -76,6 +76,28 @@ bot = get_bot()
 logger = get_logger()
 ```
 
+#### Sending Messages
+
+Use `send_messages()` to enqueue one or more messages for sending:
+
+```python
+# Send a simple text message
+await app.send_messages("Hello, world!")
+
+# Or use TelegramMessage types for more control
+from my_bot_framework import TelegramTextMessage, TelegramImageMessage
+
+await app.send_messages(TelegramTextMessage("Formatted <b>message</b>"))
+await app.send_messages(TelegramImageMessage("path/to/image.png", caption="My image"))
+
+# Send multiple messages at once
+await app.send_messages(["Hello", "World"])
+await app.send_messages([
+    "Check out this image:",
+    TelegramImageMessage("path/to/image.png", caption="My image"),
+])
+```
+
 ### Events
 
 Events run continuously and enqueue messages based on triggers.

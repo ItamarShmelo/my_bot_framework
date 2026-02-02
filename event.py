@@ -11,18 +11,11 @@ from telegram import Bot, Update
 from .telegram_utilities import (
     TelegramMessage,
     TelegramTextMessage,
-    TelegramOptionsMessage,
-    TelegramEditMessage,
     TelegramCallbackAnswerMessage,
     TelegramRemoveKeyboardMessage,
 )
-from .accessors import get_bot, get_chat_id, get_logger
-from .polling import (
-    UpdatePollerMixin,
-    flush_pending_updates,
-    poll_updates,
-    get_chat_id_from_update,
-)
+from .accessors import get_app, get_logger
+from .polling import UpdatePollerMixin
 
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogResponse
@@ -212,12 +205,8 @@ class Event:
     def __init__(self, event_name: str) -> None:
         self.event_name = event_name
 
-    async def submit(
-        self,
-        queue: "asyncio.Queue[TelegramMessage]",
-        stop_event: asyncio.Event,
-    ) -> None:
-        """Run the event loop and enqueue TelegramMessage objects."""
+    async def submit(self, stop_event: asyncio.Event) -> None:
+        """Run the event loop until stop_event is set."""
         raise NotImplementedError
 
 
@@ -314,11 +303,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
             "Unknown editable attribute. Use 'condition.<name>' or 'builder.<name>'."
         )
 
-    async def submit(
-        self,
-        queue: "asyncio.Queue[TelegramMessage]",
-        stop_event: asyncio.Event,
-    ) -> None:
+    async def submit(self, stop_event: asyncio.Event) -> None:
         logger = get_logger()
         logger.info("[%s] event_started poll_seconds=%.1f", self.event_name, self.poll_seconds)
         
@@ -339,7 +324,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
                 message = await _maybe_await(self.message_builder.build)
                 if message:
                     logger.info("event_message_queued event_name=%s", self.event_name)
-                    await _enqueue_message(queue, message)
+                    await get_app().send_messages(message)
                 else:
                     logger.warning("[%s] message_builder_returned_none", self.event_name)
             await _wait_or_stop(stop_event, self.poll_seconds)
@@ -362,49 +347,35 @@ class CommandsEvent(Event, UpdatePollerMixin):
     def __init__(
         self,
         event_name: str,
-        bot: Bot,
-        allowed_chat_id: str,
         commands: List["Command"],
         poll_seconds: float = 2.0,
         initial_offset: Optional[int] = None,
     ) -> None:
         super().__init__(event_name)
-        self.bot = bot
-        self.allowed_chat_id = str(allowed_chat_id)
         self.commands = commands
         self.poll_seconds = poll_seconds
         self._update_offset: Optional[int] = initial_offset
         self._stop_event: Optional[asyncio.Event] = None
-        self._queue: Optional["asyncio.Queue[TelegramMessage]"] = None
         self._current_offset: int = 0
 
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:
         return self._stop_event.is_set() if self._stop_event else True
 
-    def _get_bot(self) -> Bot:
-        return self.bot  # Uses instance attribute
-
-    def _get_chat_id(self) -> str:
-        return self.allowed_chat_id  # Uses instance attribute
-
-    def _get_logger(self) -> logging.Logger:
-        return get_logger()
-
     async def handle_callback_update(self, update: Update) -> None:
         """Handle stale callbacks with 'No active session'."""
-        logger = self._get_logger()
+        logger = get_logger()
         logger.debug("stale_callback_received id=%s", update.callback_query.id)
         
-        callback_answer = TelegramCallbackAnswerMessage(
+        await get_app().send_messages(TelegramCallbackAnswerMessage(
             update.callback_query.id,
             text="No active session.",
-        )
-        await callback_answer.send(self._get_bot(), self._get_chat_id(), logger)
+        ))
         
         if update.callback_query.message:
-            remove_kb = TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
-            await remove_kb.send(self._get_bot(), self._get_chat_id(), logger)
+            await get_app().send_messages(
+                TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
+            )
 
     async def handle_text_update(self, update: Update) -> None:
         """Handle '/' commands, ignore non-commands."""
@@ -415,28 +386,22 @@ class CommandsEvent(Event, UpdatePollerMixin):
         
         command = self._match_command(text)
         if command:
-            logger = self._get_logger()
+            logger = get_logger()
             logger.info("command_matched command=%s", command.command)
             # Consume this update before running command, so it won't see the command as input
             command_offset = update.update_id + 1
             # Command takes over - run it and update offset
-            result, self._current_offset = await command.run(self._queue, command_offset)
+            result, self._current_offset = await command.run(command_offset)
         else:
-            logger = self._get_logger()
+            logger = get_logger()
             logger.info("unknown_command text=%s", text)
             logger.info("event_message_queued event_name=%s", self.event_name)
-            await _enqueue_message(
-                self._queue,
+            await get_app().send_messages(
                 TelegramTextMessage(self._commands_help_text(text)),
             )
 
-    async def submit(
-        self,
-        queue: "asyncio.Queue[TelegramMessage]",
-        stop_event: asyncio.Event,
-    ) -> None:
+    async def submit(self, stop_event: asyncio.Event) -> None:
         """Event interface: delegates to poll()."""
-        self._queue = queue
         self._stop_event = stop_event
         self._current_offset = self._update_offset or 0
         
@@ -471,24 +436,6 @@ async def _wait_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
         return
 
 
-async def _enqueue_message(
-    queue: "asyncio.Queue[TelegramMessage]",
-    message: Union[None, TelegramMessage, str, List[TelegramMessage]],
-) -> None:
-    """Queue TelegramMessage instances."""
-    if not message:
-        return
-    if isinstance(message, list):
-        messages = message
-    elif isinstance(message, TelegramMessage):
-        messages = [message]
-    else:
-        messages = [TelegramTextMessage(str(message))]
-
-    for msg in messages:
-        await queue.put(msg)
-
-
 async def _maybe_await(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Allow both sync and async callables in the same pipeline."""
     result = func(*args, **kwargs)
@@ -509,11 +456,10 @@ class Command(ABC):
         self.description = description
 
     @abstractmethod
-    async def run(self, queue: asyncio.Queue, update_offset: int = 0) -> Tuple[Any, int]:
+    async def run(self, update_offset: int = 0) -> Tuple[Any, int]:
         """Run the command until completion.
         
         Args:
-            queue: Message queue for sending responses.
             update_offset: Current Telegram update offset to continue from.
             
         Returns:
@@ -523,34 +469,30 @@ class Command(ABC):
 
 
 class SimpleCommand(Command):
-    """Command that completes immediately by sending a result."""
+    """Command that completes immediately by sending a result.
+    
+    The message_builder must be a callable that takes no arguments and returns
+    a message (str, TelegramMessage, list of messages, or None).
+    """
 
     def __init__(
         self,
         command: str,
         description: str,
-        message_builder: Callable[
-            ...,
-            Union[None, TelegramMessage, str, List[TelegramMessage]],
-        ],
-        message_builder_args: tuple[Any, ...] = (),
-        message_builder_kwargs: Optional[dict[str, Any]] = None,
+        message_builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
     ) -> None:
+        assert callable(message_builder), "message_builder must be callable"
         super().__init__(command, description)
         self.message_builder = message_builder
-        self.message_builder_args = message_builder_args
-        self.message_builder_kwargs = message_builder_kwargs or {}
 
-    async def run(self, queue: asyncio.Queue, update_offset: int = 0) -> Tuple[Any, int]:
-        """Execute message builder and enqueue result, then complete."""
+    async def run(self, update_offset: int = 0) -> Tuple[Any, int]:
+        """Execute message builder and send result, then complete."""
         logger = get_logger()
         logger.info("simple_command_executed command=%s", self.command)
-        result = self.message_builder(
-            *self.message_builder_args,
-            **self.message_builder_kwargs,
-        )
-        logger.info("command_message_queued command=%s", self.command)
-        await _enqueue_message(queue, result)
+        result = await _maybe_await(self.message_builder)
+        if result:
+            logger.info("command_message_sent command=%s", self.command)
+            await get_app().send_messages(result)
         return None, update_offset  # No result, no updates consumed
 
 
@@ -570,13 +512,12 @@ class DialogCommand(Command):
         super().__init__(command, description)
         self.dialog = dialog
 
-    async def run(self, queue: asyncio.Queue, update_offset: int = 0) -> Tuple[Any, int]:
+    async def run(self, update_offset: int = 0) -> Tuple[Any, int]:
         """Run the dialog until complete.
         
         The dialog handles its own polling via start().
         
         Args:
-            queue: Message queue (not used directly, dialog sends via bot).
             update_offset: Current Telegram update offset to continue from.
             
         Returns:

@@ -13,7 +13,7 @@ from typing import Any, List, Optional, Tuple
 
 from telegram import Bot, Update
 
-from .accessors import get_logger
+from .accessors import get_bot, get_chat_id, get_logger
 
 
 async def flush_pending_updates(bot: Bot) -> int:
@@ -81,7 +81,8 @@ class UpdatePollerMixin(ABC):
     - should_stop_polling(): when to exit the poll loop
     - handle_callback_update(update): process callback queries
     - handle_text_update(update): process text messages
-    - _get_bot(), _get_chat_id(), _get_logger(): dependency getters
+    
+    Uses singleton accessors (get_bot, get_chat_id, get_logger) for dependencies.
     """
     
     @abstractmethod
@@ -99,28 +100,13 @@ class UpdatePollerMixin(ABC):
         """Handle a text message update."""
         ...
     
-    @abstractmethod
-    def _get_bot(self) -> Bot:
-        """Return the bot instance to use for polling."""
-        ...
-    
-    @abstractmethod
-    def _get_chat_id(self) -> str:
-        """Return the chat ID to filter updates."""
-        ...
-    
-    @abstractmethod
-    def _get_logger(self) -> logging.Logger:
-        """Return the logger instance."""
-        ...
-    
     async def poll(self, update_offset: int = 0) -> Tuple[Any, int]:
         """Template method: poll updates and route to handlers.
         
         Returns (result, final_offset). Result meaning is subclass-specific.
         """
-        bot = self._get_bot()
-        chat_id = self._get_chat_id()
+        bot = get_bot()
+        chat_id = get_chat_id()
         
         current_offset = update_offset
         while not self.should_stop_polling():
