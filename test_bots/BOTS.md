@@ -48,8 +48,8 @@ python test_bots/basic_bot.py
 
 **Features tested:**
 - `ActivateOnConditionEvent` with polling
-- `EditableField` for runtime parameter changes
-- Condition function with kwargs
+- `EditableAttribute` for runtime parameter changes
+- Condition/MessageBuilder interfaces
 
 **Commands:**
 | Command | Description |
@@ -157,10 +157,10 @@ python test_bots/dialog_handler_bot.py
 **Purpose:** Tests runtime-editable parameters via dialogs.
 
 **Features tested:**
-- `EditableField` - Type parsing and validation
+- `EditableAttribute` - Type parsing and validation
 - `EditableMixin` - The `edited` flag for immediate re-check
 - `DialogCommand` with `DialogHandler` for editing
-- Dynamic kwargs from editable fields to message builders
+- Condition/MessageBuilder edit routing
 - `ActivateOnConditionEvent` with editable parameters
 
 **Commands:**

@@ -365,21 +365,35 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
 
     def __init__(
         self,
-        prompt: str,
+        prompt: Union[str, Callable[[], str]],
         validator: Optional[Callable[[str], Tuple[bool, str]]] = None,
         include_cancel: bool = True,
     ) -> None:
         """Create a text input dialog.
         
         Args:
-            prompt: The question text to display.
+            prompt: The question text to display or a callable that returns it.
             validator: Optional callable(text) -> (is_valid, error_message).
             include_cancel: If True, add a Cancel button.
         """
         super().__init__()
+        self._prompt = None
         self.prompt = prompt
         self.validator = validator
         self.include_cancel = include_cancel
+
+    @property
+    def prompt(self) -> str:
+        """Resolved prompt text for this dialog."""
+        return self._prompt()
+
+    @prompt.setter
+    def prompt(self, value: Union[str, Callable[[], str]]) -> None:
+        """Set prompt as a string or callable returning a string."""
+        if callable(value):
+            self._prompt = value
+        else:
+            self._prompt = lambda: value
 
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:

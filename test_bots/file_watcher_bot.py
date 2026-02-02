@@ -3,7 +3,7 @@
 Tests:
 - create_file_change_event factory
 - File modification detection
-- Editable file_path field
+- Editable file_path attribute
 """
 
 import asyncio
@@ -72,7 +72,7 @@ def main():
     file_event = create_file_change_event(
         event_name="file_changed",
         file_path=test_file,
-        message_builder=lambda: f"📄 File was modified!\n<code>{test_file}</code>",
+        message_builder=lambda path: f"📄 File was modified!\n<code>{path}</code>",
         poll_seconds=5.0,  # Check every 5 seconds
     )
     app.register_event(file_event)
@@ -81,13 +81,13 @@ def main():
     app.register_command(SimpleCommand(
         command="/file",
         description="Show monitored file path",
-        message_builder=lambda: f"Monitoring: <code>{file_event.editable_fields[0].value}</code>",
+        message_builder=lambda: f"Monitoring: <code>{file_event.get('condition.file_path')}</code>",
     ))
     
     # Command to touch the file (trigger change)
     def touch_file():
         """Touch the file to trigger the event."""
-        current_path = file_event.editable_fields[0].value
+        current_path = file_event.get("condition.file_path")
         try:
             with open(current_path, "a") as f:
                 f.write(f"Touched at {asyncio.get_event_loop().time()}\n")
@@ -104,7 +104,7 @@ def main():
     # Command to show file contents
     def show_contents():
         """Show the current file contents."""
-        current_path = file_event.editable_fields[0].value
+        current_path = file_event.get("condition.file_path")
         try:
             with open(current_path, "r") as f:
                 contents = f.read()
@@ -129,7 +129,7 @@ def main():
             "Tests file change detection:\n"
             "• <code>create_file_change_event</code> factory\n"
             "• File modification time monitoring\n"
-            "• Editable <code>file_path</code> field\n\n"
+            "• Editable <code>file_path</code> attribute\n\n"
             "<b>Commands:</b>\n"
             "/file - Show monitored file path\n"
             "/touch - Touch file to trigger event\n"

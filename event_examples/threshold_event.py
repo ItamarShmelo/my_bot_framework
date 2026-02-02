@@ -4,9 +4,14 @@ This is an example of extending ActivateOnConditionEvent for a common pattern.
 """
 
 import time
-from typing import Any, Callable, List, Optional, Union
+from typing import Callable, List, Union
 
-from ..event import ActivateOnConditionEvent, EditableField
+from ..event import (
+    ActivateOnConditionEvent,
+    EditableAttribute,
+    Condition,
+    FunctionMessageBuilder,
+)
 from ..telegram_utilities import TelegramMessage
 
 
@@ -40,11 +45,9 @@ class ThresholdEvent(ActivateOnConditionEvent):
         event_name: str,
         value_getter: Callable[[], float],
         threshold: float,
-        message_builder: Callable[..., Union[None, TelegramMessage, str, List[TelegramMessage]]],
+        message_builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
         above: bool = True,
         poll_seconds: float = 10.0,
-        message_builder_args: tuple[Any, ...] = (),
-        message_builder_kwargs: Optional[dict[str, Any]] = None,
         cooldown_seconds: float = 60.0,
     ) -> None:
         """Initialize the threshold event.
@@ -56,67 +59,62 @@ class ThresholdEvent(ActivateOnConditionEvent):
             message_builder: Callable returning message content.
             above: If True, fire when value > threshold. If False, when value < threshold.
             poll_seconds: How often to check the condition.
-            message_builder_args: Positional args for message_builder.
-            message_builder_kwargs: Keyword args for message_builder.
             cooldown_seconds: Minimum time between fires to prevent spam.
         """
-        self._value_getter = value_getter
-        self._above = above
-        self._cooldown_seconds = cooldown_seconds
-        
-        # Create editable threshold field
-        self._threshold_field = EditableField(
-            name="threshold",
-            field_type=(int, float),
-            initial_value=threshold,
-            parse=float,
+        class ThresholdCondition(Condition):
+            def __init__(self) -> None:
+                threshold_attr = EditableAttribute(
+                    name="threshold",
+                    field_type=(int, float),
+                    initial_value=threshold,
+                    parse=float,
+                )
+                self.editable_attributes = [threshold_attr]
+                self._edited = False
+                self._state = {
+                    "last_fire_time": None,
+                }
+            
+            def check(self) -> bool:
+                """Return True when value crosses threshold (with cooldown)."""
+                now = time.time()
+                
+                # Check cooldown
+                if self._state["last_fire_time"] is not None:
+                    elapsed = now - self._state["last_fire_time"]
+                    if elapsed < cooldown_seconds:
+                        return False
+                
+                value = value_getter()
+                current_threshold = self.get("threshold")
+                
+                if above:
+                    triggered = value > current_threshold
+                else:
+                    triggered = value < current_threshold
+                
+                if triggered:
+                    self._state["last_fire_time"] = now
+                
+                return triggered
+            
+        condition = ThresholdCondition()
+        builder = FunctionMessageBuilder(
+            builder=message_builder,
         )
-        
-        # State for cooldown
-        self._threshold_state = {
-            "last_fire_time": None,
-        }
-        
         super().__init__(
             event_name=event_name,
-            condition_func=self._threshold_condition,
-            message_builder=message_builder,
-            message_builder_args=message_builder_args,
-            message_builder_kwargs=message_builder_kwargs,
-            editable_fields=[self._threshold_field],
+            condition=condition,
+            message_builder=builder,
             poll_seconds=poll_seconds,
         )
     
     @property
     def threshold(self) -> float:
         """Get the current threshold value."""
-        return self._threshold_field.value
+        return self.get("condition.threshold")
     
     @threshold.setter
     def threshold(self, value: float) -> None:
         """Set the threshold value."""
-        self._threshold_field.value = value
-        self.edited = True  # Trigger immediate re-check
-    
-    def _threshold_condition(self) -> bool:
-        """Return True when value crosses threshold (with cooldown)."""
-        now = time.time()
-        
-        # Check cooldown
-        if self._threshold_state["last_fire_time"] is not None:
-            elapsed = now - self._threshold_state["last_fire_time"]
-            if elapsed < self._cooldown_seconds:
-                return False
-        
-        value = self._value_getter()
-        current_threshold = self._threshold_field.value
-        
-        if self._above:
-            triggered = value > current_threshold
-        else:
-            triggered = value < current_threshold
-        
-        if triggered:
-            self._threshold_state["last_fire_time"] = now
-        
-        return triggered
+        self.edit("condition.threshold", value)

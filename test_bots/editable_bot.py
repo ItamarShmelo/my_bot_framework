@@ -1,7 +1,7 @@
-"""Editable bot demonstrating EditableField and EditableMixin.
+"""Editable bot demonstrating EditableAttribute and EditableMixin.
 
 Tests:
-- EditableField creation with parsing and validation
+- EditableAttribute creation with parsing and validation
 - Editing fields via DialogCommand
 - EditableMixin.edited flag for immediate re-check
 - Dynamic kwargs from editable fields
@@ -22,7 +22,9 @@ from my_bot_framework import (
     SimpleCommand,
     DialogCommand,
     ActivateOnConditionEvent,
-    EditableField,
+    EditableAttribute,
+    Condition,
+    MessageBuilder,
     ChoiceDialog,
     UserInputDialog,
     SequenceDialog,
@@ -62,22 +64,52 @@ def get_sensor_value() -> int:
     return _sensor_value
 
 
-def check_threshold(threshold: int = 80) -> bool:
-    """Check if sensor value exceeds threshold."""
-    value = get_sensor_value()
-    return value > threshold
+class SensorCondition(Condition):
+    def __init__(self, threshold: int) -> None:
+        threshold_attr = EditableAttribute(
+            name="threshold",
+            field_type=int,
+            initial_value=threshold,
+            parse=int,
+            validator=lambda v: (0 <= v <= 100, "Threshold must be between 0 and 100"),
+        )
+        self.editable_attributes = [threshold_attr]
+        self._edited = False
+    
+    def check(self) -> bool:
+        """Check if sensor value exceeds threshold."""
+        value = get_sensor_value()
+        return value > self.get("threshold")
+    
 
-
-def build_alert_message(threshold: int = 80, alert_level: str = "warning") -> str:
-    """Build alert message with current value and level."""
-    icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
-    icon = icons.get(alert_level, "⚠️")
-    return (
-        f"{icon} <b>{alert_level.upper()}</b>\n\n"
-        f"Sensor value: <code>{_sensor_value}</code>\n"
-        f"Threshold: <code>{threshold}</code>"
-    )
-
+class AlertMessageBuilder(MessageBuilder):
+    def __init__(self, condition: SensorCondition, alert_level: str) -> None:
+        alert_level_attr = EditableAttribute(
+            name="alert_level",
+            field_type=str,
+            initial_value=alert_level,
+            parse=str,
+            validator=lambda v: (
+                v in ("info", "warning", "critical"),
+                "Level must be: info, warning, or critical"
+            ),
+        )
+        self.editable_attributes = [alert_level_attr]
+        self._edited = False
+        self._condition = condition
+    
+    def build(self) -> str:
+        """Build alert message with current value and level."""
+        alert_level = self.get("alert_level")
+        threshold = self._condition.get("threshold")
+        icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
+        icon = icons.get(alert_level, "⚠️")
+        return (
+            f"{icon} <b>{alert_level.upper()}</b>\n\n"
+            f"Sensor value: <code>{_sensor_value}</code>\n"
+            f"Threshold: <code>{threshold}</code>"
+        )
+    
 
 def main():
     # Setup logging
@@ -96,33 +128,13 @@ def main():
         logger=logger,
     )
     
-    # Create editable fields
-    threshold_field = EditableField(
-        name="threshold",
-        field_type=int,
-        initial_value=80,
-        parse=int,
-        validator=lambda v: (0 <= v <= 100, "Threshold must be between 0 and 100"),
-    )
-    
-    alert_level_field = EditableField(
-        name="alert_level",
-        field_type=str,
-        initial_value="warning",
-        parse=str,
-        validator=lambda v: (
-            v in ("info", "warning", "critical"),
-            "Level must be: info, warning, or critical"
-        ),
-    )
-    
-    # Register condition event with editable fields
+    # Register condition event with editable attributes
+    condition = SensorCondition(threshold=80)
+    builder = AlertMessageBuilder(condition=condition, alert_level="warning")
     sensor_event = ActivateOnConditionEvent(
         event_name="sensor_alert",
-        condition_func=check_threshold,
-        condition_kwargs={"threshold": threshold_field.value},
-        message_builder=build_alert_message,
-        editable_fields=[threshold_field, alert_level_field],
+        condition=condition,
+        message_builder=builder,
         poll_seconds=15.0,  # Check every 15 seconds
     )
     app.register_event(sensor_event)
@@ -140,8 +152,8 @@ def main():
         description="Show current settings",
         message_builder=lambda: (
             "<b>Current Settings</b>\n\n"
-            f"Threshold: <code>{threshold_field.value}</code>\n"
-            f"Alert Level: <code>{alert_level_field.value}</code>"
+            f"Threshold: <code>{sensor_event.get('condition.threshold')}</code>\n"
+            f"Alert Level: <code>{sensor_event.get('builder.alert_level')}</code>"
         ),
     ))
     
@@ -158,16 +170,11 @@ def main():
             await msg.send(bot, chat_id, log)
             return
         
-        new_value = result
         try:
-            threshold_field.value = new_value  # Validates via setter
-            # Update the condition kwargs
-            sensor_event.condition_kwargs["threshold"] = threshold_field.value
-            # Signal that the event was edited for immediate re-check
-            sensor_event.edited = True
+            sensor_event.edit("condition.threshold", result)
             
             msg = TelegramTextMessage(
-                f"✅ Threshold updated to <code>{threshold_field.value}</code>"
+                f"✅ Threshold updated to <code>{sensor_event.get('condition.threshold')}</code>"
             )
             await msg.send(bot, chat_id, log)
         except ValueError as e:
@@ -176,7 +183,10 @@ def main():
     
     threshold_dialog = DialogHandler(
         UserInputDialog(
-            f"Enter new threshold (current: {threshold_field.value}, range 0-100):",
+            lambda: (
+                "Enter new threshold (current: "
+                f"{sensor_event.get('condition.threshold')}, range 0-100):"
+            ),
             validator=lambda v: (
                 v.isdigit() and 0 <= int(v) <= 100,
                 "Enter a number between 0 and 100"
@@ -204,14 +214,12 @@ def main():
             await msg.send(bot, chat_id, log)
             return
         
-        new_level = result
-        alert_level_field.value = new_level
-        sensor_event.edited = True
+        sensor_event.edit("builder.alert_level", result)
         
         icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
-        icon = icons.get(new_level, "")
+        icon = icons.get(sensor_event.get("builder.alert_level"), "")
         msg = TelegramTextMessage(
-            f"✅ Alert level updated to {icon} <code>{alert_level_field.value}</code>"
+            f"✅ Alert level updated to {icon} <code>{sensor_event.get('builder.alert_level')}</code>"
         )
         await msg.send(bot, chat_id, log)
     
@@ -250,19 +258,19 @@ def main():
         
         if new_threshold:
             try:
-                threshold_field.value = new_threshold
-                sensor_event.condition_kwargs["threshold"] = threshold_field.value
+                sensor_event.edit("condition.threshold", new_threshold)
             except ValueError as e:
                 errors.append(f"Threshold: {e}")
         
         if new_level:
-            alert_level_field.value = new_level
-        
-        sensor_event.edited = True
+            try:
+                sensor_event.edit("builder.alert_level", new_level)
+            except ValueError as e:
+                errors.append(f"Alert Level: {e}")
         
         # Build confirmation message
         icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
-        icon = icons.get(alert_level_field.value, "")
+        icon = icons.get(sensor_event.get("builder.alert_level"), "")
         
         if errors:
             error_text = "\n".join(f"• {e}" for e in errors)
@@ -270,8 +278,8 @@ def main():
         else:
             msg = TelegramTextMessage(
                 f"✅ <b>Settings Updated</b>\n\n"
-                f"Threshold: <code>{threshold_field.value}</code>\n"
-                f"Alert Level: {icon} <code>{alert_level_field.value}</code>"
+                f"Threshold: <code>{sensor_event.get('condition.threshold')}</code>\n"
+                f"Alert Level: {icon} <code>{sensor_event.get('builder.alert_level')}</code>"
             )
         await msg.send(bot, chat_id, log)
     
@@ -307,10 +315,9 @@ def main():
         message_builder=lambda: (
             "<b>Editable Bot</b>\n\n"
             "Tests runtime-editable parameters:\n"
-            "• <code>EditableField</code> - Type parsing and validation\n"
+            "• <code>EditableAttribute</code> - Type parsing and validation\n"
             "• <code>EditableMixin</code> - Edited flag for immediate re-check\n"
-            "• Dialog-based editing of event parameters\n"
-            "• Dynamic kwargs from editable fields\n\n"
+            "• Dialog-based editing of event parameters\n\n"
             "<b>Commands:</b>\n"
             "/sensor - Show current sensor value\n"
             "/settings - Show current settings\n"

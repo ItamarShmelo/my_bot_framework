@@ -249,7 +249,7 @@ Dialogs use the Composite pattern to build complex flows from simple components.
 
 **Leaf Dialogs** (one question each):
 - `ChoiceDialog` - User selects from keyboard options
-- `UserInputDialog` - User enters text with optional validation
+- `UserInputDialog` - User enters text with optional validation (prompt may be callable)
 - `ConfirmDialog` - Yes/No prompt
 
 **Composite Dialogs** (orchestrate children):
@@ -474,39 +474,34 @@ These factories encapsulate common condition patterns with internal state manage
 | `TelegramEditMessage` | Edit existing | Update text/keyboard |
 | `TelegramCallbackAnswerMessage` | Callback ACK | Toast notifications |
 
-## Editable Fields System
+## Editable Attributes System
 
-The `Editable` mixin and `EditableField` class enable runtime parameter modification:
+The `EditableMixin` and `EditableAttribute` classes enable runtime parameter modification
+across explicit `Condition` and `MessageBuilder` collaborators:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                  ActivateOnConditionEvent                   │
 │                       (implements EditableMixin)            │
 ├─────────────────────────────────────────────────────────────┤
-│  editable_fields: [                                         │
-│      EditableField(name="threshold", ...)                   │
-│      EditableField(name="scale", ...)                       │
-│  ]                                                          │
+│  condition: Condition (EditableMixin)                       │
+│  builder:   MessageBuilder (EditableMixin)                  │
 │                                                             │
-│  _get_message_builder_kwargs():                             │
-│      return {**base_kwargs, **editable_field_values}        │
-│                                                             │
-│  When message_builder is called:                            │
-│      builder(**merged_kwargs)                               │
-│          │                                                  │
-│          ▼                                                  │
-│      CallUpdatesInternalState.__call__(**kwargs)            │
-│          │                                                  │
-│          └─► Updates builder's internal state               │
+│  event.edit("condition.threshold", "95")                    │
+│       │                                                     │
+│       ▼                                                     │
+│  condition.edit("threshold", "95")                          │
+│       │                                                     │
+│       └─► EditableAttribute parses & validates              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 **Flow:**
-1. Event has `editable_fields` list
-2. External code modifies `field.value = "new_value"`
-3. Event sets `self.edited = True`
-4. On next poll, event merges field values into kwargs
-5. Message builder receives updated values via `CallUpdatesInternalState`
+1. Event owns a `Condition` and `MessageBuilder`, each with editable attributes
+2. External code calls `event.edit("condition.<name>", value)` or `event.edit("builder.<name>", value)`
+3. Edit is validated and applied immediately (fail-fast on errors)
+4. Event is marked `edited = True` for immediate re-check on the next poll
+5. `condition.check()` and `builder.build()` read their own attributes via `get()`
 
 ## Async Patterns
 
@@ -536,11 +531,7 @@ async def _maybe_await(func, *args, **kwargs):
 
 ```python
 # Run blocking condition in thread pool
-condition_result = await asyncio.to_thread(
-    self.condition_func,
-    *self.condition_args,
-    **self.condition_kwargs,
-)
+condition_result = await asyncio.to_thread(self.condition.check)
 ```
 
 ## Error Handling

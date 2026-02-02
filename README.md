@@ -85,26 +85,50 @@ Events run continuously and enqueue messages based on triggers.
 Emits messages when a condition becomes truthy:
 
 ```python
-from my_bot_framework import ActivateOnConditionEvent, EditableField
+from my_bot_framework import (
+    ActivateOnConditionEvent,
+    EditableAttribute,
+    Condition,
+    MessageBuilder,
+)
 
-def check_disk_full():
-    return disk_usage() > 90
-
-event = ActivateOnConditionEvent(
-    event_name="disk_alert",
-    condition_func=check_disk_full,
-    message_builder=lambda: "Disk usage critical!",
-    poll_seconds=60.0,
-    editable_fields=[
-        EditableField(
+class DiskFullCondition(Condition):
+    def __init__(self) -> None:
+        threshold_attr = EditableAttribute(
             name="threshold",
             field_type=int,
             initial_value=90,
             parse=int,
-        ),
-    ],
+        )
+        self.editable_attributes = [threshold_attr]
+        self._edited = False
+    
+    def check(self) -> bool:
+        return disk_usage() > self.get("threshold")
+    
+class DiskAlertBuilder(MessageBuilder):
+    def __init__(self, condition: DiskFullCondition) -> None:
+        self.editable_attributes = []
+        self._edited = False
+        self._condition = condition
+    
+    def build(self) -> str:
+        threshold = self._condition.get("threshold")
+        return f"Disk usage critical (>{threshold}%)!"
+    
+condition = DiskFullCondition()
+builder = DiskAlertBuilder(condition)
+
+event = ActivateOnConditionEvent(
+    event_name="disk_alert",
+    condition=condition,
+    message_builder=builder,
+    poll_seconds=60.0,
 )
 app.register_event(event)
+
+# Edit at runtime:
+event.edit("condition.threshold", "95")
 ```
 
 #### TimeEvent
@@ -158,7 +182,7 @@ from my_bot_framework import create_file_change_event
 event = create_file_change_event(
     event_name="config_changed",
     file_path="/etc/myapp/config.yaml",
-    message_builder=lambda: "Config file was modified!",
+    message_builder=lambda path: f"Config file was modified: {path}",
 )
 ```
 
@@ -203,7 +227,7 @@ The framework provides built-in dialog types for common interactions:
 
 **Leaf Dialogs** (atomic single-step):
 - `ChoiceDialog` - User selects from keyboard options
-- `UserInputDialog` - User enters text (with optional validation)
+- `UserInputDialog` - User enters text (with optional validation; prompt may be callable)
 - `ConfirmDialog` - Yes/No prompt
 
 **Composite Dialogs** (multi-step):
@@ -322,14 +346,14 @@ def image_builder():
     return TelegramImageMessage("/path/to/chart.png")
 ```
 
-## Editable Fields
+## Editable Attributes
 
 Runtime-editable parameters with validation:
 
 ```python
-from my_bot_framework import EditableField
+from my_bot_framework import EditableAttribute
 
-field = EditableField(
+field = EditableAttribute(
     name="threshold",
     field_type=int,
     initial_value=100,

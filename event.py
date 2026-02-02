@@ -1,6 +1,7 @@
 """Event system for the bot framework."""
 
 import asyncio
+import inspect
 import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, List, Optional, Tuple, Union
@@ -29,15 +30,12 @@ if TYPE_CHECKING:
 MINIMAL_TIME_BETWEEN_MESSAGES = 5.0 / 60.0
 
 
-class EditableField:
-    """A field that can be edited at runtime with string parsing and validation.
+class EditableAttribute:
+    """A runtime-editable attribute with parsing and validation.
     
     - `parse`: User-provided callable that receives string, returns typed value
     - `value` property: getter returns typed value, setter parses strings and validates
     - `validator`: Optional function that receives typed value, returns (is_valid, error_msg)
-    
-    Field values are passed to message builders via kwargs, which update their
-    internal state using CallUpdatesInternalState.
     """
 
     def __init__(
@@ -90,7 +88,7 @@ class EditableField:
 
 
 class EditableMixin(ABC):
-    """Mixin for objects with runtime-editable parameters.
+    """Mixin for objects with runtime-editable attributes.
     
     The `edited` property allows signaling that parameters have changed,
     triggering immediate re-processing in events that support it.
@@ -99,16 +97,27 @@ class EditableMixin(ABC):
     _edited: bool = False
 
     @property
-    @abstractmethod
-    def editable_name(self) -> str:
-        """Human-readable name for display."""
-        ...
+    def editable_attributes(self) -> dict[str, "EditableAttribute"]:
+        """Mapping of editable attributes."""
+        if not hasattr(self, "_editable_attributes"):
+            self._editable_attributes = {}
+        return self._editable_attributes
 
-    @property
-    @abstractmethod
-    def editable_fields(self) -> List["EditableField"]:
-        """List of editable fields."""
-        ...
+    @editable_attributes.setter
+    def editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
+        """Initialize the editable attribute mapping with validation."""
+        if not isinstance(attributes, list):
+            raise TypeError("attributes must be a list of EditableAttribute")
+        mapping: dict[str, EditableAttribute] = {}
+        for attribute in attributes:
+            if not isinstance(attribute, EditableAttribute):
+                raise TypeError("All attributes must be EditableAttribute instances")
+            if not isinstance(attribute.name, str) or not attribute.name:
+                raise ValueError("EditableAttribute.name must be a non-empty string")
+            if attribute.name in mapping:
+                raise ValueError(f"Duplicate EditableAttribute name: {attribute.name}")
+            mapping[attribute.name] = attribute
+        self._editable_attributes = mapping
 
     @property
     def edited(self) -> bool:
@@ -119,12 +128,79 @@ class EditableMixin(ABC):
     def edited(self, value: bool) -> None:
         """Set the edited flag."""
         logger = get_logger()
-        logger.info("[%s] edited_flag_set value=%s", self.editable_name, value)
+        logger.info("[%s] edited_flag_set value=%s", type(self).__name__, value)
         self._edited = value
 
-    def get_editable_kwargs(self) -> dict:
-        """Build dict from editable fields for merging with kwargs."""
-        return {field.name: field.value for field in self.editable_fields}
+    def edit(self, name: str, value: Any) -> None:
+        """Edit an attribute by name (fail fast if missing)."""
+        if name not in self.editable_attributes:
+            raise KeyError(f"Unknown editable attribute: {name}")
+        self.editable_attributes[name].value = value
+        self.edited = True
+    
+    def get(self, name: str) -> Any:
+        """Get an attribute value by name (fail fast if missing)."""
+        if name not in self.editable_attributes:
+            raise KeyError(f"Unknown editable attribute: {name}")
+        return self.editable_attributes[name].value
+
+
+class Condition(EditableMixin, ABC):
+    """Editable condition interface for ActivateOnConditionEvent."""
+    
+    @abstractmethod
+    def check(self) -> bool:
+        """Return True when the condition is satisfied."""
+        ...
+
+
+class MessageBuilder(EditableMixin, ABC):
+    """Editable message builder interface for ActivateOnConditionEvent."""
+    
+    @abstractmethod
+    def build(self) -> Union[None, TelegramMessage, str, List[TelegramMessage]]:
+        """Build message content for enqueueing."""
+        ...
+
+
+class FunctionCondition(Condition):
+    """Condition wrapper for no-arg callables."""
+    
+    def __init__(
+        self,
+        func: Callable[[], Any],
+    ) -> None:
+        if not callable(func):
+            raise TypeError("func must be callable")
+        signature = inspect.signature(func)
+        if signature.parameters:
+            raise ValueError("FunctionCondition requires a no-arg callable")
+        self.editable_attributes = []
+        self._edited = False
+        self._func = func
+    
+    def check(self) -> bool:
+        return bool(self._func())
+
+
+class FunctionMessageBuilder(MessageBuilder):
+    """Message builder wrapper for no-arg callables."""
+    
+    def __init__(
+        self,
+        builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
+    ) -> None:
+        if not callable(builder):
+            raise TypeError("builder must be callable")
+        signature = inspect.signature(builder)
+        if signature.parameters:
+            raise ValueError("FunctionMessageBuilder requires a no-arg callable")
+        self.editable_attributes = []
+        self._edited = False
+        self._builder = builder
+    
+    def build(self) -> Union[None, TelegramMessage, str, List[TelegramMessage]]:
+        return self._builder()
 
 
 class Event:
@@ -150,45 +226,50 @@ class ActivateOnConditionEvent(Event, EditableMixin):
     def __init__(
         self,
         event_name: str,
-        condition_func: Callable[..., Any],
-        condition_args: tuple[Any, ...] = (),
-        condition_kwargs: Optional[dict[str, Any]] = None,
-        message_builder: Callable[..., Union[None, TelegramMessage, str, List[TelegramMessage]]] = None,
-        message_builder_args: tuple[Any, ...] = (),
-        message_builder_kwargs: Optional[dict[str, Any]] = None,
-        editable_fields: Optional[List[EditableField]] = None,
+        condition: Condition,
+        message_builder: MessageBuilder,
+        editable_attributes: Optional[List[EditableAttribute]] = None,
         poll_seconds: float = 5.0,
     ) -> None:
         super().__init__(event_name)
-        self.condition_func = condition_func
-        self.condition_args = condition_args
-        self.condition_kwargs = condition_kwargs or {}
+        if condition is None or not isinstance(condition, Condition):
+            raise TypeError("condition must be a Condition instance")
+        if message_builder is None or not isinstance(message_builder, MessageBuilder):
+            raise TypeError("message_builder must be a MessageBuilder instance")
+        self.condition = condition
         self.message_builder = message_builder
-        self.message_builder_args = message_builder_args
-        self._base_kwargs = message_builder_kwargs or {}
-        self._editable_fields = editable_fields or []
+        self.editable_attributes = editable_attributes or []
         self._edited = False  # Initialize instance-level edited flag
         self.poll_seconds = poll_seconds
 
-    @property
-    def editable_name(self) -> str:
-        """Human-readable name for display."""
-        return self.event_name
-
-    @property
-    def editable_fields(self) -> List[EditableField]:
-        """List of editable fields."""
-        return self._editable_fields
-
-    def _get_message_builder_kwargs(self) -> dict:
-        """Get kwargs by merging base kwargs with editable field values.
-        
-        Editable field values are passed to the message builder's __call__.
-        Builders using CallUpdatesInternalState will update their internal
-        state from these kwargs before execution.
-        """
-        editable_dict = self.get_editable_kwargs()
-        return {**self._base_kwargs, **editable_dict}
+    def edit(self, name: str, value: Any) -> None:
+        """Edit this event or its condition/builder using prefixes."""
+        if name.startswith("condition."):
+            self.condition.edit(name[len("condition."):], value)
+            self.edited = True
+            return
+        if name.startswith("builder."):
+            self.message_builder.edit(name[len("builder."):], value)
+            self.edited = True
+            return
+        if name in self.editable_attributes:
+            super().edit(name, value)
+            return
+        raise KeyError(
+            "Unknown editable attribute. Use 'condition.<name>' or 'builder.<name>'."
+        )
+    
+    def get(self, name: str) -> Any:
+        """Get an attribute value from event, condition, or builder."""
+        if name.startswith("condition."):
+            return self.condition.get(name[len("condition."):])
+        if name.startswith("builder."):
+            return self.message_builder.get(name[len("builder."):])
+        if name in self.editable_attributes:
+            return super().get(name)
+        raise KeyError(
+            "Unknown editable attribute. Use 'condition.<name>' or 'builder.<name>'."
+        )
 
     async def submit(
         self,
@@ -206,27 +287,15 @@ class ActivateOnConditionEvent(Event, EditableMixin):
                 self.edited = False
             
             condition_result = await asyncio.to_thread(
-                self.condition_func,
-                *self.condition_args,
-                **self.condition_kwargs,
+                self.condition.check,
             )
             if condition_result or was_edited:
-                if self.message_builder is None:
-                    logger.error("[%s] missing_message_builder", self.event_name)
+                message = await _maybe_await(self.message_builder.build)
+                if message:
+                    logger.info("event_message_queued event_name=%s", self.event_name)
+                    await _enqueue_message(queue, message)
                 else:
-                    # Use merged kwargs (base + editable values)
-                    merged_kwargs = self._get_message_builder_kwargs()
-                    logger.debug("[%s] building_message kwargs=%s", self.event_name, merged_kwargs)
-                    message = await _maybe_await(
-                        self.message_builder,
-                        *self.message_builder_args,
-                        **merged_kwargs,
-                    )
-                    if message:
-                        logger.info("event_message_queued event_name=%s", self.event_name)
-                        await _enqueue_message(queue, message)
-                    else:
-                        logger.warning("[%s] message_builder_returned_none", self.event_name)
+                    logger.warning("[%s] message_builder_returned_none", self.event_name)
             await _wait_or_stop(stop_event, self.poll_seconds)
         
         logger.info("[%s] event_stopped", self.event_name)

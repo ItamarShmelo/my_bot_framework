@@ -1,8 +1,8 @@
-"""Condition bot testing ActivateOnConditionEvent and EditableField.
+"""Condition bot testing ActivateOnConditionEvent and EditableAttribute.
 
 Tests:
 - ActivateOnConditionEvent with polling
-- EditableField for runtime parameter changes
+- EditableAttribute for runtime parameter changes
 - Condition function integration
 """
 
@@ -20,7 +20,9 @@ from my_bot_framework import (
     BotApplication,
     SimpleCommand,
     ActivateOnConditionEvent,
-    EditableField,
+    EditableAttribute,
+    Condition,
+    MessageBuilder,
 )
 
 
@@ -51,16 +53,35 @@ def get_sensor_value() -> int:
     return _sensor_value
 
 
-def check_threshold(threshold: int = 80) -> bool:
-    """Check if sensor value exceeds threshold."""
-    value = get_sensor_value()
-    return value > threshold
+class SensorCondition(Condition):
+    def __init__(self, threshold: int) -> None:
+        threshold_attr = EditableAttribute(
+            name="threshold",
+            field_type=int,
+            initial_value=threshold,
+            parse=int,
+            validator=lambda v: (0 <= v <= 100, "Threshold must be between 0 and 100"),
+        )
+        self.editable_attributes = [threshold_attr]
+        self._edited = False
+    
+    def check(self) -> bool:
+        """Check if sensor value exceeds threshold."""
+        value = get_sensor_value()
+        return value > self.get("threshold")
+    
 
-
-def build_alert_message(threshold: int = 80) -> str:
-    """Build alert message with current value."""
-    return f"⚠️ Alert! Sensor value ({_sensor_value}) exceeded threshold ({threshold})!"
-
+class SensorMessageBuilder(MessageBuilder):
+    def __init__(self, condition: SensorCondition) -> None:
+        self.editable_attributes = []
+        self._edited = False
+        self._condition = condition
+    
+    def build(self) -> str:
+        """Build alert message with current value."""
+        threshold = self._condition.get("threshold")
+        return f"⚠️ Alert! Sensor value ({_sensor_value}) exceeded threshold ({threshold})!"
+    
 
 def main():
     # Setup logging
@@ -79,23 +100,14 @@ def main():
         logger=logger,
     )
     
-    # Create editable threshold field
-    threshold_field = EditableField(
-        name="threshold",
-        field_type=int,
-        initial_value=80,
-        parse=int,
-        validator=lambda v: (0 <= v <= 100, "Threshold must be between 0 and 100"),
-    )
+    condition = SensorCondition(threshold=80)
+    builder = SensorMessageBuilder(condition)
     
-    # Register condition event with editable field
+    # Register condition event with editable attributes
     condition_event = ActivateOnConditionEvent(
         event_name="sensor_alert",
-        condition_func=check_threshold,
-        condition_kwargs={"threshold": threshold_field.value},
-        message_builder=build_alert_message,
-        message_builder_kwargs={"threshold": threshold_field.value},
-        editable_fields=[threshold_field],
+        condition=condition,
+        message_builder=builder,
         poll_seconds=10.0,  # Check every 10 seconds
     )
     app.register_event(condition_event)
@@ -111,7 +123,7 @@ def main():
     app.register_command(SimpleCommand(
         command="/threshold",
         description="Show current alert threshold",
-        message_builder=lambda: f"Current threshold: {threshold_field.value}",
+        message_builder=lambda: f"Current threshold: {condition_event.get('condition.threshold')}",
     ))
     
     # Register info command
@@ -122,8 +134,8 @@ def main():
             "<b>Condition Bot</b>\n\n"
             "Tests condition-based events:\n"
             "• ActivateOnConditionEvent with polling\n"
-            "• EditableField for runtime parameter changes\n"
-            "• Condition function with kwargs\n\n"
+            "• EditableAttribute for runtime parameter changes\n"
+            "• Condition/MessageBuilder interfaces\n\n"
             "Simulates a sensor that triggers alerts when exceeding threshold."
         ),
     ))
