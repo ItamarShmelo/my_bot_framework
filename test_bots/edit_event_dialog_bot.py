@@ -8,6 +8,7 @@ Tests:
 """
 
 import asyncio
+import html
 import logging
 import os
 import random
@@ -206,7 +207,10 @@ def main() -> None:
         
         if limit_min is not None and limit_max is not None:
             if limit_min >= limit_max:
-                return False, f"limit_min ({limit_min:.1f}) must be < limit_max ({limit_max:.1f})"
+                # Use html.escape() since error messages are displayed as HTML
+                return False, html.escape(
+                    f"limit_min ({limit_min:.1f}) must be < limit_max ({limit_max:.1f})"
+                )
         return True, ""
     
     # Create EditEventDialog with cross-field validation
@@ -268,7 +272,8 @@ def main() -> None:
             
             min_val = get_min_value()
             if min_val is not None and max_val <= min_val:
-                return False, f"Must be > limit_min ({min_val:.1f})"
+                # Use html.escape() since error messages are displayed as HTML
+                return False, html.escape(f"Must be > limit_min ({min_val:.1f})")
             return True, ""
         return validator
     

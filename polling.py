@@ -54,11 +54,12 @@ async def flush_pending_updates(bot: Bot) -> None:
 
 async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
     """Poll for updates and update the global next_update_id."""
-    updates = await bot.get_updates(
+    updates_tuple = await bot.get_updates(
         offset=get_next_update_id(),
         timeout=timeout,
         allowed_updates=["message", "callback_query"],
     )
+    updates = list(updates_tuple)
     if updates:
         set_next_update_id(max(updates, key=lambda u: u.update_id).update_id + 1)
         get_logger().debug("poll_updates_received count=%d", len(updates))
@@ -68,8 +69,10 @@ async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
 def get_chat_id_from_update(update: Update) -> Optional[int]:
     """Extract chat_id from update."""
     if update.callback_query and update.callback_query.message:
-        return update.callback_query.message.chat_id
-    if update.message:
+        message = update.callback_query.message
+        if message and hasattr(message, "chat_id"):
+            return message.chat_id
+    if update.message and hasattr(update.message, "chat_id"):
         return update.message.chat_id
     return None
 

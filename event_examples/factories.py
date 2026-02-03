@@ -8,7 +8,7 @@ For class-based approaches, see TimeEvent and ThresholdEvent in this package.
 
 import os
 import time
-from typing import Callable, List, Union
+from typing import Any, Callable, List, Union
 
 from ..event import (
     ActivateOnConditionEvent,
@@ -62,13 +62,13 @@ def create_threshold_event(
         def __init__(self) -> None:
             threshold_attr = EditableAttribute(
                 name="threshold",
-                field_type=(int, float),
+                field_type=(int, float),  # type: ignore[arg-type]
                 initial_value=threshold,
                 parse=float,
             )
             self.editable_attributes = [threshold_attr]
             self._edited = False
-            self._state = {
+            self._state: dict[str, Any] = {
                 "last_fire_time": None,
             }
         
@@ -157,7 +157,7 @@ def create_file_change_event(
             )
             self.editable_attributes = [file_path_attr]
             self._edited = False
-            self._state = {
+            self._state: dict[str, Any] = {
                 "last_mtime": None,
                 "last_path": file_path,  # Track path changes
             }

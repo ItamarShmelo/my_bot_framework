@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import List, Optional, Union
+from typing import Awaitable, Callable, List, Optional, Union
 
 from telegram import Bot
 

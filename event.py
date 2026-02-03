@@ -3,7 +3,7 @@
 import asyncio
 import inspect
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, List, Optional, Union
 
 from telegram import Update
 
@@ -265,20 +265,25 @@ class CommandsEvent(Event, UpdatePollerMixin):
     async def handle_callback_update(self, update: Update) -> None:
         """Handle stale callbacks with 'No active session'."""
         logger = get_logger()
-        logger.debug("stale_callback_received id=%s", update.callback_query.id)
+        callback_query = update.callback_query
+        if callback_query is None:
+            return
+        logger.debug("stale_callback_received id=%s", callback_query.id)
         
         await get_app().send_messages(TelegramCallbackAnswerMessage(
-            update.callback_query.id,
+            callback_query.id,
             text="No active session.",
         ))
         
-        if update.callback_query.message:
+        if callback_query.message:
             await get_app().send_messages(
-                TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
+                TelegramRemoveKeyboardMessage(callback_query.message.message_id)
             )
 
     async def handle_text_update(self, update: Update) -> None:
         """Handle '/' commands, ignore non-commands."""
+        if update.message is None or update.message.text is None:
+            return
         text = update.message.text.strip()
         
         if not text.startswith("/"):
@@ -333,7 +338,11 @@ async def _wait_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
         return
 
 
-async def _maybe_await(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+async def _maybe_await(
+    func: Union[Callable[..., Any], Callable[..., Coroutine[Any, Any, Any]]],
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
     """Allow both sync and async callables in the same pipeline."""
     result = func(*args, **kwargs)
     if asyncio.iscoroutine(result):
@@ -373,9 +382,11 @@ class SimpleCommand(Command):
         self,
         command: str,
         description: str,
-        message_builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
+        message_builder: Union[
+            Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
+            Callable[[], Coroutine[Any, Any, Union[None, TelegramMessage, str, List[TelegramMessage]]]],
+        ],
     ) -> None:
-        assert callable(message_builder), "message_builder must be callable"
         super().__init__(command, description)
         self.message_builder = message_builder
 

@@ -7,7 +7,7 @@ This document describes the internal architecture, design patterns, and code flo
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                       BotApplication                            │
-│  (Singleton - manages lifecycle, queue, events, commands)       │
+│  (Singleton - manages lifecycle, events, commands)              │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
@@ -16,17 +16,12 @@ This document describes the internal architecture, design patterns, and code flo
 │  └──────┬───────┘    └──────┬───────┘    └────────┬─────────┘   │
 │         │                   │                     │             │
 │         └───────────────────┼─────────────────────┘             │
-│                             ▼                                   │
-│                    ┌─────────────────┐                          │
-│                    │  Message Queue  │                          │
-│                    │(TelegramMessage)│                          │
-│                    └────────┬────────┘                          │
 │                             │                                   │
 │                             ▼                                   │
 │                    ┌────────────────┐                           │
-│                    │ Message Sender │                           │
-│                    │    Worker      │                           │
-│                    └────────┬───────┘                           │
+│                    │ send_messages() │                           │
+│                    │ (Direct Send)  │                           │
+│                    └────────┬────────┘                          │
 │                             │                                   │
 │                             ▼                                   │
 │                    ┌────────────────┐                           │
@@ -128,7 +123,9 @@ graph TD
 | `polling.py` | `accessors` |
 | `editable.py` | `accessors`, `telegram_utilities` |
 | `event.py` | `accessors`, `polling`, `telegram_utilities`, `editable` |
-| `event_factories.py` | `event`, `telegram_utilities` |
+| `event_examples/factories.py` | `event`, `telegram_utilities` |
+| `event_examples/time_event.py` | `event`, `telegram_utilities` |
+| `event_examples/threshold_event.py` | `event`, `telegram_utilities` |
 | `dialog.py` | `accessors`, `polling`, `telegram_utilities` |
 | `bot_application.py` | `accessors`, `polling`, `event`, `telegram_utilities` |
 | `__init__.py` | all modules (re-exports public API) |
@@ -190,25 +187,24 @@ def get_bot() -> Bot:
 
 The `BotApplication.initialize()` calls `_set_instance()` to register itself.
 
-### 2. Producer-Consumer Pattern - Message Queue
+### 2. Direct Message Sending
 
-Events produce `TelegramMessage` objects (with logging at call site), the sender worker consumes them:
+Events produce `TelegramMessage` objects and send them directly via `BotApplication.send_messages()`:
 
 ```
-Events (Producers)          Queue              Sender (Consumer)
-       │                      │                       │
-       ├──TelegramMessage────►│                       │
-       │                      │◄──────get()───────────┤
-       │                      │                       │
-       │                      │───────message────────►│
-       │                      │                       │
-       │                      │                       ├──►Telegram API
+Events (Producers)          BotApplication         Telegram API
+       │                         │                      │
+       ├──TelegramMessage────────►                      │
+       │                         │                      │
+       │                         ├──send_messages()─────┤
+       │                         │                      │
+       │                         │                      ├──►Sent
 ```
 
-The queue decouples message generation from sending, enabling:
-- Rate limiting (0.05s delay between sends)
-- Graceful shutdown (drain queue before exit)
-- Non-blocking event loops
+Messages are sent immediately when events fire. Each message type handles its own:
+- Chunking for long text messages (TelegramTextMessage)
+- Rate limiting (0.05s delay between chunks)
+- Error handling with graceful degradation
 
 ### 3. Template Method Pattern - Events
 
@@ -216,14 +212,17 @@ The `Event` base class defines the contract; subclasses implement `submit()`:
 
 ```python
 class Event:
-    async def submit(self, queue, stop_event) -> None:
+    async def submit(self, stop_event: asyncio.Event) -> None:
         raise NotImplementedError
 
 class ActivateOnConditionEvent(Event):
-    async def submit(self, queue, stop_event) -> None:
+    async def submit(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():
-            if self.condition_func():
-                await get_app().send_messages(self.message_builder.build())
+            condition_result = await asyncio.to_thread(self.condition.check)
+            if condition_result:
+                message = await _maybe_await(self.message_builder.build)
+                if message:
+                    await get_app().send_messages(message)
             await _wait_or_stop(stop_event, self.poll_seconds)
 
 # Time-based events use the TimeEvent subclass
@@ -323,12 +322,11 @@ await app.run()
 1. Register built-in commands (/terminate, /commands)
 2. Flush pending updates (ignore messages sent before startup)
 3. Create CommandsEvent with initial offset
-4. Start message sender worker task
-5. Start all event tasks concurrently
-6. Wait for stop_event to be set
-7. Drain message queue
-8. Cancel all tasks
-9. Return exit code
+4. Start all event tasks concurrently (each runs submit(stop_event))
+5. Wait for stop_event to be set
+6. Cancel all event tasks
+7. Wait for tasks to complete cancellation
+8. Return exit code (0)
 ```
 
 **Fresh Start:** The bot calls `flush_pending_updates()` on startup to clear any old messages. This ensures the bot only processes commands sent after it started.
@@ -364,16 +362,18 @@ while not stop_event.is_set():
 **CommandsEvent polling:**
 ```
 while not stop_event.is_set():
-    updates = await bot.get_updates(offset, timeout)
+    updates = await poll_updates(bot)
 
     for update in updates:
         if update.message.text.startswith("/"):
             command = match_command(text)
             if command:
+                # Set offset past this command before running
+                set_next_update_id(update.update_id + 1)
                 # Command takes over - blocks until complete
-                new_offset = await command.run(queue, offset)
+                await command.run()
             else:
-                send_help_message()
+                await get_app().send_messages(help_message)
 
     await _wait_or_stop(stop_event, poll_seconds)
 ```
@@ -417,7 +417,7 @@ async def run():
 ### 4. Message Sending Flow
 
 ```
-queue.get() ──► TelegramMessage
+send_messages() ──► TelegramMessage
                         │
                         ▼
                 message.send(bot, chat_id, logger)
@@ -426,10 +426,11 @@ queue.get() ──► TelegramMessage
               │  TelegramTextMessage  │
               │  - Chunk if > 4096    │
               │  - Send each chunk    │
+              │  - 0.05s delay between│
               └───────────────────────┘
 ```
 
-Note: Event logging (event_name) happens at the call site before enqueueing,
+Note: Event logging (event_name) happens at the call site before sending,
 not during message sending.
 
 ## Key Classes
@@ -441,7 +442,6 @@ not during message sending.
 | `bot` | `Bot` | Telegram Bot instance |
 | `chat_id` | `str` | Allowed chat ID |
 | `logger` | `Logger` | Application logger |
-| `queue` | `Queue[TelegramMessage]` | Outgoing message queue |
 | `stop_event` | `asyncio.Event` | Shutdown signal |
 | `events` | `List[Event]` | Registered events |
 | `commands` | `List[Command]` | Registered commands |
@@ -452,7 +452,7 @@ not during message sending.
 | `get_instance()` | Get the existing singleton |
 | `register_event(event)` | Register an event to run |
 | `register_command(command)` | Register a command handler |
-| `send_messages(messages)` | Enqueue message(s) (str, TelegramMessage, or list) |
+| `send_messages(messages)` | Send message(s) immediately (str, TelegramMessage, or list) |
 | `run()` | Start the bot (blocks until shutdown) |
 
 ### Event Types
@@ -477,6 +477,7 @@ Factory functions create pre-configured `ActivateOnConditionEvent` instances:
 
 | Factory | Creates | Use Case |
 |---------|---------|----------|
+| `create_threshold_event` | Threshold monitor | Value crosses threshold with cooldown |
 | `create_file_change_event` | File watcher | Config changes, log updates |
 
 These factories encapsulate common condition patterns with internal state management.
@@ -497,6 +498,8 @@ These factories encapsulate common condition patterns with internal state manage
 | `TelegramOptionsMessage` | Text + keyboard | Inline buttons |
 | `TelegramEditMessage` | Edit existing | Update text/keyboard |
 | `TelegramCallbackAnswerMessage` | Callback ACK | Toast notifications |
+
+**Note:** All message types use `parse_mode=HTML`. If text contains unescaped HTML special characters, an `InvalidHtmlError` is raised with instructions to use `html.escape()`.
 
 ## Editable Attributes System
 
@@ -601,9 +604,33 @@ async def send(self, bot, chat_id, title, logger):
     try:
         await bot.send_message(...)
     except Exception as exc:
+        if _is_html_parse_error(exc):
+            raise InvalidHtmlError(exc, self.message) from exc
         logger.error("telegram_send_failed error=%s", exc)
         await _try_send_error_message(bot, chat_id, title, logger, exc)
 ```
+
+### HTML Parse Errors
+
+All messages are sent with `parse_mode=HTML`. If the text contains invalid HTML (e.g., unescaped `<`, `>`, `&`), Telegram will reject the message. The framework catches these errors and raises an `InvalidHtmlError` to provide clear guidance:
+
+```python
+class InvalidHtmlError(Exception):
+    """Raised when message text contains invalid HTML that Telegram cannot parse."""
+    
+    def __init__(self, original_error: Exception, text: str) -> None:
+        # Message tells user to use html.escape()
+        super().__init__(
+            f"Message contains invalid HTML that Telegram cannot parse. "
+            f"Use html.escape() on your text before passing it to TelegramMessage. "
+            f"Original error: {original_error}. "
+            f"Text (truncated): {text[:100]!r}"
+        )
+        self.original_error = original_error
+        self.text = text
+```
+
+Detection is done via `_is_html_parse_error()` which checks for Telegram's `BadRequest` with "can't parse entities" in the message.
 
 ### Graceful Degradation
 
@@ -611,6 +638,7 @@ async def send(self, bot, chat_id, title, logger):
 async def _try_send_error_message(bot, chat_id, title, logger, exc):
     """Best-effort error notification without raising."""
     try:
+        # Sent without parse_mode to avoid HTML issues in error messages
         await bot.send_message(text=f"Error: {exc}")
     except Exception as error_exc:
         logger.error("error_message_also_failed error=%s", error_exc)
@@ -625,19 +653,13 @@ async def _try_send_error_message(bot, chat_id, title, logger, exc):
 2. Events notice stop_event   # _wait_or_stop returns early
        │
        ▼
-3. await queue.join()         # Wait for queue to drain
+3. Cancel event tasks         # task.cancel() for each
        │
        ▼
-4. Cancel event tasks         # task.cancel() for each
+4. await gather(..., return_exceptions=True)  # Wait for cleanup
        │
        ▼
-5. Cancel sender task         # sender_task.cancel()
-       │
-       ▼
-6. await gather(..., return_exceptions=True)  # Wait for cleanup
-       │
-       ▼
-7. Return exit code
+5. Return exit code (0)
 ```
 
 ## UpdatePollerMixin Pattern
@@ -798,13 +820,15 @@ dialog = EditEventDialog(event, validator=validate_range)
 
 The validator runs after each field edit. If it fails, the user must fix the value or cancel the field edit.
 
+**Note:** Validation error messages are displayed as HTML. If your error messages contain special characters like `<`, `>`, or `&`, use `html.escape()` to prevent parsing errors.
+
 ## Extension Points
 
 ### Custom Event
 
 ```python
 class CustomEvent(Event):
-    async def submit(self, queue, stop_event):
+    async def submit(self, stop_event: asyncio.Event) -> None:
         # Your custom event loop
         while not stop_event.is_set():
             # Your logic

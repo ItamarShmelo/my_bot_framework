@@ -56,6 +56,7 @@ from .telegram_utilities import (
     TelegramEditMessage,
     TelegramCallbackAnswerMessage,
     TelegramRemoveKeyboardMessage,
+    InvalidHtmlError,
 )
 from .dialog import (
     Dialog,
@@ -118,6 +119,7 @@ __all__ = [
     "TelegramEditMessage",
     "TelegramCallbackAnswerMessage",
     "TelegramRemoveKeyboardMessage",
+    "InvalidHtmlError",
     # Dialog
     "Dialog",
     "DialogState",

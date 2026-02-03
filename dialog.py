@@ -86,8 +86,11 @@ class DialogResponse:
     keyboard: Optional[InlineKeyboardMarkup] = None
     edit_message: bool = True
 
+    # Sentinel for "no message change needed" - dialog consumed input but no UI update
+    NO_CHANGE: "DialogResponse" = None  # type: ignore[assignment]
 
-# Sentinel for "no message change needed" - dialog consumed input but no UI update
+
+# Initialize the NO_CHANGE sentinel after class definition
 DialogResponse.NO_CHANGE = DialogResponse(text="", keyboard=None, edit_message=False)
 
 
@@ -249,16 +252,19 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
 
     async def handle_callback_update(self, update: Update) -> None:
         """Answer callback, remove keyboard, delegate to handle_callback()."""
+        callback_query = update.callback_query
+        if callback_query is None or callback_query.data is None:
+            return
         # Answer callback and remove keyboard
-        await get_app().send_messages(TelegramCallbackAnswerMessage(update.callback_query.id))
+        await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
         
-        if update.callback_query.message:
+        if callback_query.message:
             await get_app().send_messages(
-                TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
+                TelegramRemoveKeyboardMessage(callback_query.message.message_id)
             )
         
         # Delegate to dialog's handle_callback
-        response = self.handle_callback(update.callback_query.data)
+        response = self.handle_callback(callback_query.data)
         if response:
             await self._send_response(response)
 
@@ -367,7 +373,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             include_cancel: If True, add a Cancel button.
         """
         super().__init__()
-        self._prompt = None
+        self._prompt: Callable[[], str]
         self.prompt = prompt
         self.validator = validator
         self.include_cancel = include_cancel
@@ -392,21 +398,26 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
 
     async def handle_callback_update(self, update: Update) -> None:
         """Answer callback, remove keyboard, delegate to handle_callback()."""
+        callback_query = update.callback_query
+        if callback_query is None or callback_query.data is None:
+            return
         # Answer callback and remove keyboard
-        await get_app().send_messages(TelegramCallbackAnswerMessage(update.callback_query.id))
+        await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
         
-        if update.callback_query.message:
+        if callback_query.message:
             await get_app().send_messages(
-                TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
+                TelegramRemoveKeyboardMessage(callback_query.message.message_id)
             )
         
         # Delegate to dialog's handle_callback
-        response = self.handle_callback(update.callback_query.data)
+        response = self.handle_callback(callback_query.data)
         if response:
             await self._send_response(response)
 
     async def handle_text_update(self, update: Update) -> None:
         """Delegate to handle_text_input() and remove keyboard from previous prompt."""
+        if update.message is None or update.message.text is None:
+            return
         text = update.message.text.strip()
         response = self.handle_text_input(text)
         
@@ -546,16 +557,19 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
 
     async def handle_callback_update(self, update: Update) -> None:
         """Answer callback, remove keyboard, delegate to handle_callback()."""
+        callback_query = update.callback_query
+        if callback_query is None or callback_query.data is None:
+            return
         # Answer callback and remove keyboard
-        await get_app().send_messages(TelegramCallbackAnswerMessage(update.callback_query.id))
+        await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
         
-        if update.callback_query.message:
+        if callback_query.message:
             await get_app().send_messages(
-                TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
+                TelegramRemoveKeyboardMessage(callback_query.message.message_id)
             )
         
         # Delegate to dialog's handle_callback
-        response = self.handle_callback(update.callback_query.data)
+        response = self.handle_callback(callback_query.data)
         if response:
             await self._send_response(response)
 
@@ -849,16 +863,19 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
 
     async def handle_callback_update(self, update: Update) -> None:
         """Answer callback, remove keyboard, delegate to handle_callback()."""
+        callback_query = update.callback_query
+        if callback_query is None or callback_query.data is None:
+            return
         # Answer callback and remove keyboard
-        await get_app().send_messages(TelegramCallbackAnswerMessage(update.callback_query.id))
+        await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
         
-        if update.callback_query.message:
+        if callback_query.message:
             await get_app().send_messages(
-                TelegramRemoveKeyboardMessage(update.callback_query.message.message_id)
+                TelegramRemoveKeyboardMessage(callback_query.message.message_id)
             )
         
         # Delegate to dialog's handle_callback
-        response = self.handle_callback(update.callback_query.data)
+        response = self.handle_callback(callback_query.data)
         if response:
             await self._send_response(response)
 
@@ -908,6 +925,10 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
             return CANCELLED
         
         # Run selected branch - child's start() handles reset internally
+        if self._active_branch is None:
+            self._value = CANCELLED
+            self.state = DialogState.COMPLETE
+            return CANCELLED
         result = await self._active_branch.start(self.context)
         self._value = result
         self.state = DialogState.COMPLETE
@@ -1342,6 +1363,9 @@ class EditEventDialog(Dialog):
             return False
         
         # Parse and stage the value (validator already checked it's valid)
+        # UserInputDialog returns str, but mypy sees DialogResult which is Union
+        if not isinstance(result, str):
+            return False
         parsed_value = attr.parse(result)
         self.context[field_name] = parsed_value
         logger.info(
@@ -1381,6 +1405,8 @@ class EditEventDialog(Dialog):
                 return self.build_result()
             
             # Field selected - edit it
+            if not isinstance(result, str):
+                continue
             field_name = result
             if field_name not in self.event.editable_attributes:
                 continue

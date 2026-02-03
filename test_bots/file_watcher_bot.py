@@ -7,6 +7,7 @@ Tests:
 """
 
 import asyncio
+import html
 import logging
 import os
 import sys
@@ -110,7 +111,8 @@ def main():
                 contents = f.read()
             if len(contents) > 500:
                 contents = contents[:500] + "\n... (truncated)"
-            return f"<b>File contents:</b>\n<pre>{contents}</pre>"
+            # Escape file contents since they may contain HTML special characters
+            return f"<b>File contents:</b>\n<pre>{html.escape(contents)}</pre>"
         except OSError as e:
             return f"❌ Failed to read file: {e}"
     

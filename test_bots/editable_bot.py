@@ -13,6 +13,7 @@ import os
 import random
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -97,7 +98,7 @@ class AlertMessageBuilder(MessageBuilder):
         self._condition = condition
         self._alert_count = 0
     
-    def build(self) -> str:
+    def build(self) -> Optional[str]:
         """Build alert message with current value and level."""
         max_alerts = self.get("max_alerts")
         

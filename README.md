@@ -7,7 +7,7 @@ A modular, event-driven Telegram bot framework built on `python-telegram-bot`.
 - **Singleton Bot Application** - Centralized bot lifecycle management
 - **Event System** - Time-based and condition-based event triggers
 - **Command Handling** - Simple commands and interactive dialog commands
-- **Message Queue** - Async message sending with automatic chunking
+- **Direct Message Sending** - Async message sending with automatic chunking
 - **Interactive Dialogs** - Multi-step conversations with inline keyboards
 - **Editable Parameters** - Runtime-configurable event parameters
 
@@ -66,7 +66,7 @@ asyncio.run(app.run())
 
 The singleton entry point for the framework. Manages:
 - Bot instance and credentials
-- Message queue for outgoing messages
+- Direct message sending for outgoing messages
 - Event and command registration
 - Graceful shutdown via `/terminate`
 
@@ -84,7 +84,7 @@ logger = get_logger()
 
 #### Sending Messages
 
-Use `send_messages()` to enqueue one or more messages for sending:
+Use `send_messages()` to send one or more messages immediately:
 
 ```python
 # Send a simple text message
@@ -106,7 +106,7 @@ await app.send_messages([
 
 ### Events
 
-Events run continuously and enqueue messages based on triggers.
+Events run continuously and send messages based on triggers.
 
 #### ActivateOnConditionEvent
 
@@ -380,6 +380,33 @@ TelegramOptionsMessage("Choose an option:", keyboard_markup)
 # Edit existing message
 TelegramEditMessage(message_id=123, text="Updated text")
 ```
+
+#### HTML Escaping
+
+All messages are sent with `parse_mode=HTML`. If your text contains HTML special characters (`<`, `>`, `&`) that should be displayed literally (not parsed as HTML), you must escape them using `html.escape()`:
+
+```python
+import html
+from my_bot_framework import TelegramTextMessage, InvalidHtmlError
+
+# Text with HTML special characters - MUST escape
+user_input = "Use <script> tags for JavaScript"
+safe_text = html.escape(user_input)  # "Use &lt;script&gt; tags for JavaScript"
+message = TelegramTextMessage(safe_text)
+
+# If you forget to escape, InvalidHtmlError is raised
+try:
+    message = TelegramTextMessage("Invalid <unclosed tag")
+    await app.send_messages(message)
+except InvalidHtmlError as e:
+    print(f"HTML error: {e}")
+    # Fix: html.escape() your text
+```
+
+The `InvalidHtmlError` exception provides:
+- The original Telegram API error
+- The offending text (truncated for display)
+- Clear instructions to use `html.escape()`
 
 ## Built-in Commands
 

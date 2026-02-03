@@ -4,7 +4,7 @@ This is an example of extending ActivateOnConditionEvent for a common pattern.
 """
 
 import time
-from typing import Callable, List, Union
+from typing import Any, Callable, List, Union
 
 from ..event import (
     ActivateOnConditionEvent,
@@ -62,7 +62,7 @@ class TimeEvent(ActivateOnConditionEvent):
             def __init__(self) -> None:
                 interval_attr = EditableAttribute(
                     name="interval_hours",
-                    field_type=(int, float),
+                    field_type=(int, float),  # type: ignore[arg-type]
                     initial_value=interval_hours,
                     parse=float,
                     validator=lambda v: (
@@ -72,7 +72,7 @@ class TimeEvent(ActivateOnConditionEvent):
                 )
                 self.editable_attributes = [interval_attr]
                 self._edited = False
-                self._state = {
+                self._state: dict[str, Any] = {
                     "last_fire_time": None,
                     "first_check": True,
                 }

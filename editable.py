@@ -10,6 +10,9 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 from .accessors import get_logger
 
+# Type alias to avoid conflict with EditableAttribute.bool method
+_Bool = bool
+
 
 # =============================================================================
 # Helper functions for factory methods
@@ -79,7 +82,7 @@ class EditableAttribute:
     def __init__(
         self,
         name: str,
-        field_type: type,
+        field_type: Union[type, Tuple[type, ...]],
         initial_value: Any,
         parse: Callable[[str], Any],
         validator: Optional[Callable[[Any], Tuple[bool, str]]] = None,
@@ -223,7 +226,7 @@ class EditableAttribute:
         name: str,
         initial_value: Optional[bool],
         *,
-        optional: bool = False,
+        optional: bool = False,  # noqa: A002
     ) -> "EditableAttribute":
         """Create a boolean attribute.
         
@@ -263,7 +266,7 @@ class EditableAttribute:
         initial_value: Optional[str],
         *,
         choices: Optional[List[str]] = None,
-        optional: bool = False,
+        optional: _Bool = False,
     ) -> "EditableAttribute":
         """Create a string attribute with optional choices validation.
         
@@ -313,7 +316,7 @@ class EditableMixin(ABC):
     def editable_attributes(self) -> dict[str, "EditableAttribute"]:
         """Mapping of editable attributes."""
         if not hasattr(self, "_editable_attributes"):
-            self._editable_attributes = {}
+            self._editable_attributes: dict[str, "EditableAttribute"] = {}
         return self._editable_attributes
 
     @editable_attributes.setter
