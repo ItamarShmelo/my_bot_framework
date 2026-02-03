@@ -1,0 +1,56 @@
+---
+description: Enforce comprehensive logging for async code traceability
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Comprehensive Logging
+
+Async code flow is hard to trace. Logging is the primary debugging tool.
+
+## Requirements
+
+1. **Log every significant action** - entry, exit, state changes
+2. **Include context** - correlation IDs, object state, parameters
+3. **Log before AND after** async operations
+
+## Patterns
+
+```python
+# ❌ BAD - No visibility into what happened
+async def process_update(self, update: Update) -> None:
+    result = await self._handle_command(update.message.text)
+    await self._send_response(result)
+
+# ✅ GOOD - Full traceability
+async def process_update(self, update: Update) -> None:
+    self.logger.info("process_update: received update_id=%s text=%r", 
+                     update.update_id, update.message.text)
+    
+    result = await self._handle_command(update.message.text)
+    self.logger.debug("process_update: command result=%r", result)
+    
+    await self._send_response(result)
+    self.logger.info("process_update: completed update_id=%s", update.update_id)
+```
+
+## What to Log
+
+| Level | When |
+|-------|------|
+| `INFO` | Function entry/exit, state transitions, external calls |
+| `DEBUG` | Intermediate values, loop iterations, conditional branches |
+| `WARNING` | Recoverable issues, retries, fallbacks |
+| `ERROR` | Failures with full context (args, state, exception) |
+
+## Log Format
+
+Always include:
+- **Function/method name** as prefix
+- **Key parameters** that identify the operation
+- **State changes** (before → after)
+
+```python
+self.logger.info("check_condition: event=%s condition=%s result=%s",
+                 self.event_name, condition_name, result)
+```
