@@ -91,16 +91,23 @@ Use `send_messages()` to send one or more messages immediately:
 await app.send_messages("Hello, world!")
 
 # Or use TelegramMessage types for more control
-from my_bot_framework import TelegramTextMessage, TelegramImageMessage
+from my_bot_framework import TelegramTextMessage, TelegramImageMessage, TelegramDocumentMessage
 
 await app.send_messages(TelegramTextMessage("Formatted <b>message</b>"))
 await app.send_messages(TelegramImageMessage("path/to/image.png", caption="My image"))
+await app.send_messages(TelegramDocumentMessage("path/to/file.pdf", caption="My document"))
 
 # Send multiple messages at once
 await app.send_messages(["Hello", "World"])
 await app.send_messages([
     "Check out this image:",
     TelegramImageMessage("path/to/image.png", caption="My image"),
+])
+
+# Or send a document
+await app.send_messages([
+    "Here's the report:",
+    TelegramDocumentMessage("path/to/report.pdf", caption="Monthly report"),
 ])
 ```
 
@@ -364,6 +371,7 @@ The framework provides several message wrappers:
 from my_bot_framework import (
     TelegramTextMessage,
     TelegramImageMessage,
+    TelegramDocumentMessage,
     TelegramOptionsMessage,
     TelegramEditMessage,
 )
@@ -373,6 +381,9 @@ TelegramTextMessage("Hello, world!")
 
 # Image with caption
 TelegramImageMessage("/path/to/image.png", caption="My image")
+
+# Document/file with caption
+TelegramDocumentMessage("/path/to/document.pdf", caption="My document")
 
 # Message with inline keyboard
 TelegramOptionsMessage("Choose an option:", keyboard_markup)

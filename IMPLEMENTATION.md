@@ -495,6 +495,7 @@ These factories encapsulate common condition patterns with internal state manage
 |-------|---------|----------|
 | `TelegramTextMessage` | Plain text | Auto-chunking for long messages |
 | `TelegramImageMessage` | Image file | Caption support |
+| `TelegramDocumentMessage` | Document file | Caption support |
 | `TelegramOptionsMessage` | Text + keyboard | Inline buttons |
 | `TelegramEditMessage` | Edit existing | Update text/keyboard |
 | `TelegramCallbackAnswerMessage` | Callback ACK | Toast notifications |
@@ -879,7 +880,7 @@ class CustomDialog(Dialog, UpdatePollerMixin):
 ### Custom Message Type
 
 ```python
-class TelegramDocumentMessage(TelegramMessage):
-    async def send(self, bot, chat_id, title, logger):
-        await bot.send_document(chat_id=chat_id, document=self.file)
+class TelegramCustomMessage(TelegramMessage):
+    async def send(self, bot, chat_id, logger):
+        await bot.send_message(chat_id=chat_id, text=self.text)
 ```

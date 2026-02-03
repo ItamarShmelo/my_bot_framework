@@ -153,6 +153,54 @@ class TelegramImageMessage(TelegramMessage):
             await _try_send_error_message(bot, chat_id, logger, exc)
 
 
+class TelegramDocumentMessage(TelegramMessage):
+    """Document message for sending files with optional caption."""
+
+    file_path: str | Path
+    caption: str | None
+
+    def __init__(self, file_path: str | Path, caption: str | None = None) -> None:
+        """Create a document message payload with optional caption.
+
+        Args:
+            file_path: Path to the document file to send.
+            caption: Optional caption text for the document.
+        """
+        self.file_path = file_path
+        self.caption = caption
+
+    async def send(
+        self,
+        bot: Bot,
+        chat_id: str,
+        logger: logging.Logger,
+    ) -> None:
+        """Send a document file with optional caption.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID to send the document to.
+            logger: Logger for recording send status.
+        """
+        try:
+            document_path = Path(self.file_path)
+            logger.debug('document_send_start path="%s"', document_path)
+            with document_path.open("rb") as handle:
+                caption_text = self.caption or ""
+                await bot.send_document(
+                    chat_id=chat_id,
+                    document=handle,
+                    caption=caption_text if caption_text else None,
+                    parse_mode=ParseMode.HTML if caption_text else None,
+                )
+            logger.info('document_sent path="%s"', document_path)
+        except Exception as exc:
+            if _is_html_parse_error(exc):
+                raise InvalidHtmlError(exc, self.caption or "") from exc
+            logger.error("telegram_send_document_failed error=%s", exc)
+            await _try_send_error_message(bot, chat_id, logger, exc)
+
+
 class TelegramOptionsMessage(TelegramMessage):
     """Message with inline keyboard buttons."""
 

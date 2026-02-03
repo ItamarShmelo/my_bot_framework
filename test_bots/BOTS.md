@@ -299,6 +299,35 @@ python test_bots/edit_event_dialog_bot.py
 
 ---
 
+### document_bot.py
+
+**Purpose:** Tests the TelegramDocumentMessage class for sending files.
+
+**Features tested:**
+- `TelegramDocumentMessage` - Sending document files via Telegram
+- Caption support (plain text and HTML)
+- Path types (both `str` and `Path` objects)
+- Error handling for missing files
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/doc` | Send a document without caption |
+| `/doc_caption` | Send a document with plain caption |
+| `/doc_html` | Send a document with HTML-formatted caption |
+| `/doc_string` | Send document using string path |
+| `/doc_error` | Test error handling (missing file) |
+| `/info` | Shows what this bot tests |
+| `/commands` | Lists all commands (built-in) |
+| `/terminate` | Shuts down the bot (built-in) |
+
+**Run:**
+```bash
+python test_bots/document_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:
