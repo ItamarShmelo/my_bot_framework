@@ -15,6 +15,9 @@ from .utilities import divide_message_to_chunks
 # Delay between sending message chunks to avoid rate limiting
 MESSAGE_SEND_DELAY_SECONDS = 0.05
 
+# Reserved space for chunk prefix like "(99/99):\n" to avoid exceeding message limits
+CHUNK_PREFIX_OVERHEAD = 20
+
 
 class InvalidHtmlError(Exception):
     """Raised when message text contains invalid HTML that Telegram cannot parse.
@@ -79,7 +82,7 @@ class TelegramTextMessage(TelegramMessage):
     ) -> None:
         """Send a chunked text message."""
         try:
-            max_chunk_size: Final[int] = MessageLimit.MAX_TEXT_LENGTH
+            max_chunk_size: Final[int] = MessageLimit.MAX_TEXT_LENGTH - CHUNK_PREFIX_OVERHEAD
             chunks = divide_message_to_chunks(self.message, max_chunk_size)
 
             if not chunks:
