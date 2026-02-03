@@ -371,16 +371,16 @@ while not stop_event.is_set():
 
 **SimpleCommand execution:**
 ```
-async def run(update_offset):
+async def run():
     result = await _maybe_await(message_builder)  # No-arg callable
     if result:
         await get_app().send_messages(result)
-    return None, update_offset  # No updates consumed
+    return None  # No result
 ```
 
 **DialogCommand execution:**
 ```
-async def run(queue, update_offset):
+async def run():
     response = dialog.start()
     send_message_with_keyboard(response)
 
@@ -607,20 +607,23 @@ pattern using the Template Method:
 │                    UpdatePollerMixin                        │
 │              (Template Method Pattern)                      │
 ├─────────────────────────────────────────────────────────────┤
-│  poll(update_offset) -> (result, final_offset):             │
+│  poll() -> result:                                          │
 │      while not should_stop_polling():                       │
-│          updates = poll_updates(bot, chat_id, offset)       │
+│          updates = poll_updates(bot)                        │
 │          for update in updates:                             │
 │              if callback_query:                             │
 │                  handle_callback_update(update)             │
 │              elif text_message:                             │
 │                  handle_text_update(update)                 │
-│      return _get_poll_result(), offset                      │
+│      return _get_poll_result()                              │
 ├─────────────────────────────────────────────────────────────┤
 │  Abstract methods (subclasses implement):                   │
 │    • should_stop_polling() -> bool                          │
 │    • handle_callback_update(update) -> None                 │
 │    • handle_text_update(update) -> None                     │
+│                                                             │
+│  Update offset is managed globally via:                     │
+│    • get_next_update_id() / set_next_update_id()            │
 │                                                             │
 │  Uses singleton accessors: get_bot(), get_chat_id(),        │
 │  get_logger() for dependencies.                             │
@@ -640,7 +643,7 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                       Dialog (ABC)                          │
-│         start(context, offset) -> (DialogResult, int)       │
+│              start(context) -> DialogResult                 │
 ├─────────────────────────────────────────────────────────────┤
 │  Template method:                                           │
 │    start():                                                 │
@@ -714,9 +717,9 @@ class CustomEvent(Event):
 
 ```python
 class CustomCommand(Command):
-    async def run(self, queue, update_offset) -> int:
+    async def run(self) -> Any:
         # Your command logic
-        return update_offset
+        return None
 ```
 
 ### Custom Dialog
@@ -728,11 +731,11 @@ that handles its own polling, inherit from both `Dialog` and `UpdatePollerMixin`
 from my_bot_framework import Dialog, UpdatePollerMixin
 
 class CustomDialog(Dialog, UpdatePollerMixin):
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         # Send initial UI
         await self._send_response(response)
         # Poll until complete
-        return await self.poll(update_offset)
+        return await self.poll()
     
     def build_result(self) -> DialogResult:
         return self.value

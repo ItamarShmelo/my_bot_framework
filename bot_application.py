@@ -129,13 +129,12 @@ class BotApplication:
         ))
         
         # Flush pending updates to only process new messages
-        initial_offset = await flush_pending_updates(self.bot)
+        await flush_pending_updates(self.bot)
         
         # Create the commands event
         commands_event = CommandsEvent(
             event_name="commands",
             commands=self.commands,
-            initial_offset=initial_offset,
         )
         self.events.append(commands_event)
         

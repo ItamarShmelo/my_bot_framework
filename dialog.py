@@ -94,8 +94,8 @@ class Dialog(ABC):
     - context: Shared dict for cross-dialog communication
     
     Methods:
-    - start(context, update_offset): Async entry point, runs dialog until complete
-    - _run_dialog(update_offset): Abstract method subclasses implement
+    - start(context): Async entry point, runs dialog until complete
+    - _run_dialog(): Abstract method subclasses implement
     - build_result(): Build standardized DialogResult
     - handle_callback(data): Handle button press (used internally)
     - handle_text_input(text): Handle text input (used internally)
@@ -136,8 +136,7 @@ class Dialog(ABC):
     async def start(
         self,
         context: Optional[Dict[str, Any]] = None,
-        update_offset: int = 0,
-    ) -> Tuple[DialogResult, int]:
+    ) -> DialogResult:
         """Start and run the dialog until complete.
         
         Template method that:
@@ -147,17 +146,16 @@ class Dialog(ABC):
         
         Args:
             context: Optional shared context dict.
-            update_offset: Telegram update offset to continue from.
             
         Returns:
-            Tuple of (DialogResult, final_update_offset)
+            DialogResult
         """
         self.reset()
         self._context = context if context is not None else {}
-        return await self._run_dialog(update_offset)
+        return await self._run_dialog()
 
     @abstractmethod
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         """Run the dialog logic. Subclasses implement this."""
         ...
 
@@ -273,7 +271,7 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
         else:
             await get_app().send_messages(response.text)
 
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         """Send prompt with keyboard, then poll until selection made."""
         self.state = DialogState.ACTIVE
         self._text_reminder_sent = False  # Reset spam control
@@ -287,8 +285,7 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
         await self._send_response(response)
         
         # Poll until complete
-        result, final_offset = await self.poll(update_offset)
-        return result, final_offset
+        return await self.poll()
 
     def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
         """Handle button press - set value and complete."""
@@ -428,7 +425,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         else:
             await get_app().send_messages(response.text)
 
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         """Show prompt and poll until text input received."""
         self.state = DialogState.AWAITING_TEXT
         
@@ -445,8 +442,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         await self._send_response(response)
         
         # Poll until complete
-        result, final_offset = await self.poll(update_offset)
-        return result, final_offset
+        return await self.poll()
 
     def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
         """Handle cancel button."""
@@ -571,7 +567,7 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
         else:
             await get_app().send_messages(response.text)
 
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         """Show prompt with Yes/No buttons, then poll until selection made."""
         self.state = DialogState.ACTIVE
         self._text_reminder_sent = False  # Reset spam control
@@ -593,8 +589,7 @@ class ConfirmDialog(Dialog, UpdatePollerMixin):
         await self._send_response(response)
         
         # Poll until complete
-        result, final_offset = await self.poll(update_offset)
-        return result, final_offset
+        return await self.poll()
 
     def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
         """Handle Yes/No/Cancel button press."""
@@ -683,30 +678,29 @@ class SequenceDialog(Dialog):
         """Sequence returns dict of named child results."""
         return {name: d.build_result() for name, d in self._dialogs}
 
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         """Run each child's start() in sequence."""
         self.state = DialogState.ACTIVE
         self._current_index = 0
         
         if not self._dialogs:
             self.state = DialogState.COMPLETE
-            return {}, update_offset
+            return {}
         
-        current_offset = update_offset
         for name, dialog in self._dialogs:
             # Pass our context to child - child's start() handles reset internally
-            result, current_offset = await dialog.start(self.context, current_offset)
+            result = await dialog.start(self.context)
             self.context[name] = result
             self._current_index += 1
             
             if result is CANCELLED:
                 self._value = CANCELLED
                 self.state = DialogState.COMPLETE
-                return CANCELLED, current_offset
+                return CANCELLED
         
         self._value = self.values
         self.state = DialogState.COMPLETE
-        return self.build_result(), current_offset
+        return self.build_result()
 
     def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
         """Delegate to current child dialog (for backwards compatibility)."""
@@ -760,7 +754,7 @@ class BranchDialog(Dialog):
             return {self._active_key: self._active_branch.build_result()}
         return None
 
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         """Evaluate condition and run selected branch."""
         self.state = DialogState.ACTIVE
         
@@ -772,16 +766,16 @@ class BranchDialog(Dialog):
             logger.error("branch_key_not_found key=%s", branch_key)
             self._value = CANCELLED
             self.state = DialogState.COMPLETE
-            return CANCELLED, update_offset
+            return CANCELLED
         
         self._active_key = branch_key
         self._active_branch = self.branches[branch_key]
         
         # Child's start() handles reset and context internally
-        result, offset = await self._active_branch.start(self.context, update_offset)
+        result = await self._active_branch.start(self.context)
         self._value = result
         self.state = DialogState.COMPLETE
-        return self.build_result(), offset
+        return self.build_result()
 
     def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
         """Delegate to active branch (for backwards compatibility)."""
@@ -877,7 +871,7 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
         """Return the value after polling (for cancel detection)."""
         return self.value  # Don't use build_result() - only need raw value for cancel check
 
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         """Show choice, poll for selection, then run selected branch."""
         self.state = DialogState.ACTIVE
         self._choosing = True
@@ -892,17 +886,17 @@ class ChoiceBranchDialog(Dialog, UpdatePollerMixin):
         await self._send_response(response)
         
         # Poll until user selects a branch
-        poll_result, current_offset = await self.poll(update_offset)
+        poll_result = await self.poll()
         
         if poll_result is CANCELLED:
             self.state = DialogState.COMPLETE
-            return CANCELLED, current_offset
+            return CANCELLED
         
         # Run selected branch - child's start() handles reset internally
-        result, final_offset = await self._active_branch.start(self.context, current_offset)
+        result = await self._active_branch.start(self.context)
         self._value = result
         self.state = DialogState.COMPLETE
-        return self.build_result(), final_offset
+        return self.build_result()
 
     def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
         """Handle branch selection or delegate to active branch."""
@@ -1016,21 +1010,20 @@ class LoopDialog(Dialog):
             return True
         return False
 
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         """Run inner dialog repeatedly until exit condition."""
         self.state = DialogState.ACTIVE
         self._iterations = 0
         self._all_values = []
         
-        current_offset = update_offset
         while True:
             # Child's start() handles reset internally - no need to call reset() here
-            result, current_offset = await self.dialog.start(self.context, current_offset)
+            result = await self.dialog.start(self.context)
             
             if result is CANCELLED:
                 self._value = CANCELLED
                 self.state = DialogState.COMPLETE
-                return CANCELLED, current_offset
+                return CANCELLED
             
             self._all_values.append(result)
             self._iterations += 1
@@ -1038,7 +1031,7 @@ class LoopDialog(Dialog):
             if self._should_exit(result):
                 self._value = result
                 self.state = DialogState.COMPLETE
-                return self.build_result(), current_offset
+                return self.build_result()
 
     def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
         """Delegate to inner dialog (for backwards compatibility)."""
@@ -1083,10 +1076,10 @@ class DialogHandler(Dialog):
         """Handler returns inner dialog's result."""
         return self.dialog.build_result()
 
-    async def _run_dialog(self, update_offset: int = 0) -> Tuple[DialogResult, int]:
+    async def _run_dialog(self) -> DialogResult:
         """Run inner dialog and call on_complete handler."""
         # Child's start() handles reset and context internally
-        result, offset = await self.dialog.start(self.context, update_offset)
+        result = await self.dialog.start(self.context)
         
         # Always call on_complete, even if cancelled - let the callback decide how to handle it
         if self.on_complete:
@@ -1096,7 +1089,7 @@ class DialogHandler(Dialog):
         
         self._value = result
         self.state = DialogState.COMPLETE
-        return self.build_result(), offset
+        return self.build_result()
 
     def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
         """Delegate to inner dialog (for backwards compatibility)."""

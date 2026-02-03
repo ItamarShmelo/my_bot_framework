@@ -1,68 +1,68 @@
 """Telegram update polling utilities.
 
 This module provides:
+- get_next_update_id(): Get the next update ID to poll from
+- set_next_update_id(): Set the next update ID to poll from
+- flush_pending_updates(): Clear pending updates on startup
 - poll_updates(): Poll for Telegram updates
 - get_chat_id_from_update(): Extract chat_id from an update
-- flush_pending_updates(): Clear pending updates on startup
 - UpdatePollerMixin: Mixin class for update polling with Template Method Pattern
 """
 
-import logging
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from telegram import Bot, Update
 
 from .accessors import get_bot, get_chat_id, get_logger
 
 
-async def flush_pending_updates(bot: Bot) -> int:
-    """Flush all pending updates and return the next offset.
+# Module-level state for tracking Telegram update offset
+_next_update_id: int = 0
+
+
+def get_next_update_id() -> int:
+    """Get the next update ID to poll from."""
+    return _next_update_id
+
+
+def set_next_update_id(value: int) -> None:
+    """Set the next update ID to poll from."""
+    global _next_update_id
+    _next_update_id = value
+
+
+async def flush_pending_updates(bot: Bot) -> None:
+    """Flush all pending updates and set the next update ID.
     
-    Call this when the bot starts to ignore old messages and only
-    process messages sent after startup.
+    Call this when the bot starts to ignore old messages.
     
     Args:
         bot: The Telegram Bot instance.
-        
-    Returns:
-        The update offset to use for subsequent polling.
     """
     logger = get_logger()
-    
-    # Use offset=-1 to get the latest update and mark all as read
     updates = await bot.get_updates(offset=-1, timeout=0)
     
     if updates:
-        # Return offset after the latest update
-        new_offset = updates[-1].update_id + 1
-        logger.info("flush_pending_updates cleared=%d next_offset=%d", len(updates), new_offset)
-        return new_offset
-    
-    # No pending updates, start from 0
-    logger.info("flush_pending_updates no_pending_updates")
-    return 0
+        next_id = updates[-1].update_id + 1
+        set_next_update_id(next_id)
+        logger.info("flush_pending_updates cleared=%d next_id=%d", len(updates), next_id)
+    else:
+        set_next_update_id(0)
+        logger.info("flush_pending_updates no_pending_updates")
 
 
-async def poll_updates(
-    bot: Bot,
-    allowed_chat_id: str,
-    update_offset: int,
-    timeout: int = 5,
-) -> Tuple[List[Update], int]:
-    """Poll for updates and return (updates, new_offset)."""
+async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
+    """Poll for updates and update the global next_update_id."""
     updates = await bot.get_updates(
-        offset=update_offset,
+        offset=get_next_update_id(),
         timeout=timeout,
         allowed_updates=["message", "callback_query"],
     )
-    new_offset = update_offset
-    for update in updates:
-        new_offset = update.update_id + 1
     if updates:
-        logger = get_logger()
-        logger.debug("poll_updates_received count=%d", len(updates))
-    return updates, new_offset
+        set_next_update_id(max(updates, key=lambda u: u.update_id).update_id + 1)
+        get_logger().debug("poll_updates_received count=%d", len(updates))
+    return updates
 
 
 def get_chat_id_from_update(update: Update) -> Optional[int]:
@@ -100,17 +100,16 @@ class UpdatePollerMixin(ABC):
         """Handle a text message update."""
         ...
     
-    async def poll(self, update_offset: int = 0) -> Tuple[Any, int]:
+    async def poll(self) -> Any:
         """Template method: poll updates and route to handlers.
         
-        Returns (result, final_offset). Result meaning is subclass-specific.
+        Returns result (subclass-specific).
         """
         bot = get_bot()
         chat_id = get_chat_id()
         
-        current_offset = update_offset
         while not self.should_stop_polling():
-            updates, current_offset = await poll_updates(bot, chat_id, current_offset)
+            updates = await poll_updates(bot)
             
             for update in updates:
                 update_chat_id = get_chat_id_from_update(update)
@@ -122,7 +121,7 @@ class UpdatePollerMixin(ABC):
                 elif update.message and update.message.text:
                     await self.handle_text_update(update)
         
-        return self._get_poll_result(), current_offset
+        return self._get_poll_result()
     
     def _get_poll_result(self) -> Any:
         """Override to customize the result returned by poll()."""

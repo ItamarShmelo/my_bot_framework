@@ -43,6 +43,8 @@ from .polling import (
     flush_pending_updates,
     poll_updates,
     get_chat_id_from_update,
+    get_next_update_id,
+    set_next_update_id,
 )
 from .telegram_utilities import (
     TelegramMessage,
@@ -140,6 +142,8 @@ __all__ = [
     "flush_pending_updates",
     "poll_updates",
     "get_chat_id_from_update",
+    "get_next_update_id",
+    "set_next_update_id",
     # Event Factories
     "create_threshold_event",
     "create_file_change_event",

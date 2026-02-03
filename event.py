@@ -15,7 +15,7 @@ from .telegram_utilities import (
     TelegramRemoveKeyboardMessage,
 )
 from .accessors import get_app, get_logger
-from .polling import UpdatePollerMixin
+from .polling import UpdatePollerMixin, set_next_update_id
 
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogResponse
@@ -349,14 +349,11 @@ class CommandsEvent(Event, UpdatePollerMixin):
         event_name: str,
         commands: List["Command"],
         poll_seconds: float = 2.0,
-        initial_offset: Optional[int] = None,
     ) -> None:
         super().__init__(event_name)
         self.commands = commands
         self.poll_seconds = poll_seconds
-        self._update_offset: Optional[int] = initial_offset
         self._stop_event: Optional[asyncio.Event] = None
-        self._current_offset: int = 0
 
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:
@@ -388,10 +385,9 @@ class CommandsEvent(Event, UpdatePollerMixin):
         if command:
             logger = get_logger()
             logger.info("command_matched command=%s", command.command)
-            # Consume this update before running command, so it won't see the command as input
-            command_offset = update.update_id + 1
-            # Command takes over - run it and update offset
-            result, self._current_offset = await command.run(command_offset)
+            # Set offset past this command before running, so command won't see itself as input
+            set_next_update_id(update.update_id + 1)
+            await command.run()
         else:
             logger = get_logger()
             logger.info("unknown_command text=%s", text)
@@ -403,9 +399,7 @@ class CommandsEvent(Event, UpdatePollerMixin):
     async def submit(self, stop_event: asyncio.Event) -> None:
         """Event interface: delegates to poll()."""
         self._stop_event = stop_event
-        self._current_offset = self._update_offset or 0
-        
-        await self.poll(self._current_offset)
+        await self.poll()
 
     def _match_command(self, text: str) -> Optional["Command"]:
         """Match the first token against known commands."""
@@ -456,14 +450,11 @@ class Command(ABC):
         self.description = description
 
     @abstractmethod
-    async def run(self, update_offset: int = 0) -> Tuple[Any, int]:
+    async def run(self) -> Any:
         """Run the command until completion.
         
-        Args:
-            update_offset: Current Telegram update offset to continue from.
-            
         Returns:
-            Tuple of (result, final_update_offset). Result is command-specific.
+            Result (command-specific, or None).
         """
         ...
 
@@ -485,7 +476,7 @@ class SimpleCommand(Command):
         super().__init__(command, description)
         self.message_builder = message_builder
 
-    async def run(self, update_offset: int = 0) -> Tuple[Any, int]:
+    async def run(self) -> Any:
         """Execute message builder and send result, then complete."""
         logger = get_logger()
         logger.info("simple_command_executed command=%s", self.command)
@@ -493,7 +484,7 @@ class SimpleCommand(Command):
         if result:
             logger.info("command_message_sent command=%s", self.command)
             await get_app().send_messages(result)
-        return None, update_offset  # No result, no updates consumed
+        return None
 
 
 class DialogCommand(Command):
@@ -512,22 +503,19 @@ class DialogCommand(Command):
         super().__init__(command, description)
         self.dialog = dialog
 
-    async def run(self, update_offset: int = 0) -> Tuple[Any, int]:
+    async def run(self) -> Any:
         """Run the dialog until complete.
         
         The dialog handles its own polling via start().
         
-        Args:
-            update_offset: Current Telegram update offset to continue from.
-            
         Returns:
-            Tuple of (DialogResult, final_update_offset).
+            DialogResult.
         """
         logger = get_logger()
         logger.info("dialog_command_started command=%s", self.command)
         
         # start() handles reset internally - no need to call reset() explicitly
-        result, final_offset = await self.dialog.start({}, update_offset)
+        result = await self.dialog.start({})
         
         logger.info("dialog_command_completed command=%s result=%s", self.command, result)
-        return result, final_offset
+        return result
