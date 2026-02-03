@@ -13,8 +13,14 @@ A modular, event-driven Telegram bot framework built on `python-telegram-bot`.
 
 ## Installation
 
+This project uses [uv](https://docs.astral.sh/uv/) for package and virtual environment management.
+
 ```bash
-pip install python-telegram-bot
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Add the required dependency
+uv add python-telegram-bot
 ```
 
 ## Quick Start
