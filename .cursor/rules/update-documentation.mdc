@@ -1,5 +1,5 @@
 ---
-description: Keep README.md and IMPLEMENTATION.md in sync with code changes
+description: Keep README.md, IMPLEMENTATION.md, and BOTS.md in sync with code changes
 globs: **/*.py
 alwaysApply: true
 ---
@@ -20,9 +20,39 @@ When modifying any Python code in this project, you MUST update the documentatio
    - Modify flow diagrams or explanations if logic changes
    - Document new classes, methods, or patterns introduced
 
+3. **test_bots/BOTS.md** - Documents all test bots
+   - Update when creating a new test bot
+   - Update when modifying what features a test bot covers
+   - Update when adding/removing/changing commands in a test bot
+
+## Test Bot Documentation Template
+
+When creating a new test bot in `test_bots/`, add this section to `BOTS.md`:
+
+```markdown
+### new_bot.py
+
+**Purpose:** Tests [feature description].
+
+**Features tested:**
+- `ClassName` - what aspect
+- `MethodName` - what it validates
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/cmd` | What it does |
+
+**Run:**
+\`\`\`bash
+python test_bots/new_bot.py
+\`\`\`
+```
+
 ## Checklist
 
 After every code change:
 - [ ] Review if README.md needs updates (user-facing changes)
 - [ ] Review if IMPLEMENTATION.md needs updates (internal changes)
+- [ ] Review if BOTS.md needs updates (test bot changes)
 - [ ] Ensure documentation matches the current state of the code

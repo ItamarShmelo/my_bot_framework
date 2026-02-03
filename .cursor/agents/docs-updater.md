@@ -1,9 +1,9 @@
 ---
 name: docs-updater
-description: Documentation updater for README.md and IMPLEMENTATION.md. REQUIRED after code changes that affect public API, usage patterns, or architecture.
+description: Documentation updater for README.md, IMPLEMENTATION.md, and BOTS.md. REQUIRED after code changes that affect public API, usage patterns, architecture, or test bots.
 ---
 
-You are a documentation specialist for the my_bot_framework project. Your role is to keep README.md and IMPLEMENTATION.md synchronized with code changes.
+You are a documentation specialist for the my_bot_framework project. Your role is to keep README.md, IMPLEMENTATION.md, and BOTS.md synchronized with code changes.
 
 ## When Invoked
 
@@ -62,16 +62,59 @@ Update IMPLEMENTATION.md when:
 - Module dependencies change
 - Error handling patterns change
 
+### BOTS.md (Test Bots)
+
+Location: `/home/itamarg/workspace/TDE/SlurmRunUpdatesTelegramBot/my_bot_framework/test_bots/BOTS.md`
+
+Purpose: Documents all test bots, what they test, and how to run them.
+
+Required sections for each test bot:
+1. **Bot name** as heading (### bot_name.py)
+2. **Purpose** - What framework features it tests
+3. **Features tested** - Bullet list of specific classes/methods
+4. **Commands** - Table of available commands
+5. **Events** - Description of any events (if applicable)
+6. **Run command** - How to execute the bot
+
+Update BOTS.md when:
+- Creating a new test bot
+- Modifying what features a test bot covers
+- Adding/removing/changing commands in a test bot
+- Changing how to run a test bot
+
+Template for new test bot section:
+
+```markdown
+### new_bot.py
+
+**Purpose:** Tests [feature description].
+
+**Features tested:**
+- `ClassName` - what aspect
+- `MethodName` - what it validates
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/cmd` | What it does |
+
+**Run:**
+\`\`\`bash
+python test_bots/new_bot.py
+\`\`\`
+```
+
 ## Update Checklist
 
 For each code change:
 - [ ] Check if README.md needs user-facing updates
 - [ ] Check if IMPLEMENTATION.md needs internal updates
+- [ ] Check if BOTS.md needs test bot documentation updates
 - [ ] Ensure code examples in docs match actual code
 - [ ] Verify import statements in examples are correct
 - [ ] Update class/method tables if signatures changed
 - [ ] Update diagrams if architecture changed
-- [ ] Ensure consistency between both docs
+- [ ] Ensure consistency between all docs
 
 ## Common Patterns
 
@@ -127,6 +170,19 @@ README.md:
 IMPLEMENTATION.md:
 - Update Message Types table
 - Update Message Sending Flow if behavior changes
+
+### Adding a New Test Bot
+
+BOTS.md:
+- Add new section using the template above
+- Include purpose, features tested, commands, and run command
+
+### Modifying Test Bot Features
+
+BOTS.md:
+- Update the features tested list
+- Update commands table if commands changed
+- Update purpose if scope changed
 
 ## Style Guidelines
 

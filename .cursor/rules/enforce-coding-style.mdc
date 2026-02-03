@@ -1,0 +1,68 @@
+---
+description: Enforce consistent coding style across Python files
+globs: **/*.py
+alwaysApply: false
+---
+
+# Enforce Coding Style
+
+All Python code in this project MUST follow consistent coding standards.
+
+## Naming Conventions
+
+| Element | Convention | Example |
+|---------|------------|---------|
+| Classes | CamelCase | `BotApplication`, `TimeEvent` |
+| Methods | snake_case | `register_event`, `send_messages` |
+| Functions | snake_case | `get_credentials`, `format_message` |
+| Variables | snake_case | `event_tasks`, `is_valid` |
+| Constants | UPPER_SNAKE_CASE | `CANCELLED`, `DIALOG_DEBUG` |
+| Private | _prefix | `_instance`, `_value` |
+
+## Function Formatting
+
+**3+ parameters:** Multi-line with trailing comma
+
+```python
+def initialize(
+    cls,
+    token: str,
+    chat_id: str,
+    logger: logging.Logger,
+) -> "BotApplication":
+```
+
+**2 or fewer parameters:** Single line
+
+```python
+def register_event(self, event: "Event") -> None:
+```
+
+## Docstrings (Google Style)
+
+Every function and class MUST have a docstring:
+
+```python
+def function_name(param1: Type1, param2: Type2) -> ReturnType:
+    """Brief one-line description ending with period.
+    
+    Args:
+        param1: Description of param1.
+        param2: Description of param2.
+        
+    Returns:
+        Description of return value.
+    """
+```
+
+## Code Quality
+
+- No unused imports
+- No unused parameters (except in overridden methods)
+- All imports at top of file
+- No code duplication (3+ similar blocks → extract to helper)
+- No trailing whitespace
+
+## Subagent
+
+For comprehensive style enforcement, use the `code-style-enforcer` subagent.

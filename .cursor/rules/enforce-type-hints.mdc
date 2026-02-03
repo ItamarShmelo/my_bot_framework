@@ -1,0 +1,48 @@
+---
+description: Ensure all Python code has complete type hints
+globs: **/*.py
+alwaysApply: false
+---
+
+# Enforce Type Hints
+
+All Python code in this project MUST have complete type annotations.
+
+## Requirements
+
+1. **All function parameters** must have type hints
+2. **All return types** must be specified (use `-> None` for no return)
+3. **Class attributes** should have type hints where appropriate
+4. **Variables** with non-obvious types should be annotated
+
+## Common Patterns
+
+```python
+# Function with typed parameters and return
+def process_update(self, update: Update, context: Optional[Dict[str, Any]] = None) -> DialogResponse:
+    ...
+
+# Optional types
+def find_item(self, name: str, default: Optional[str] = None) -> Optional[str]:
+    ...
+
+# Collections with element types
+def process_items(self, items: List[Dict[str, Any]]) -> List[str]:
+    ...
+
+# Forward references (for circular imports or later-defined classes)
+def get_app() -> "BotApplication":
+    ...
+```
+
+## Verification
+
+Run mypy to verify type hints:
+
+```bash
+uv run mypy <file> --ignore-missing-imports
+```
+
+## Subagent
+
+For comprehensive type hint enforcement and mypy verification, use the `type-hints-enforcer` subagent.
