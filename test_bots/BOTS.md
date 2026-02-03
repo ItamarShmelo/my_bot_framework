@@ -4,12 +4,17 @@ This directory contains test bots that validate the functionality of the bot fra
 
 ## Setup
 
-All bots read credentials from environment variables:
+All bots read credentials from files in the `test_bots` directory:
+
+1. Create a `.token` file containing your Telegram bot token
+2. Create a `.chat_id` file containing your Telegram chat ID
 
 ```bash
-export TELEGRAM_BOT_TOKEN="your_bot_token"
-export TELEGRAM_CHAT_ID="your_chat_id"
+echo "your_bot_token" > test_bots/.token
+echo "your_chat_id" > test_bots/.chat_id
 ```
+
+**Note:** These files are gitignored to prevent accidental commits of credentials.
 
 ## Available Bots
 
@@ -299,6 +304,6 @@ python test_bots/edit_event_dialog_bot.py
 When adding a new test bot:
 
 1. Create a new `.py` file in this directory
-2. Use `get_credentials()` pattern for environment variables
+2. Use `get_credentials()` pattern for reading `.token` and `.chat_id` files
 3. Document what framework features it tests
 4. Update this file with the new bot's documentation

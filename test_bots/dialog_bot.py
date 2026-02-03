@@ -12,7 +12,6 @@ Tests ALL dialog types:
 
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -35,13 +34,22 @@ from my_bot_framework import (
 
 
 def get_credentials():
-    """Get bot credentials from environment variables."""
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    """Get bot credentials from .token and .chat_id files in test_bots directory."""
+    test_bots_dir = Path(__file__).resolve().parent
+    token_file = test_bots_dir / ".token"
+    chat_id_file = test_bots_dir / ".chat_id"
+    
+    if not token_file.exists() or not chat_id_file.exists():
+        raise RuntimeError(
+            "Missing credential files. Create .token and .chat_id files in test_bots directory."
+        )
+    
+    token = token_file.read_text().strip()
+    chat_id = chat_id_file.read_text().strip()
     
     if not token or not chat_id:
         raise RuntimeError(
-            "Missing environment variables. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"
+            "Empty credential files. Ensure .token and .chat_id contain valid values."
         )
     return token, chat_id
 
