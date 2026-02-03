@@ -157,7 +157,7 @@ python test_bots/dialog_handler_bot.py
 **Purpose:** Tests runtime-editable parameters via dialogs.
 
 **Features tested:**
-- `EditableAttribute` - Type parsing and validation
+- `EditableAttribute` factory methods (`int()`, `str()` with choices, `optional=True`)
 - `EditableMixin` - The `edited` flag for immediate re-check
 - `DialogCommand` with `DialogHandler` for editing
 - Condition/MessageBuilder edit routing
@@ -181,6 +181,7 @@ python test_bots/dialog_handler_bot.py
 |-------|------|-------|---------|
 | `threshold` | int | 0-100 | 80 |
 | `alert_level` | str | info/warning/critical | warning |
+| `max_alerts` | int (optional) | ≥1 or None | None (unlimited) |
 
 **Run:**
 ```bash

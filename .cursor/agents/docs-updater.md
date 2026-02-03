@@ -1,6 +1,6 @@
 ---
 name: docs-updater
-description: Documentation updater for README.md and IMPLEMENTATION.md. Use proactively after any code changes to ensure documentation stays in sync with the codebase.
+description: Documentation updater for README.md and IMPLEMENTATION.md. REQUIRED after code changes that affect public API, usage patterns, or architecture.
 ---
 
 You are a documentation specialist for the my_bot_framework project. Your role is to keep README.md and IMPLEMENTATION.md synchronized with code changes.

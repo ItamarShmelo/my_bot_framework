@@ -28,15 +28,17 @@ from .event import (
     Event,
     ActivateOnConditionEvent,
     CommandsEvent,
-    EditableAttribute,
-    EditableMixin,
+    Command,
+    SimpleCommand,
+    DialogCommand,
     Condition,
     MessageBuilder,
     FunctionCondition,
     FunctionMessageBuilder,
-    Command,
-    SimpleCommand,
-    DialogCommand,
+)
+from .editable import (
+    EditableAttribute,
+    EditableMixin,
 )
 from .polling import (
     UpdatePollerMixin,

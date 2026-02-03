@@ -73,6 +73,7 @@ graph TD
     end
 
     subgraph business [Business Logic]
+        EDITABLE[editable.py]
         EVENT[event.py]
         DIALOG[dialog.py]
     end
@@ -90,9 +91,13 @@ graph TD
     POLL --> ACC
 
     %% Business logic depends on core and polling
+    EDITABLE --> ACC
+    EDITABLE --> TU
+    
     EVENT --> ACC
     EVENT --> POLL
     EVENT --> TU
+    EVENT --> EDITABLE
 
     DIALOG --> ACC
     DIALOG --> POLL
@@ -106,6 +111,7 @@ graph TD
 
     INIT --> BOT
     INIT --> EVENT
+    INIT --> EDITABLE
     INIT --> DIALOG
     INIT --> POLL
     INIT --> TU
@@ -120,7 +126,8 @@ graph TD
 | `utilities.py` | *(no internal dependencies)* |
 | `telegram_utilities.py` | `utilities` |
 | `polling.py` | `accessors` |
-| `event.py` | `accessors`, `polling`, `telegram_utilities` |
+| `editable.py` | `accessors`, `telegram_utilities` |
+| `event.py` | `accessors`, `polling`, `telegram_utilities`, `editable` |
 | `event_factories.py` | `event`, `telegram_utilities` |
 | `dialog.py` | `accessors`, `polling`, `telegram_utilities` |
 | `bot_application.py` | `accessors`, `polling`, `event`, `telegram_utilities` |
@@ -492,7 +499,8 @@ These factories encapsulate common condition patterns with internal state manage
 ## Editable Attributes System
 
 The `EditableMixin` and `EditableAttribute` classes enable runtime parameter modification
-across explicit `Condition` and `MessageBuilder` collaborators:
+across explicit `Condition` and `MessageBuilder` collaborators. These classes are defined
+in the `editable.py` module.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -517,6 +525,39 @@ across explicit `Condition` and `MessageBuilder` collaborators:
 3. Edit is validated and applied immediately (fail-fast on errors)
 4. Event is marked `edited = True` for immediate re-check on the next poll
 5. `condition.check()` and `builder.build()` read their own attributes via `get()`
+
+### EditableAttribute Factory Methods
+
+The `EditableAttribute` class provides factory methods for creating common types with
+built-in validation:
+
+- **`float(name, initial_value, *, positive=False, min_val=None, max_val=None, optional=False)`** - Float with optional constraints. Set `optional=True` to allow None values.
+- **`int(name, initial_value, *, positive=False, min_val=None, max_val=None, optional=False)`** - Integer with optional constraints. Set `optional=True` to allow None values.
+- **`bool(name, initial_value, *, optional=False)`** - Boolean (parses common boolean strings). Set `optional=True` to allow None values.
+- **`str(name, initial_value, *, choices=None, optional=False)`** - String with optional choices validation. Set `optional=True` to allow None values.
+
+These factory methods simplify attribute creation:
+
+```python
+# Before (verbose)
+EditableAttribute(
+    name="threshold", field_type=int, initial_value=90,
+    parse=int, validator=lambda v: (v >= 0 and v <= 100, "Must be 0-100")
+)
+
+# After (concise factory methods)
+EditableAttribute.int("threshold", 90, min_val=0, max_val=100)
+```
+
+### Module Structure
+
+The `editable.py` module contains:
+- **`EditableAttribute`** - Core class for typed, validated, editable values with factory methods
+- **`EditableMixin`** - Mixin for objects with editable attributes
+- **`Condition`** - Abstract interface for editable conditions
+- **`MessageBuilder`** - Abstract interface for editable message builders
+- **`FunctionCondition`** - Wrapper for no-arg callables as conditions
+- **`FunctionMessageBuilder`** - Wrapper for no-arg callables as message builders
 
 ## Async Patterns
 

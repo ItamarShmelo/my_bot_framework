@@ -122,12 +122,8 @@ from my_bot_framework import (
 
 class DiskFullCondition(Condition):
     def __init__(self) -> None:
-        threshold_attr = EditableAttribute(
-            name="threshold",
-            field_type=int,
-            initial_value=90,
-            parse=int,
-        )
+        # Use factory method for cleaner syntax
+        threshold_attr = EditableAttribute.int("threshold", 90, min_val=0, max_val=100)
         self.editable_attributes = [threshold_attr]
         self._edited = False
     
@@ -377,11 +373,47 @@ def image_builder():
 
 ## Editable Attributes
 
-Runtime-editable parameters with validation:
+Runtime-editable parameters with validation. The `EditableAttribute` class provides factory methods for common types, making it easy to create validated attributes:
 
 ```python
 from my_bot_framework import EditableAttribute
 
+# Factory methods for common types (recommended)
+threshold = EditableAttribute.int("threshold", 90, min_val=0, max_val=100)
+rate = EditableAttribute.float("rate", 1.0, positive=True)
+enabled = EditableAttribute.bool("enabled", True)
+mode = EditableAttribute.str("mode", "auto", choices=["auto", "manual"])
+
+# Optional types (allow None)
+limit = EditableAttribute.float("limit", None, optional=True, positive=True)
+max_count = EditableAttribute.int("max_count", None, optional=True, min_val=1)
+prefix = EditableAttribute.str("prefix", None, optional=True, choices=["A", "B", "C"])
+
+# Update via string input (parsed and validated)
+threshold.value = "95"  # Parsed as int, validated against min/max
+rate.value = "2.5"      # Parsed as float, validated as positive
+enabled.value = "yes"   # Parses common boolean strings (true/false, yes/no, 1/0, on/off)
+
+# Or set directly (still validated)
+threshold.value = 80
+rate.value = 3.0
+enabled.value = False
+```
+
+### Factory Methods
+
+The `EditableAttribute` class provides convenient factory methods:
+
+- **`EditableAttribute.float(name, initial_value, *, positive=False, min_val=None, max_val=None, optional=False)`** - Float with optional constraints. Set `optional=True` to allow None values.
+- **`EditableAttribute.int(name, initial_value, *, positive=False, min_val=None, max_val=None, optional=False)`** - Integer with optional constraints. Set `optional=True` to allow None values.
+- **`EditableAttribute.bool(name, initial_value, *, optional=False)`** - Boolean (parses true/false, yes/no, 1/0, on/off). Set `optional=True` to allow None values.
+- **`EditableAttribute.str(name, initial_value, *, choices=None, optional=False)`** - String with optional choices validation. Set `optional=True` to allow None values.
+
+### Advanced Usage
+
+For custom validation or parsing, use the full constructor:
+
+```python
 field = EditableAttribute(
     name="threshold",
     field_type=int,
@@ -389,12 +421,6 @@ field = EditableAttribute(
     parse=int,  # String parser
     validator=lambda v: (v > 0, "Must be positive"),
 )
-
-# Update via string input
-field.value = "150"  # Parsed and validated
-
-# Or set directly
-field.value = 200
 ```
 
 ## Utilities

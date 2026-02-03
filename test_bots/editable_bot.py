@@ -63,12 +63,11 @@ def get_sensor_value() -> int:
 
 class SensorCondition(Condition):
     def __init__(self, threshold: int) -> None:
-        threshold_attr = EditableAttribute(
-            name="threshold",
-            field_type=int,
-            initial_value=threshold,
-            parse=int,
-            validator=lambda v: (0 <= v <= 100, "Threshold must be between 0 and 100"),
+        threshold_attr = EditableAttribute.int(
+            "threshold",
+            threshold,
+            min_val=0,
+            max_val=100,
         )
         self.editable_attributes = [threshold_attr]
         self._edited = False
@@ -81,28 +80,41 @@ class SensorCondition(Condition):
 
 class AlertMessageBuilder(MessageBuilder):
     def __init__(self, condition: SensorCondition, alert_level: str) -> None:
-        alert_level_attr = EditableAttribute(
-            name="alert_level",
-            field_type=str,
-            initial_value=alert_level,
-            parse=str,
-            validator=lambda v: (
-                v in ("info", "warning", "critical"),
-                "Level must be: info, warning, or critical"
-            ),
+        alert_level_attr = EditableAttribute.str(
+            "alert_level",
+            alert_level,
+            choices=["info", "warning", "critical"],
         )
-        self.editable_attributes = [alert_level_attr]
+        # Optional int: None means unlimited, otherwise max number of alerts
+        max_alerts_attr = EditableAttribute.int(
+            "max_alerts",
+            None,  # None = unlimited
+            optional=True,
+            min_val=1,
+        )
+        self.editable_attributes = [alert_level_attr, max_alerts_attr]
         self._edited = False
         self._condition = condition
+        self._alert_count = 0
     
     def build(self) -> str:
         """Build alert message with current value and level."""
+        max_alerts = self.get("max_alerts")
+        
+        # Check if we've hit the limit (if set)
+        if max_alerts is not None and self._alert_count >= max_alerts:
+            return None  # Suppress alert
+        
+        self._alert_count += 1
+        
         alert_level = self.get("alert_level")
         threshold = self._condition.get("threshold")
         icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
         icon = icons.get(alert_level, "⚠️")
+        
+        limit_text = f" ({self._alert_count}/{max_alerts})" if max_alerts else ""
         return (
-            f"{icon} <b>{alert_level.upper()}</b>\n\n"
+            f"{icon} <b>{alert_level.upper()}</b>{limit_text}\n\n"
             f"Sensor value: <code>{_sensor_value}</code>\n"
             f"Threshold: <code>{threshold}</code>"
         )
@@ -145,14 +157,20 @@ def main():
         message_builder=lambda: f"Current sensor value: <code>{_sensor_value}</code>",
     ))
     
+    def get_settings_text():
+        max_alerts = sensor_event.get("builder.max_alerts")
+        max_alerts_text = "unlimited" if max_alerts is None else str(max_alerts)
+        return (
+            "<b>Current Settings</b>\n\n"
+            f"Threshold: <code>{sensor_event.get('condition.threshold')}</code>\n"
+            f"Alert Level: <code>{sensor_event.get('builder.alert_level')}</code>\n"
+            f"Max Alerts: <code>{max_alerts_text}</code>"
+        )
+    
     app.register_command(SimpleCommand(
         command="/settings",
         description="Show current settings",
-        message_builder=lambda: (
-            "<b>Current Settings</b>\n\n"
-            f"Threshold: <code>{sensor_event.get('condition.threshold')}</code>\n"
-            f"Alert Level: <code>{sensor_event.get('builder.alert_level')}</code>"
-        ),
+        message_builder=get_settings_text,
     ))
     
     # --- Dialog command to edit threshold ---
@@ -290,7 +308,7 @@ def main():
     info_text = (
         "<b>Editable Bot</b>\n\n"
         "Tests runtime-editable parameters:\n"
-        "• <code>EditableAttribute</code> - Type parsing and validation\n"
+        "• <code>EditableAttribute</code> factory methods (int, str, optional=True)\n"
         "• <code>EditableMixin</code> - Edited flag for immediate re-check\n"
         "• Dialog-based editing of event parameters\n\n"
         "<b>Commands:</b>\n"

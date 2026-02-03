@@ -2,11 +2,10 @@
 
 import asyncio
 import inspect
-import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Union
 
-from telegram import Bot, Update
+from telegram import Update
 
 from .telegram_utilities import (
     TelegramMessage,
@@ -16,130 +15,12 @@ from .telegram_utilities import (
 )
 from .accessors import get_app, get_logger
 from .polling import UpdatePollerMixin, set_next_update_id
+from .editable import EditableAttribute, EditableMixin
 
 if TYPE_CHECKING:
     from .dialog import Dialog, DialogResponse
 
 MINIMAL_TIME_BETWEEN_MESSAGES = 5.0 / 60.0
-
-
-class EditableAttribute:
-    """A runtime-editable attribute with parsing and validation.
-    
-    - `parse`: User-provided callable that receives string, returns typed value
-    - `value` property: getter returns typed value, setter parses strings and validates
-    - `validator`: Optional function that receives typed value, returns (is_valid, error_msg)
-    """
-
-    def __init__(
-        self,
-        name: str,
-        field_type: type,
-        initial_value: Any,
-        parse: Callable[[str], Any],
-        validator: Optional[Callable[[Any], Tuple[bool, str]]] = None,
-    ) -> None:
-        self.name = name
-        self.field_type = field_type
-        self._value = initial_value
-        self.parse = parse
-        self.validator = validator
-
-    def validate(self, value: Any) -> Tuple[bool, str]:
-        """Validate a typed value. Returns (is_valid, error_message)."""
-        # Type check - field_type can be a single type or tuple of types
-        if not isinstance(value, self.field_type):
-            if isinstance(self.field_type, tuple):
-                type_names = " or ".join(t.__name__ for t in self.field_type)
-            else:
-                type_names = self.field_type.__name__
-            return False, f"Expected {type_names}, got {type(value).__name__}"
-
-        # Custom validator
-        if self.validator:
-            return self.validator(value)
-
-        return True, ""
-
-    @property
-    def value(self) -> Any:
-        """Get the current value."""
-        return self._value
-
-    @value.setter
-    def value(self, new_value: Any) -> None:
-        """Set value - parses if string, then validates. Raises ValueError if invalid."""
-        # If string, parse first
-        if isinstance(new_value, str):
-            new_value = self.parse(new_value)
-
-        # Validate the (parsed) value
-        is_valid, error = self.validate(new_value)
-        if not is_valid:
-            raise ValueError(error)
-        self._value = new_value
-
-
-class EditableMixin(ABC):
-    """Mixin for objects with runtime-editable attributes.
-    
-    The `edited` property allows signaling that parameters have changed,
-    triggering immediate re-processing in events that support it.
-    """
-    
-    _edited: bool = False
-
-    @property
-    def editable_attributes(self) -> dict[str, "EditableAttribute"]:
-        """Mapping of editable attributes."""
-        if not hasattr(self, "_editable_attributes"):
-            self._editable_attributes = {}
-        return self._editable_attributes
-
-    @editable_attributes.setter
-    def editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
-        """Initialize the editable attribute mapping with validation."""
-        self._init_editable_attributes(attributes)
-
-    def _init_editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
-        """Validate and store editable attributes."""
-        if not isinstance(attributes, list):
-            raise TypeError("attributes must be a list of EditableAttribute")
-        mapping: dict[str, EditableAttribute] = {}
-        for attribute in attributes:
-            if not isinstance(attribute, EditableAttribute):
-                raise TypeError("All attributes must be EditableAttribute instances")
-            if not isinstance(attribute.name, str) or not attribute.name:
-                raise ValueError("EditableAttribute.name must be a non-empty string")
-            if attribute.name in mapping:
-                raise ValueError(f"Duplicate EditableAttribute name: {attribute.name}")
-            mapping[attribute.name] = attribute
-        self._editable_attributes = mapping
-
-    @property
-    def edited(self) -> bool:
-        """Check if the object has been marked as edited."""
-        return self._edited
-
-    @edited.setter
-    def edited(self, value: bool) -> None:
-        """Set the edited flag."""
-        logger = get_logger()
-        logger.info("[%s] edited_flag_set value=%s", type(self).__name__, value)
-        self._edited = value
-
-    def edit(self, name: str, value: Any) -> None:
-        """Edit an attribute by name (fail fast if missing)."""
-        if name not in self.editable_attributes:
-            raise KeyError(f"Unknown editable attribute: {name}")
-        self.editable_attributes[name].value = value
-        self.edited = True
-    
-    def get(self, name: str) -> Any:
-        """Get an attribute value by name (fail fast if missing)."""
-        if name not in self.editable_attributes:
-            raise KeyError(f"Unknown editable attribute: {name}")
-        return self.editable_attributes[name].value
 
 
 class Condition(EditableMixin, ABC):
@@ -167,6 +48,16 @@ class FunctionCondition(Condition):
         self,
         func: Callable[[], Any],
     ) -> None:
+        """Initialize a function-based condition.
+        
+        Args:
+            func: No-argument callable that returns a truthy/falsy value.
+                The result is converted to bool via bool(func()).
+        
+        Raises:
+            TypeError: If func is not callable.
+            ValueError: If func has any parameters.
+        """
         if not callable(func):
             raise TypeError("func must be callable")
         signature = inspect.signature(func)
@@ -177,6 +68,7 @@ class FunctionCondition(Condition):
         self._func = func
     
     def check(self) -> bool:
+        """Check if the condition is satisfied."""
         return bool(self._func())
 
 
@@ -187,6 +79,16 @@ class FunctionMessageBuilder(MessageBuilder):
         self,
         builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
     ) -> None:
+        """Initialize a function-based message builder.
+        
+        Args:
+            builder: No-argument callable that returns a message or None.
+                Can return str, TelegramMessage, List[TelegramMessage], or None.
+        
+        Raises:
+            TypeError: If builder is not callable.
+            ValueError: If builder has any parameters.
+        """
         if not callable(builder):
             raise TypeError("builder must be callable")
         signature = inspect.signature(builder)
@@ -197,6 +99,7 @@ class FunctionMessageBuilder(MessageBuilder):
         self._builder = builder
     
     def build(self) -> Union[None, TelegramMessage, str, List[TelegramMessage]]:
+        """Build the message content."""
         return self._builder()
 
 

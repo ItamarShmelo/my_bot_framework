@@ -1,0 +1,33 @@
+# Run Code Style Enforcer After Code Changes
+
+When modifying Python code in this project, you MUST run the code-style-enforcer agent.
+
+## Triggers
+
+Run code-style-enforcer when:
+- Creating new Python files
+- Modifying existing Python files (classes, methods, functions)
+- Adding or changing type hints
+- Adding or changing docstrings
+
+## Files Requiring Style Enforcement
+
+| Modified File Type | Action |
+|--------------------|--------|
+| `*.py` in framework root | Run code-style-enforcer |
+| `*.py` in `event_examples/` | Run code-style-enforcer |
+| `*.py` in `test_bots/` | Run code-style-enforcer |
+
+## When to Skip
+
+You may skip code-style-enforcer for:
+- Documentation-only changes (README.md, IMPLEMENTATION.md, BOTS.md)
+- Configuration file changes
+- Rule/agent definition changes (.cursor/rules/, .cursor/agents/)
+
+## Checklist
+
+After Python code changes:
+- [ ] Run code-style-enforcer agent on modified files
+- [ ] Verify all style violations are fixed
+- [ ] Confirm mypy passes (if type hints were modified)

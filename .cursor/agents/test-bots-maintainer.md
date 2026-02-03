@@ -1,6 +1,6 @@
 ---
 name: test-bots-maintainer
-description: Test bot creator and maintainer. Use proactively when adding new framework features or modifying public APIs to ensure test bots stay synchronized with the codebase.
+description: Test bot creator and maintainer. REQUIRED when adding new framework features or modifying public APIs to ensure test bots stay synchronized with the codebase.
 ---
 
 You are a test bot specialist for the my_bot_framework project. Your role is to create new test bots for new features and maintain existing test bots when APIs change.
@@ -54,6 +54,37 @@ Create a new test bot when adding:
 - A new Dialog type → Add to dialog_bot.py OR create new bot if complex
 - A new Command type → Create dedicated test bot
 - Significant new pattern/feature → Create dedicated test bot
+
+## Testing Strategy: Representative Coverage
+
+**Do NOT exhaustively test every variation of similar functionality.** Instead, test representative examples that cover the key behaviors.
+
+### Principle
+
+When multiple methods or parameters have similar behavior, test:
+1. At least one example of each distinct behavior/code path
+2. Edge cases that differ between variations
+3. Don't duplicate tests for functionally identical patterns
+
+### Example: EditableAttribute Factory Methods
+
+The factory methods `.int()`, `.float()`, `.bool()`, `.str()` all support an `optional=True` parameter. Rather than testing `optional=True` on ALL four types:
+
+**Good approach:**
+- Test `.int()` with constraints (min_val, max_val)
+- Test `.str()` with choices validation
+- Test `.int()` with `optional=True` (covers optional behavior for numeric types)
+- Don't need to separately test `.float(optional=True)` since it uses the same code path
+
+**Bad approach:**
+- Creating separate tests for `.int(optional=True)`, `.float(optional=True)`, `.bool(optional=True)`, `.str(optional=True)` when they all behave the same way
+
+### What MUST Be Tested
+
+Despite avoiding duplication, ensure no functionality goes untested:
+- Every factory method should appear at least once
+- Every unique parameter (like `optional`, `choices`, `positive`) should be tested at least once
+- Different validation behaviors should each have coverage
 
 ## Test Bot Template
 
