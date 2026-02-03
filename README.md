@@ -254,6 +254,7 @@ The framework provides built-in dialog types for common interactions:
 - `ChoiceDialog` - User selects from keyboard options
 - `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input)
 - `ConfirmDialog` - Yes/No prompt
+- `EditEventDialog` - Edit an event's editable attributes via inline keyboard
 
 **Composite Dialogs** (multi-step):
 - `SequenceDialog` - Run dialogs in order
@@ -299,6 +300,40 @@ handled_dialog = DialogHandler(survey_dialog, on_complete=on_complete)
 # Register as command
 app.register_command(DialogCommand("/survey", "Take survey", handled_dialog))
 ```
+
+#### EditEventDialog
+
+Edit any event's editable attributes via an inline keyboard interface:
+
+```python
+from my_bot_framework import EditEventDialog, DialogCommand
+
+# Create an event with editable attributes
+event = ActivateOnConditionEvent(
+    event_name="my_event",
+    condition=my_condition,  # Has editable attributes
+    message_builder=my_builder,  # Has editable attributes
+)
+
+# Simple usage - edit all fields
+edit_dialog = EditEventDialog(event)
+
+# With cross-field validation
+def validate_limits(context):
+    """Ensure limit_min < limit_max."""
+    min_val = context.get("condition.limit_min", event.get("condition.limit_min"))
+    max_val = context.get("condition.limit_max", event.get("condition.limit_max"))
+    if min_val is not None and max_val is not None and min_val >= max_val:
+        return False, f"limit_min ({min_val}) must be < limit_max ({max_val})"
+    return True, ""
+
+validated_dialog = EditEventDialog(event, validator=validate_limits)
+
+# Register as command
+app.register_command(DialogCommand("/edit", "Edit event settings", validated_dialog))
+```
+
+The dialog shows a field list with current values. Boolean fields use toggle buttons, other fields use text input. Edits are staged and only applied when clicking Done.
 
 #### Cancellation Handling
 

@@ -258,6 +258,7 @@ Dialogs use the Composite pattern to build complex flows from simple components.
 - `ChoiceDialog` - User selects from keyboard options
 - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input)
 - `ConfirmDialog` - Yes/No prompt
+- `EditEventDialog` - Edit an event's editable attributes via inline keyboard
 
 **Composite Dialogs** (orchestrate children):
 - `SequenceDialog` - Run dialogs in order with named values
@@ -270,6 +271,7 @@ classDiagram
     Dialog <|-- ChoiceDialog
     Dialog <|-- UserInputDialog
     Dialog <|-- ConfirmDialog
+    Dialog <|-- EditEventDialog
     Dialog <|-- SequenceDialog
     Dialog <|-- BranchDialog
     Dialog <|-- LoopDialog
@@ -672,7 +674,7 @@ pattern using the Template Method:
 ```
 
 Classes that inherit `UpdatePollerMixin`:
-- **Leaf Dialogs**: `ChoiceDialog`, `UserInputDialog`, `ConfirmDialog`
+- **Leaf Dialogs**: `ChoiceDialog`, `UserInputDialog`, `ConfirmDialog`, `EditEventDialog`
 - **Hybrid Dialogs**: `ChoiceBranchDialog` (polls for selection, then delegates)
 - **Events**: `CommandsEvent`
 
@@ -740,6 +742,61 @@ Each dialog implements `build_result()` to create standardized nested dictionari
 - **BranchDialog/ChoiceBranchDialog**: Return `{selected_key: branch.build_result()}`
 - **LoopDialog**: Return final `value`
 - **DialogHandler**: Return inner dialog's `build_result()`
+- **EditEventDialog**: Return context dict with all edited field values
+
+## EditEventDialog Architecture
+
+`EditEventDialog` provides a generic UI for editing any `ActivateOnConditionEvent`'s editable attributes via Telegram inline keyboard.
+
+### State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> FieldList: start()
+    FieldList --> EditBool: select bool field
+    FieldList --> EditText: select non-bool field
+    FieldList --> ApplyEdits: Done button
+    FieldList --> Cancelled: Cancel button
+    EditBool --> EditBool: validation fails
+    EditBool --> FieldList: validation passes
+    EditBool --> FieldList: Cancel field
+    EditText --> EditText: validation fails
+    EditText --> FieldList: validation passes
+    EditText --> FieldList: Cancel field
+    ApplyEdits --> Complete: event.edit() all staged values
+    Cancelled --> Complete: no edits applied
+```
+
+### Key Design: Staged Edits
+
+Edits are staged in the dialog's context dict and only applied to the event when clicking Done:
+
+1. **Field selection**: User clicks a field button, dialog shows editor
+2. **Value entry**: User enters value (text or bool toggle)
+3. **Validation**: Single-field validation, then optional cross-field validation
+4. **Staging**: Valid value stored in context, return to field list
+5. **Done**: All staged edits applied via `event.edit()`, `event.edited = True`
+6. **Cancel from field list**: No edits applied, returns `CANCELLED`
+
+### Cross-Field Validation
+
+Optional `validator` parameter enables complex validation rules:
+
+```python
+def validate_range(context: Dict[str, Any]) -> Tuple[bool, str]:
+    """Ensure min < max. Called after each field edit."""
+    min_val = context.get("condition.limit_min", event.get("condition.limit_min"))
+    max_val = context.get("condition.limit_max", event.get("condition.limit_max"))
+    
+    if min_val is not None and max_val is not None:
+        if min_val >= max_val:
+            return False, f"limit_min ({min_val}) must be < limit_max ({max_val})"
+    return True, ""
+
+dialog = EditEventDialog(event, validator=validate_range)
+```
+
+The validator runs after each field edit. If it fails, the user must fix the value or cancel the field edit.
 
 ## Extension Points
 

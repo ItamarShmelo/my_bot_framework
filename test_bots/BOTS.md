@@ -247,6 +247,53 @@ python test_bots/file_watcher_bot.py
 
 ---
 
+### edit_event_dialog_bot.py
+
+**Purpose:** Tests the EditEventDialog class for editing event attributes via inline keyboard.
+
+**Features tested:**
+- `EditEventDialog` - Edit event attributes via inline keyboard
+- Boolean fields with True/False toggle buttons
+- Numeric fields with text input
+- Cross-field validation (`limit_min < limit_max`)
+- Staged edits applied only on Done button
+- Manual cross-field validation pattern (closures + context)
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/sensor` | Show current simulated sensor value |
+| `/settings` | Show current limit_min, limit_max, log_scale |
+| `/edit` | Edit settings with EditEventDialog (cross-field validation) |
+| `/manual_edit` | Edit limits using closure pattern (educational) |
+| `/info` | Shows what this bot tests |
+
+**Events:**
+- Range alert when sensor value is outside limit_min/limit_max (polls every 30s)
+
+**Editable Fields:**
+| Field | Type | Range | Default |
+|-------|------|-------|---------|
+| `condition.limit_min` | float | 0-100 | 20.0 |
+| `condition.limit_max` | float | 0-100 | 80.0 |
+| `condition.log_scale` | bool | True/False | False |
+
+**Cross-Field Validation:**
+The `/edit` command uses `EditEventDialog` with a validator that ensures `limit_min < limit_max`. If validation fails, the user must fix the value or cancel the field edit.
+
+**Educational Pattern:**
+The `/manual_edit` command demonstrates how to achieve similar cross-field validation without `EditEventDialog`, using:
+- Closures to capture shared state
+- Dialog context to pass values between sequential dialogs
+- UserInputDialog validators that reference external state
+
+**Run:**
+```bash
+python test_bots/edit_event_dialog_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:

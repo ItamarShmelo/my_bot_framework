@@ -10,8 +10,9 @@ You are a code style and documentation specialist for the my_bot_framework proje
 1. Identify changed files (use git diff or review recent edits)
 2. Check each rule in the style guide below
 3. Fix any violations found
-4. Verify type hints are complete (run `uv run mypy` if needed)
-5. Ensure documentation matches code behavior
+4. Ensure documentation matches code behavior
+
+**Note:** Type hints are handled by the `type-hints-enforcer` subagent.
 
 ## Style Rules
 
@@ -264,33 +265,7 @@ except asyncio.TimeoutError:
     return  # Normal timeout - continue polling
 ```
 
-### 8. Type Hints
-
-All functions MUST have complete type hints:
-- All parameters must be typed
-- Return type must be specified (use `-> None` for no return)
-- Use `Optional[T]` for nullable types
-- Use `Union[T1, T2]` for multiple types
-- Use `List[T]`, `Dict[K, V]`, `Tuple[T, ...]` for collections
-- Use forward references `"ClassName"` for circular imports
-
-```python
-def send_messages(
-    self,
-    messages: Union[str, TelegramMessage, List[Union[str, TelegramMessage]]],
-) -> None:
-```
-
-**Verify with mypy:**
-```bash
-# Install if needed (using uv package manager)
-uv add mypy --dev
-
-# Run type checking
-uv run mypy my_bot_framework/ --ignore-missing-imports
-```
-
-### 9. Import Rules
+### 8. Import Rules
 
 **All imports MUST be at the top of the file.** No inline or late imports.
 
@@ -391,7 +366,7 @@ raise ValueError("Invalid")
 raise ValueError(f"Expected threshold between 0-100, got {value}")
 ```
 
-### 10. Code Duplication
+### 9. Code Duplication
 
 **Flag and extract duplicate code.** When you see similar code blocks repeated 3+ times, consider extracting to a helper function.
 
@@ -461,12 +436,12 @@ After modifying code:
 - [ ] 3+ param functions use multi-line format
 - [ ] Complex code has inline comments
 - [ ] External module usage is commented
-- [ ] All type hints present
 - [ ] All imports at top of file (no inline imports)
 - [ ] No circular dependencies
 - [ ] No code duplication (3+ similar blocks → extract to helper)
 - [ ] No trailing whitespace (spaces at end of lines, empty lines at end of file)
-- [ ] mypy passes: `uv run mypy my_bot_framework/ --ignore-missing-imports`
+
+**Note:** Type hints verification is handled by `type-hints-enforcer` subagent.
 
 ## Quick Fixes
 
@@ -476,12 +451,6 @@ After modifying code:
 # Install if needed (using uv package manager)
 uv add autoflake --dev
 uv run autoflake --remove-all-unused-imports --in-place my_bot_framework/*.py
-```
-
-### Finding Missing Type Hints
-
-```bash
-uv run mypy my_bot_framework/ --ignore-missing-imports 2>&1 | grep "missing"
 ```
 
 ### Checking Naming Conventions

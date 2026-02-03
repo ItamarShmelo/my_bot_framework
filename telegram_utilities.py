@@ -1,6 +1,7 @@
 """Telegram message wrappers for sending various message types."""
 
 import asyncio
+import html
 import logging
 from pathlib import Path
 from typing import Final, Optional
@@ -56,9 +57,11 @@ class TelegramTextMessage(TelegramMessage):
                 ]
 
             for chunk in chunks:
+                # Escape HTML special characters to prevent parse errors
+                escaped_chunk = html.escape(chunk)
                 await bot.send_message(
                     chat_id=chat_id,
-                    text=chunk,
+                    text=escaped_chunk,
                     parse_mode=ParseMode.HTML,
                 )
                 await asyncio.sleep(0.05)
@@ -96,11 +99,13 @@ class TelegramImageMessage(TelegramMessage):
             logger.debug('image_send_start path="%s"', image_path)
             with image_path.open("rb") as handle:
                 caption_text = self.caption or ""
+                # Escape HTML special characters to prevent parse errors
+                escaped_caption = html.escape(caption_text) if caption_text else None
                 await bot.send_photo(
                     chat_id=chat_id,
                     photo=handle,
-                    caption=caption_text if caption_text else None,
-                    parse_mode=ParseMode.HTML if caption_text else None,
+                    caption=escaped_caption,
+                    parse_mode=ParseMode.HTML if escaped_caption else None,
                 )
             logger.info('image_sent path="%s"', image_path)
         except Exception as exc:
@@ -130,9 +135,11 @@ class TelegramOptionsMessage(TelegramMessage):
     ) -> None:
         """Send a message with inline keyboard buttons."""
         try:
+            # Escape HTML special characters to prevent parse errors
+            escaped_text = html.escape(self.text)
             self.sent_message = await bot.send_message(
                 chat_id=chat_id,
-                text=self.text,
+                text=escaped_text,
                 reply_markup=self.reply_markup,
                 parse_mode=ParseMode.HTML,
             )
@@ -170,10 +177,12 @@ class TelegramEditMessage(TelegramMessage):
     ) -> None:
         """Edit an existing message's text and/or keyboard."""
         try:
+            # Escape HTML special characters to prevent parse errors
+            escaped_text = html.escape(self.text)
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=self.message_id,
-                text=self.text,
+                text=escaped_text,
                 reply_markup=self.reply_markup,
                 parse_mode=ParseMode.HTML,
             )
@@ -251,9 +260,11 @@ async def _try_send_error_message(
 ) -> None:
     """Best-effort error notification without raising further errors."""
     try:
+        # Escape HTML special characters in exception message
+        escaped_exc = html.escape(str(exc))
         await bot.send_message(
             chat_id=chat_id,
-            text=f"Error while sending message: {exc}",
+            text=f"Error while sending message: {escaped_exc}",
         )
     except Exception as error_exc:
         logger.error("telegram_error_message_failed error=%s", error_exc)

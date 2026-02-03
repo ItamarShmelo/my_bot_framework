@@ -7,6 +7,7 @@ Leaf dialogs (one question each):
 - ChoiceDialog: User selects from keyboard options
 - UserInputDialog: User enters text
 - ConfirmDialog: Yes/No prompt
+- EditEventDialog: Edit an event's editable attributes via inline keyboard
 
 Composite dialogs:
 - SequenceDialog: Run dialogs in order
@@ -16,13 +17,14 @@ Composite dialogs:
 """
 
 import asyncio
+import inspect
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 
 from .accessors import get_app, get_logger
 from .polling import UpdatePollerMixin
@@ -33,6 +35,10 @@ from .telegram_utilities import (
     TelegramCallbackAnswerMessage,
     TelegramRemoveKeyboardMessage,
 )
+
+if TYPE_CHECKING:
+    from .event import ActivateOnConditionEvent
+    from .editable import EditableAttribute
 
 
 # Sentinel for cancelled dialogs - distinct from None which could be a valid value
@@ -219,6 +225,14 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
         """
         super().__init__()
         self.prompt = prompt
+        if callable(choices):
+            sig = inspect.signature(choices)
+            params = [p for p in sig.parameters.values() 
+                      if p.default is inspect.Parameter.empty]
+            assert len(params) == 1, (
+                f"choices callable must accept exactly 1 argument (context), "
+                f"got {len(params)} required parameters"
+            )
         self._choices = choices
         self.include_cancel = include_cancel
         self._text_reminder_sent = False  # Spam control
@@ -475,7 +489,8 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         self.state = DialogState.COMPLETE
         
         # Log input
-        get_logger().info("user_input_dialog_received text=%s", text[:50] if len(text) > 50 else text)
+        text_preview = text[:50] if len(text) > 50 else text
+        get_logger().info("user_input_dialog_received text=%s", text_preview)
         
         # Only send confirmation message if debug mode is enabled
         if DIALOG_DEBUG:
@@ -1103,3 +1118,294 @@ class DialogHandler(Dialog):
         """Reset handler and inner dialog."""
         super().reset()
         self.dialog.reset()
+
+
+class EditEventDialog(Dialog):
+    """Dialog for editing an event's editable attributes via inline keyboard.
+    
+    Delegates to ChoiceDialog for field selection and boolean fields,
+    and UserInputDialog for text fields. Does not poll directly.
+    
+    Shows a list of editable fields as buttons. Supports:
+    - Boolean fields: Toggle buttons [True] [False] via ChoiceDialog
+    - Other fields: Text input via UserInputDialog
+    
+    Edits are staged in the context and only applied when clicking Done.
+    Supports optional cross-field validation after each field edit.
+    
+    Example:
+        def validate_range(context):
+            min_val = context.get("condition.limit_min", event.get("condition.limit_min"))
+            max_val = context.get("condition.limit_max", event.get("condition.limit_max"))
+            if min_val is not None and max_val is not None and min_val >= max_val:
+                return False, "limit_min must be < limit_max"
+            return True, ""
+        
+        dialog = EditEventDialog(my_event, validator=validate_range)
+    """
+    
+    DONE_VALUE = "__done__"
+
+    def __init__(
+        self,
+        event: "ActivateOnConditionEvent",
+        validator: Optional[Callable[[Dict[str, Any]], Tuple[bool, str]]] = None,
+    ) -> None:
+        """Create an edit event dialog.
+        
+        Args:
+            event: The event with editable_attributes to edit.
+            validator: Optional cross-field validation function.
+                Receives context dict with staged edits, returns (is_valid, error_msg).
+                Called after each successful field edit.
+        """
+        super().__init__()
+        self.event = event
+        self.validator = validator
+
+    def _is_bool_field(self, attr: "EditableAttribute") -> bool:
+        """Check if an attribute is a boolean type."""
+        if attr.field_type == bool:
+            return True
+        if isinstance(attr.field_type, tuple) and bool in attr.field_type:
+            return True
+        return False
+
+    def _get_field_display_value(self, field_name: str) -> str:
+        """Get the display value for a field (from context or event)."""
+        if field_name in self.context:
+            return str(self.context[field_name])
+        return str(self.event.get(field_name))
+
+    def _build_field_choices(self, context: Dict[str, Any]) -> List[Tuple[str, str]]:
+        """Build choices list for field selection dialog.
+        
+        Args:
+            context: Dialog context (passed by ChoiceDialog, uses self.context instead).
+        """
+        # Note: We use self.context (which has staged edits) rather than the passed context
+        choices = []
+        for name in self.event.editable_attributes:
+            display_value = self._get_field_display_value(name)
+            label = f"{name}: {display_value}"
+            choices.append((label, name))
+        choices.append(("Done", self.DONE_VALUE))
+        return choices
+
+    def _get_field_list_prompt(self) -> str:
+        """Build the prompt text for field list screen."""
+        event_name = self.event.event_name
+        return f'Editing "{event_name}". Select field:'
+
+    def _validate_and_stage_value(
+        self,
+        field_name: str,
+        parsed_value: Any,
+    ) -> Tuple[bool, Optional[str]]:
+        """Validate a parsed value and stage it in context if valid.
+        
+        Args:
+            field_name: Name of the field being edited.
+            parsed_value: The parsed value to validate and stage.
+        
+        Returns:
+            (success, error_message) - error_message is None on success.
+        """
+        attr = self.event.editable_attributes[field_name]
+        
+        # Single-field validation
+        is_valid, error = attr.validate(parsed_value)
+        if not is_valid:
+            return False, error
+        
+        # Tentatively stage the value
+        old_value = self.context.get(field_name)
+        self.context[field_name] = parsed_value
+        
+        # Cross-field validation (if validator provided)
+        if self.validator:
+            is_valid, error = self.validator(self.context)
+            if not is_valid:
+                # Revert the staged value
+                if old_value is not None:
+                    self.context[field_name] = old_value
+                else:
+                    del self.context[field_name]
+                return False, error
+        
+        return True, None
+
+    def _apply_all_edits(self) -> None:
+        """Apply all staged edits to the event."""
+        for field_name, value in self.context.items():
+            self.event.edit(field_name, value)
+        self.event.edited = True
+
+    async def _edit_bool_field(self, field_name: str) -> bool:
+        """Edit a boolean field using ConfirmDialog.
+        
+        Args:
+            field_name: Name of the boolean field to edit.
+        
+        Returns:
+            True if field was successfully edited, False if cancelled.
+        """
+        logger = get_logger()
+        current = self._get_field_display_value(field_name)
+        
+        while True:
+            bool_dialog = ConfirmDialog(
+                prompt=f"Set {field_name} to True? (current: {current})",
+                yes_label="True",
+                no_label="False",
+                include_cancel=True,
+            )
+            result = await bool_dialog.start(self.context)
+            
+            if is_cancelled(result):
+                logger.info("edit_event_dialog_field_cancelled field=%s", field_name)
+                return False
+            
+            new_value = result  # ConfirmDialog returns bool directly
+            success, error = self._validate_and_stage_value(field_name, new_value)
+            
+            if success:
+                logger.info(
+                    "edit_event_dialog_field_staged field=%s value=%s",
+                    field_name,
+                    new_value,
+                )
+                return True
+            
+            # Validation failed - show error and loop to re-prompt
+            logger.info(
+                "edit_event_dialog_validation_failed field=%s error=%s",
+                field_name,
+                error,
+            )
+            await get_app().send_messages(f"⚠️ {error}")
+            # Loop continues with a new ChoiceDialog
+
+    async def _edit_text_field(self, field_name: str) -> bool:
+        """Edit a text field using UserInputDialog.
+        
+        Args:
+            field_name: Name of the text field to edit.
+        
+        Returns:
+            True if field was successfully edited, False if cancelled.
+        """
+        logger = get_logger()
+        attr = self.event.editable_attributes[field_name]
+        
+        def make_validator():
+            """Create a validator that parses and validates the input."""
+            def validator(text: str) -> Tuple[bool, str]:
+                # Parse the input
+                try:
+                    parsed_value = attr.parse(text)
+                except (ValueError, TypeError) as e:
+                    error = str(e) if str(e) else "Invalid input"
+                    return False, error
+                
+                # Single-field validation
+                is_valid, error = attr.validate(parsed_value)
+                if not is_valid:
+                    return False, error
+                
+                # Cross-field validation (tentatively stage)
+                if self.validator:
+                    old_value = self.context.get(field_name)
+                    self.context[field_name] = parsed_value
+                    is_valid, error = self.validator(self.context)
+                    # Revert for now - will stage properly if dialog completes
+                    if old_value is not None:
+                        self.context[field_name] = old_value
+                    else:
+                        self.context.pop(field_name, None)
+                    if not is_valid:
+                        return False, error
+                
+                return True, ""
+            return validator
+        
+        current = self._get_field_display_value(field_name)
+        text_dialog = UserInputDialog(
+            prompt=f"Enter new value for {field_name} (current: {current}):",
+            validator=make_validator(),
+            include_cancel=True,
+        )
+        result = await text_dialog.start(self.context)
+        
+        if is_cancelled(result):
+            logger.info("edit_event_dialog_field_cancelled field=%s", field_name)
+            return False
+        
+        # Parse and stage the value (validator already checked it's valid)
+        parsed_value = attr.parse(result)
+        self.context[field_name] = parsed_value
+        logger.info(
+            "edit_event_dialog_field_staged field=%s value=%s",
+            field_name,
+            parsed_value,
+        )
+        return True
+
+    async def _run_dialog(self) -> DialogResult:
+        """Run the edit dialog loop until Done or Cancel."""
+        self.state = DialogState.ACTIVE
+        logger = get_logger()
+        
+        while True:
+            # Show field selection dialog
+            field_dialog = ChoiceDialog(
+                prompt=self._get_field_list_prompt(),
+                choices=self._build_field_choices,  # Dynamic choices
+                include_cancel=True,
+            )
+            result = await field_dialog.start(self.context)
+            
+            if is_cancelled(result):
+                # Cancel from field list - exit without applying edits
+                self._value = CANCELLED
+                self.state = DialogState.COMPLETE
+                logger.info("edit_event_dialog_cancelled")
+                return CANCELLED
+            
+            if result == self.DONE_VALUE:
+                # Done - apply all edits
+                self._apply_all_edits()
+                self._value = dict(self.context)
+                self.state = DialogState.COMPLETE
+                logger.info("edit_event_dialog_done edits=%s", self.context)
+                return self.build_result()
+            
+            # Field selected - edit it
+            field_name = result
+            if field_name not in self.event.editable_attributes:
+                continue
+            
+            attr = self.event.editable_attributes[field_name]
+            
+            if self._is_bool_field(attr):
+                await self._edit_bool_field(field_name)
+            else:
+                await self._edit_text_field(field_name)
+            
+            # After editing (success or cancel), loop back to field list
+
+    def build_result(self) -> DialogResult:
+        """Return the context dict with all staged edits."""
+        return self.value
+
+    def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
+        """Not used - delegates to child dialogs."""
+        return None
+
+    def handle_text_input(self, text: str) -> Optional[DialogResponse]:
+        """Not used - delegates to child dialogs."""
+        return None
+
+    def reset(self) -> None:
+        """Reset the dialog for reuse."""
+        super().reset()

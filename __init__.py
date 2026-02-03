@@ -70,6 +70,7 @@ from .dialog import (
     BranchDialog,
     ChoiceBranchDialog,
     LoopDialog,
+    EditEventDialog,
     CANCELLED,
     is_cancelled,
     DIALOG_DEBUG,
@@ -130,6 +131,7 @@ __all__ = [
     "BranchDialog",
     "ChoiceBranchDialog",
     "LoopDialog",
+    "EditEventDialog",
     # Mixins
     "UpdatePollerMixin",
     # Sentinels and Debug
