@@ -258,32 +258,55 @@ app.register_command(cmd)
 The framework provides built-in dialog types for common interactions:
 
 **Leaf Dialogs** (atomic single-step):
-- `ChoiceDialog` - User selects from keyboard options
-- `PaginatedChoiceDialog` - User selects from paginated keyboard options (shows first page as buttons, remaining items as numbered text list)
-- `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input)
-- `ConfirmDialog` - Yes/No prompt
-- `EditEventDialog` - Edit an event's editable attributes via inline keyboard
+- **Inline Keyboard** (attached to message):
+  - `InlineKeyboardChoiceDialog` / `ChoiceDialog` (alias) - User selects from inline keyboard options
+  - `InlineKeyboardPaginatedChoiceDialog` / `PaginatedChoiceDialog` (alias) - User selects from paginated inline keyboard options (shows first page as buttons, remaining items as numbered text list)
+  - `InlineKeyboardConfirmDialog` / `ConfirmDialog` (alias) - Yes/No prompt with inline keyboard
+- **Reply Keyboard** (buttons at bottom of chat):
+  - `ReplyKeyboardChoiceDialog` - User selects from reply keyboard options
+  - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
+  - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
+- **Other Leaf Dialogs**:
+  - `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input)
+  - `EditEventDialog` - Edit an event's editable attributes via inline keyboard
 
 **Composite Dialogs** (multi-step):
 - `SequenceDialog` - Run dialogs in order
 - `BranchDialog` - Condition-based branching
-- `ChoiceBranchDialog` - User selects branch
+- `InlineKeyboardChoiceBranchDialog` / `ChoiceBranchDialog` (alias) - User selects branch via inline keyboard
+- `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard
 - `LoopDialog` - Repeat until exit condition
 - `DialogHandler` - Wrap dialog with completion callback
 
 ```python
 from my_bot_framework import (
     ChoiceDialog, PaginatedChoiceDialog, UserInputDialog, ConfirmDialog,
+    ReplyKeyboardChoiceDialog, ReplyKeyboardConfirmDialog,
     SequenceDialog, DialogHandler, DialogCommand,
+    KeyboardType, create_choice_dialog, create_confirm_dialog,
     CANCELLED, is_cancelled,
 )
 
-# Simple choice dialog
+# Simple inline keyboard choice dialog (default)
 color_dialog = ChoiceDialog("Pick a color:", [
     ("Red", "red"),
     ("Green", "green"),
     ("Blue", "blue"),
 ])
+
+# Reply keyboard choice dialog (buttons at bottom of chat)
+color_dialog_reply = ReplyKeyboardChoiceDialog("Pick a color:", [
+    ("Red", "red"),
+    ("Green", "green"),
+    ("Blue", "blue"),
+])
+
+# Using factory function with keyboard type
+color_dialog_factory = create_choice_dialog(
+    prompt="Pick a color:",
+    choices=[("Red", "red"), ("Green", "green"), ("Blue", "blue")],
+    keyboard_type=KeyboardType.REPLY,  # or KeyboardType.INLINE (default)
+)
 
 # Paginated choice dialog (for long lists)
 expenses = [
@@ -303,7 +326,7 @@ expense_dialog = PaginatedChoiceDialog(
     more_label="More...",  # Button label for remaining items
 )
 
-# Multi-step sequence
+# Multi-step sequence with mixed keyboard types
 survey_dialog = SequenceDialog([
     ("name", UserInputDialog("What is your name?")),
     ("rating", ChoiceDialog("Rate our service:", [
@@ -311,7 +334,7 @@ survey_dialog = SequenceDialog([
         ("4 Stars", "4"),
         ("3 Stars", "3"),
     ])),
-    ("recommend", ConfirmDialog("Would you recommend us?")),
+    ("recommend", ReplyKeyboardConfirmDialog("Would you recommend us?")),
 ])
 
 # DialogHandler with completion callback
@@ -325,6 +348,70 @@ handled_dialog = DialogHandler(survey_dialog, on_complete=on_complete)
 
 # Register as command
 app.register_command(DialogCommand("/survey", "Take survey", handled_dialog))
+```
+
+#### Factory Functions
+
+Factory functions provide a convenient way to create dialogs with a specified keyboard type:
+
+```python
+from my_bot_framework import (
+    KeyboardType,
+    create_choice_dialog,
+    create_confirm_dialog,
+    create_paginated_choice_dialog,
+    create_choice_branch_dialog,
+)
+
+# Create choice dialog with reply keyboard
+dialog = create_choice_dialog(
+    prompt="Select an option:",
+    choices=[("Option 1", "opt1"), ("Option 2", "opt2")],
+    keyboard_type=KeyboardType.REPLY,
+    include_cancel=True,
+)
+
+# Create confirmation dialog with inline keyboard (default)
+confirm = create_confirm_dialog(
+    prompt="Are you sure?",
+    keyboard_type=KeyboardType.INLINE,
+    yes_label="Yes",
+    no_label="No",
+    include_cancel=False,
+)
+
+# Create paginated choice dialog
+paginated = create_paginated_choice_dialog(
+    prompt="Select item:",
+    items=[("Item 1", "1"), ("Item 2", "2"), ...],
+    keyboard_type=KeyboardType.REPLY,
+    page_size=5,
+    more_label="More...",
+    include_cancel=True,
+)
+
+# Create choice branch dialog
+branch = create_choice_branch_dialog(
+    prompt="Select action:",
+    branches={
+        "edit": ("Edit", edit_dialog),
+        "delete": ("Delete", delete_dialog),
+    },
+    keyboard_type=KeyboardType.INLINE,
+    include_cancel=True,
+)
+```
+
+#### Backward Compatibility
+
+The old dialog class names (`ChoiceDialog`, `ConfirmDialog`, `PaginatedChoiceDialog`, `ChoiceBranchDialog`) are still available as aliases for the inline keyboard versions. They work exactly as before:
+
+```python
+# These are equivalent:
+ChoiceDialog(...) == InlineKeyboardChoiceDialog(...)
+ConfirmDialog(...) == InlineKeyboardConfirmDialog(...)
+PaginatedChoiceDialog(...) == InlineKeyboardPaginatedChoiceDialog(...)
+ChoiceBranchDialog(...) == InlineKeyboardChoiceBranchDialog(...)
 ```
 
 #### EditEventDialog

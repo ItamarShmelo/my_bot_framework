@@ -255,29 +255,47 @@ class ComplexBuilder:
 Dialogs use the Composite pattern to build complex flows from simple components.
 
 **Leaf Dialogs** (one question each):
-- `ChoiceDialog` - User selects from keyboard options
-- `PaginatedChoiceDialog` - User selects from paginated keyboard options (shows first page_size items as buttons, remaining items as numbered text list)
-- `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input)
-- `ConfirmDialog` - Yes/No prompt
-- `EditEventDialog` - Edit an event's editable attributes via inline keyboard
+- **Inline Keyboard Dialogs**:
+  - `InlineKeyboardChoiceDialog` / `ChoiceDialog` (alias) - User selects from inline keyboard options
+  - `InlineKeyboardPaginatedChoiceDialog` / `PaginatedChoiceDialog` (alias) - User selects from paginated inline keyboard options
+  - `InlineKeyboardConfirmDialog` / `ConfirmDialog` (alias) - Yes/No prompt with inline keyboard
+  - `InlineKeyboardChoiceBranchDialog` / `ChoiceBranchDialog` (alias) - User selects branch via inline keyboard
+- **Reply Keyboard Dialogs**:
+  - `ReplyKeyboardChoiceDialog` - User selects from reply keyboard options (buttons at bottom of chat)
+  - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
+  - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
+  - `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard
+- **Other Leaf Dialogs**:
+  - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input)
+  - `EditEventDialog` - Edit an event's editable attributes via inline keyboard
 
 **Composite Dialogs** (orchestrate children):
 - `SequenceDialog` - Run dialogs in order with named values
 - `BranchDialog` - Condition-based branching
-- `ChoiceBranchDialog` - User selects branch via keyboard
 - `LoopDialog` - Repeat until exit condition
+- `DialogHandler` - Wrap dialog with completion callback
 
 ```mermaid
 classDiagram
-    Dialog <|-- ChoiceDialog
-    Dialog <|-- PaginatedChoiceDialog
+    Dialog <|-- InlineKeyboardChoiceDialog
+    Dialog <|-- InlineKeyboardPaginatedChoiceDialog
+    Dialog <|-- InlineKeyboardConfirmDialog
+    Dialog <|-- InlineKeyboardChoiceBranchDialog
+    Dialog <|-- ReplyKeyboardChoiceDialog
+    Dialog <|-- ReplyKeyboardPaginatedChoiceDialog
+    Dialog <|-- ReplyKeyboardConfirmDialog
+    Dialog <|-- ReplyKeyboardChoiceBranchDialog
     Dialog <|-- UserInputDialog
-    Dialog <|-- ConfirmDialog
     Dialog <|-- EditEventDialog
     Dialog <|-- SequenceDialog
     Dialog <|-- BranchDialog
     Dialog <|-- LoopDialog
-    BranchDialog <|-- ChoiceBranchDialog
+    Dialog <|-- DialogHandler
+    
+    InlineKeyboardChoiceDialog --|> ChoiceDialog : alias
+    InlineKeyboardPaginatedChoiceDialog --|> PaginatedChoiceDialog : alias
+    InlineKeyboardConfirmDialog --|> ConfirmDialog : alias
+    InlineKeyboardChoiceBranchDialog --|> ChoiceBranchDialog : alias
 ```
 
 **Shared Context**: All dialogs share a `context` dict for cross-dialog communication:
@@ -499,11 +517,17 @@ These factories encapsulate common condition patterns with internal state manage
 | `TelegramTextMessage` | Plain text | Auto-chunking for long messages |
 | `TelegramImageMessage` | Image file | Caption support |
 | `TelegramDocumentMessage` | Document file | Caption support |
-| `TelegramOptionsMessage` | Text + keyboard | Inline buttons |
+| `TelegramOptionsMessage` | Text + inline keyboard | Inline buttons attached to message (used by inline keyboard dialogs) |
 | `TelegramEditMessage` | Edit existing | Update text/keyboard |
-| `TelegramCallbackAnswerMessage` | Callback ACK | Toast notifications |
-| `TelegramReplyKeyboardMessage` | Text + reply keyboard | Persistent keyboard at bottom of chat (ReplyKeyboardMarkup) |
+| `TelegramCallbackAnswerMessage` | Callback ACK | Toast notifications for inline keyboard button presses |
+| `TelegramReplyKeyboardMessage` | Text + reply keyboard | Persistent keyboard at bottom of chat (ReplyKeyboardMarkup, used by reply keyboard dialogs) |
 | `TelegramRemoveReplyKeyboardMessage` | Text | Removes persistent reply keyboard (ReplyKeyboardRemove) |
+| `TelegramRemoveKeyboardMessage` | Message ID | Removes inline keyboard from a specific message |
+
+**Keyboard Message Types:**
+
+- **Inline keyboards** (`TelegramOptionsMessage`): Buttons attached to messages, send `callback_query` events when pressed. Used by `InlineKeyboard*Dialog` classes.
+- **Reply keyboards** (`TelegramReplyKeyboardMessage`): Persistent buttons at bottom of chat, send text messages (button labels) when pressed. Used by `ReplyKeyboard*Dialog` classes. Auto-hide with `one_time_keyboard=True`.
 
 **Note:** All message types use `parse_mode=HTML`. If text contains unescaped HTML special characters, an `InvalidHtmlError` is raised with instructions to use `html.escape()`.
 
@@ -846,12 +870,16 @@ pattern using the Template Method:
 ```
 
 Classes that inherit `UpdatePollerMixin`:
-- **Leaf Dialogs**: `ChoiceDialog`, `PaginatedChoiceDialog`, `UserInputDialog`, `ConfirmDialog`, `EditEventDialog`
-- **Hybrid Dialogs**: `ChoiceBranchDialog` (polls for selection, then delegates)
+- **Inline Keyboard Leaf Dialogs**: `InlineKeyboardChoiceDialog`, `InlineKeyboardPaginatedChoiceDialog`, `InlineKeyboardConfirmDialog`, `InlineKeyboardChoiceBranchDialog`
+- **Reply Keyboard Leaf Dialogs**: `ReplyKeyboardChoiceDialog`, `ReplyKeyboardPaginatedChoiceDialog`, `ReplyKeyboardConfirmDialog`, `ReplyKeyboardChoiceBranchDialog`
+- **Other Leaf Dialogs**: `UserInputDialog` (uses inline keyboard for cancel button)
+- **Hybrid Dialogs**: `InlineKeyboardChoiceBranchDialog`, `ReplyKeyboardChoiceBranchDialog` (poll for selection, then delegate)
 - **Events**: `CommandsEvent`
 
 Composite dialogs (`SequenceDialog`, `BranchDialog`, `LoopDialog`, `DialogHandler`)
 do NOT inherit `UpdatePollerMixin` - they delegate to children.
+
+**Note**: `EditEventDialog` does NOT inherit `UpdatePollerMixin` - it delegates to child dialogs (`InlineKeyboardChoiceDialog`, `InlineKeyboardConfirmDialog`, `UserInputDialog`).
 
 ## Dialog System Architecture
 
@@ -864,13 +892,13 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
 │    start():                                                 │
 │      1. reset() - clean state                               │
 │      2. Set context                                         │
-│      3. _run_dialog() - delegate to subclass                │
+│      3. _run_dialog() - delegate to subclass              │
 │                                                             │
 │  Abstract:                                                  │
-│    • _run_dialog(offset) -> (DialogResult, int)             │
+│    • _run_dialog() -> DialogResult                          │
 │    • build_result() -> DialogResult                         │
-│    • handle_callback(data) -> DialogResponse                │
-│    • handle_text_input(text) -> DialogResponse              │
+│    • handle_callback(data) -> DialogResponse                 │
+│    • handle_text_input(text) -> DialogResponse               │
 └─────────────────────────────────────────────────────────────┘
                               │
           ┌───────────────────┼───────────────────┐
@@ -880,12 +908,50 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
    │Leaf Dialogs│    │Composite Dialogs│   │DialogHandler │
    │(+ Mixin)   │    │                 │   │              │
    ├────────────┤    ├─────────────────┤   ├──────────────┤
-   │ Choice     │    │ Sequence        │   │ Wrap dialog  │
-   │ Paginated  │    │ Branch          │   │ Call callback│
-   │ Choice     │    │ ChoiceBranch*   │   │ on complete  │
-   │ UserInput  │    │ Loop            │   └──────────────┘
-   │ Confirm    │    └─────────────────┘
-   └────────────┘    (* hybrid - has Mixin)
+   │ Inline KB  │    │ Sequence        │   │ Wrap dialog  │
+   │ Reply KB   │    │ Branch          │   │ Call callback│
+   │ UserInput  │    │ ChoiceBranch*   │   │ on complete  │
+   │ EditEvent  │    │ Loop            │   └──────────────┘
+   └────────────┘    └─────────────────┘   (* hybrid - has Mixin)
+```
+
+### Keyboard Type System
+
+The framework supports two keyboard types via the `KeyboardType` enum:
+
+- **`KeyboardType.INLINE`**: Inline keyboards attached to messages (`TelegramOptionsMessage`)
+- **`KeyboardType.REPLY`**: Reply keyboards at bottom of chat (`TelegramReplyKeyboardMessage`)
+
+**Implementation Differences:**
+
+| Aspect | Inline Keyboard Dialogs | Reply Keyboard Dialogs |
+|--------|------------------------|------------------------|
+| **Message Type** | `TelegramOptionsMessage` | `TelegramReplyKeyboardMessage` |
+| **Input Handling** | `handle_callback_update()` processes `callback_query` events | `handle_text_update()` matches text against button labels |
+| **Keyboard Removal** | `TelegramRemoveKeyboardMessage` (removes inline keyboard from message) | `TelegramRemoveReplyKeyboardMessage` (removes reply keyboard) |
+| **Auto-hide** | Manual removal required | `one_time_keyboard=True` auto-hides after selection |
+| **Button Press** | Sends `callback_query` with `callback_data` | Sends text message with button label text |
+
+**Class Naming Convention:**
+
+- **Inline keyboard dialogs**: `InlineKeyboard*Dialog` (e.g., `InlineKeyboardChoiceDialog`)
+- **Reply keyboard dialogs**: `ReplyKeyboard*Dialog` (e.g., `ReplyKeyboardChoiceDialog`)
+- **Backward compatibility**: Old names (`ChoiceDialog`, `ConfirmDialog`, etc.) are aliases for inline versions
+
+**Factory Functions:**
+
+Factory functions (`create_choice_dialog`, `create_confirm_dialog`, etc.) accept a `keyboard_type` parameter to create the appropriate dialog class:
+
+```python
+def create_choice_dialog(
+    prompt: str,
+    choices: List[Tuple[str, str]],
+    keyboard_type: KeyboardType = KeyboardType.INLINE,
+    include_cancel: bool = True,
+) -> Dialog:
+    if keyboard_type == KeyboardType.REPLY:
+        return ReplyKeyboardChoiceDialog(prompt, choices, include_cancel)
+    return InlineKeyboardChoiceDialog(prompt, choices, include_cancel)
 ```
 
 ### Cancellation with CANCELLED Sentinel
@@ -911,7 +977,7 @@ Each dialog implements `build_result()` to create standardized nested dictionari
 
 - **Leaf dialogs**: Return raw `value`
 - **SequenceDialog**: Return `{name: child.build_result()}`
-- **BranchDialog/ChoiceBranchDialog**: Return `{selected_key: branch.build_result()}`
+- **BranchDialog/ChoiceBranchDialog/InlineKeyboardChoiceBranchDialog/ReplyKeyboardChoiceBranchDialog**: Return `{selected_key: branch.build_result()}`
 - **LoopDialog**: Return final `value`
 - **DialogHandler**: Return inner dialog's `build_result()`
 - **EditEventDialog**: Return context dict with all edited field values

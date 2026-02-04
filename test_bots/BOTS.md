@@ -446,6 +446,58 @@ python test_bots/reply_keyboard_bot.py
 
 ---
 
+### reply_keyboard_dialog_bot.py
+
+**Purpose:** Tests the reply keyboard dialog classes that use Telegram's reply keyboard instead of inline keyboard.
+
+**Features tested:**
+- `ReplyKeyboardChoiceDialog` - Choice dialog using reply keyboard
+- `ReplyKeyboardConfirmDialog` - Confirm dialog using reply keyboard
+- `ReplyKeyboardPaginatedChoiceDialog` - Paginated choice dialog using reply keyboard
+- `ReplyKeyboardChoiceBranchDialog` - Choice branch dialog using reply keyboard
+- Factory functions with `keyboard_type=KeyboardType.REPLY`:
+  - `create_choice_dialog()` with `KeyboardType.REPLY`
+  - `create_confirm_dialog()` with `KeyboardType.REPLY`
+  - `create_paginated_choice_dialog()` with `KeyboardType.REPLY`
+  - `create_choice_branch_dialog()` with `KeyboardType.REPLY`
+- Text matching for button labels
+- Cancel functionality
+- Dynamic choices via callable
+- Integration with `DialogHandler` and `SequenceDialog`
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/info` | Shows what this bot tests |
+| `/choice` | Test ReplyKeyboardChoiceDialog (direct class) |
+| `/choice_factory` | Test create_choice_dialog with KeyboardType.REPLY |
+| `/confirm` | Test ReplyKeyboardConfirmDialog (direct class) |
+| `/confirm_cancel` | Test ReplyKeyboardConfirmDialog with cancel button |
+| `/confirm_factory` | Test create_confirm_dialog with KeyboardType.REPLY |
+| `/paginated` | Test ReplyKeyboardPaginatedChoiceDialog (direct class) |
+| `/paginated_factory` | Test create_paginated_choice_dialog with KeyboardType.REPLY |
+| `/dynamic_choice` | Test dynamic choices via callable |
+| `/branch` | Test ReplyKeyboardChoiceBranchDialog (direct class) |
+| `/branch_factory` | Test create_choice_branch_dialog with KeyboardType.REPLY |
+| `/choice_handler` | Test ReplyKeyboardChoiceDialog with DialogHandler |
+| `/confirm_handler` | Test ReplyKeyboardConfirmDialog with DialogHandler |
+
+**Dialog Types Tested:**
+
+| Dialog Type | Description |
+|-------------|-------------|
+| `ReplyKeyboardChoiceDialog` | Static/dynamic keyboard options using reply keyboard |
+| `ReplyKeyboardConfirmDialog` | Yes/No with custom labels using reply keyboard |
+| `ReplyKeyboardPaginatedChoiceDialog` | Paginated options with "More..." button using reply keyboard |
+| `ReplyKeyboardChoiceBranchDialog` | User-driven branching using reply keyboard |
+
+**Run:**
+```bash
+python test_bots/reply_keyboard_dialog_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:

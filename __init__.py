@@ -67,15 +67,34 @@ from .dialog import (
     DialogResponse,
     DialogResult,
     DialogHandler,
+    KeyboardType,
+    # Inline keyboard dialogs (new names)
+    InlineKeyboardChoiceDialog,
+    InlineKeyboardConfirmDialog,
+    InlineKeyboardPaginatedChoiceDialog,
+    InlineKeyboardChoiceBranchDialog,
+    # Reply keyboard dialogs
+    ReplyKeyboardChoiceDialog,
+    ReplyKeyboardConfirmDialog,
+    ReplyKeyboardPaginatedChoiceDialog,
+    ReplyKeyboardChoiceBranchDialog,
+    # Backward compatibility aliases
     ChoiceDialog,
     PaginatedChoiceDialog,
-    UserInputDialog,
     ConfirmDialog,
+    ChoiceBranchDialog,
+    # Other dialogs
+    UserInputDialog,
     SequenceDialog,
     BranchDialog,
-    ChoiceBranchDialog,
     LoopDialog,
     EditEventDialog,
+    # Factory functions
+    create_choice_dialog,
+    create_confirm_dialog,
+    create_paginated_choice_dialog,
+    create_choice_branch_dialog,
+    # Sentinels and debug
     CANCELLED,
     is_cancelled,
     DIALOG_DEBUG,
@@ -144,15 +163,33 @@ __all__ = [
     "DialogResponse",
     "DialogResult",
     "DialogHandler",
+    "KeyboardType",
+    # Inline keyboard dialogs (new names)
+    "InlineKeyboardChoiceDialog",
+    "InlineKeyboardConfirmDialog",
+    "InlineKeyboardPaginatedChoiceDialog",
+    "InlineKeyboardChoiceBranchDialog",
+    # Reply keyboard dialogs
+    "ReplyKeyboardChoiceDialog",
+    "ReplyKeyboardConfirmDialog",
+    "ReplyKeyboardPaginatedChoiceDialog",
+    "ReplyKeyboardChoiceBranchDialog",
+    # Backward compatibility aliases
     "ChoiceDialog",
     "PaginatedChoiceDialog",
-    "UserInputDialog",
     "ConfirmDialog",
+    "ChoiceBranchDialog",
+    # Other dialogs
+    "UserInputDialog",
     "SequenceDialog",
     "BranchDialog",
-    "ChoiceBranchDialog",
     "LoopDialog",
     "EditEventDialog",
+    # Factory functions
+    "create_choice_dialog",
+    "create_confirm_dialog",
+    "create_paginated_choice_dialog",
+    "create_choice_branch_dialog",
     # Mixins
     "UpdatePollerMixin",
     # Sentinels and Debug
