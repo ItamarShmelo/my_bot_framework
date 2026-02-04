@@ -328,6 +328,49 @@ python test_bots/document_bot.py
 
 ---
 
+### paginated_dialog_bot.py
+
+**Purpose:** Tests the PaginatedChoiceDialog class for displaying long lists with pagination.
+
+**Features tested:**
+- `PaginatedChoiceDialog` - Paginated keyboard selection
+- Static items list
+- Dynamic items via callable
+- Different page sizes
+- "More..." button behavior
+- Text input selection for remaining items
+- Cancel functionality
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/info` | Shows what this bot tests |
+| `/start` | Show available commands |
+| `/short` | Test short list (no More button) |
+| `/expenses` | Test expense list with pagination (5 items/page) |
+| `/countries` | Test country list with small page size (3 items/page) |
+| `/tasks` | Test dynamic items via callable |
+| `/nocancel` | Test without cancel button |
+| `/commands` | Lists all commands (built-in) |
+| `/terminate` | Shuts down the bot (built-in) |
+
+**Test Scenarios:**
+
+| Scenario | Page Size | Items | Has "More..." |
+|----------|-----------|-------|---------------|
+| `/short` | 5 | 3 fruits | No |
+| `/expenses` | 5 | 12 expenses | Yes |
+| `/countries` | 3 | 20 countries | Yes |
+| `/tasks` | 4 | 8 dynamic tasks | Yes |
+| `/nocancel` | 3 | 8 expenses | Yes |
+
+**Run:**
+```bash
+python test_bots/paginated_dialog_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:

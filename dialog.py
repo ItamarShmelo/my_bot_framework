@@ -5,6 +5,7 @@ from simple atomic components (leaf dialogs) and composites.
 
 Leaf dialogs (one question each):
 - ChoiceDialog: User selects from keyboard options
+- PaginatedChoiceDialog: User selects from paginated keyboard options
 - UserInputDialog: User enters text
 - ConfirmDialog: Yes/No prompt
 - EditEventDialog: Edit an event's editable attributes via inline keyboard
@@ -216,7 +217,7 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
     def __init__(
         self,
         prompt: str,
-        choices: Union[List[Tuple[str, str]], Callable[[Dict], List[Tuple[str, str]]]],
+        choices: Union[List[Tuple[str, str]], Callable[[Dict[str, Any]], List[Tuple[str, str]]]],
         include_cancel: bool = True,
     ) -> None:
         """Create a choice dialog.
@@ -348,6 +349,293 @@ class ChoiceDialog(Dialog, UpdatePollerMixin):
         if self.include_cancel:
             buttons.append([InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)])
         return InlineKeyboardMarkup(buttons)
+
+
+class PaginatedChoiceDialog(Dialog, UpdatePollerMixin):
+    """Leaf dialog: User selects from a paginated list of options.
+    
+    Shows first `page_size` items as buttons. If there are more items,
+    shows a "More..." button. Clicking "More..." displays all remaining
+    items as a numbered text list and prompts for text input.
+    
+    Inherits UpdatePollerMixin for self-polling.
+    """
+
+    CANCEL_CALLBACK = "__cancel__"
+    MORE_CALLBACK = "__more__"
+
+    def __init__(
+        self,
+        prompt: str,
+        items: Union[List[Tuple[str, str]], Callable[[Dict[str, Any]], List[Tuple[str, str]]]],
+        page_size: int = 5,
+        more_label: str = "More...",
+        include_cancel: bool = True,
+    ) -> None:
+        """Create a paginated choice dialog.
+        
+        Args:
+            prompt: The question text to display.
+            items: List of (label, callback_data) tuples, or callable(context) returning same.
+            page_size: Number of items to show as buttons (default 5).
+            more_label: Label for the "show more" button.
+            include_cancel: If True, add a Cancel button.
+        """
+        super().__init__()
+        self.prompt = prompt
+        if callable(items):
+            sig = inspect.signature(items)
+            params = [p for p in sig.parameters.values() 
+                      if p.default is inspect.Parameter.empty]
+            assert len(params) == 1, (
+                f"items callable must accept exactly 1 argument (context), "
+                f"got {len(params)} required parameters"
+            )
+        self._items = items
+        self.page_size = page_size
+        self.more_label = more_label
+        self.include_cancel = include_cancel
+        self._showing_more = False  # True when in text input mode for remaining items
+        self._text_reminder_sent = False  # Spam control
+        self._prompt_message_id: Optional[int] = None  # Track prompt for keyboard removal
+
+    def get_items(self) -> List[Tuple[str, str]]:
+        """Get items - evaluates callable if dynamic."""
+        if callable(self._items):
+            return self._items(self.context)
+        return self._items
+
+    def _get_first_page_items(self) -> List[Tuple[str, str]]:
+        """Get items for the first page (buttons)."""
+        return self.get_items()[:self.page_size]
+
+    def _get_remaining_items(self) -> List[Tuple[str, str]]:
+        """Get items beyond the first page."""
+        return self.get_items()[self.page_size:]
+
+    def _has_more_items(self) -> bool:
+        """Check if there are items beyond the first page."""
+        return len(self.get_items()) > self.page_size
+
+    def _build_error_response(self, remaining: List[Tuple[str, str]]) -> DialogResponse:
+        """Build error response for invalid text input.
+        
+        Args:
+            remaining: List of remaining items to display.
+            
+        Returns:
+            DialogResponse with error message and re-prompt.
+        """
+        lines = [f"{i + 1}. {label}" for i, (label, _) in enumerate(remaining)]
+        error_text = f"Please enter a number between 1 and {len(remaining)}.\n\n"
+        text_prompt = f"{self.prompt}\n\n" + "\n".join(lines) + "\n\nEnter the number of your choice:"
+        
+        keyboard = None
+        if self.include_cancel:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)]
+            ])
+        
+        return DialogResponse(
+            text=error_text + text_prompt,
+            keyboard=keyboard,
+            edit_message=False,
+        )
+
+    # UpdatePollerMixin abstract methods
+    def should_stop_polling(self) -> bool:
+        """Stop polling when dialog is complete."""
+        return self.is_complete
+
+    async def handle_callback_update(self, update: Update) -> None:
+        """Answer callback, remove keyboard, delegate to handle_callback()."""
+        callback_query = update.callback_query
+        if callback_query is None or callback_query.data is None:
+            return
+        # Answer callback and remove keyboard
+        await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
+        
+        if callback_query.message:
+            await get_app().send_messages(
+                TelegramRemoveKeyboardMessage(callback_query.message.message_id)
+            )
+        
+        # Delegate to dialog's handle_callback
+        response = self.handle_callback(callback_query.data)
+        if response:
+            await self._send_response(response)
+
+    async def handle_text_update(self, update: Update) -> None:
+        """Handle text input - only valid when showing more items."""
+        if update.message is None or update.message.text is None:
+            return
+        
+        if not self._showing_more:
+            # Not in text input mode - remind user to use buttons
+            if self.is_active and not self._text_reminder_sent:
+                self._text_reminder_sent = True
+                await get_app().send_messages("Please use the buttons to make a selection.")
+            return
+        
+        text = update.message.text.strip()
+        response = self.handle_text_input(text)
+        
+        # Remove keyboard from previous prompt
+        if self._prompt_message_id is not None:
+            await get_app().send_messages(TelegramRemoveKeyboardMessage(self._prompt_message_id))
+            self._prompt_message_id = None
+        
+        if response:
+            await self._send_response(response)
+
+    def _get_poll_result(self) -> Any:
+        """Return the dialog result after polling completes."""
+        return self.build_result()
+
+    def build_result(self) -> DialogResult:
+        """Leaf returns raw value."""
+        return self.value
+
+    async def _send_response(self, response: DialogResponse) -> None:
+        """Send a dialog response via Telegram."""
+        if response is DialogResponse.NO_CHANGE:
+            return
+        
+        if response.keyboard:
+            msg = TelegramOptionsMessage(response.text, response.keyboard)
+            await get_app().send_messages(msg)
+            # Track message ID for later keyboard removal
+            if msg.sent_message:
+                self._prompt_message_id = msg.sent_message.message_id
+        else:
+            await get_app().send_messages(response.text)
+
+    async def _run_dialog(self) -> DialogResult:
+        """Send prompt with keyboard, then poll until selection made."""
+        self.state = DialogState.ACTIVE
+        self._showing_more = False
+        self._text_reminder_sent = False  # Reset spam control
+        
+        # Send initial message with keyboard
+        response = DialogResponse(
+            text=self.prompt,
+            keyboard=self._build_keyboard(),
+            edit_message=False,
+        )
+        await self._send_response(response)
+        
+        # Poll until complete
+        return await self.poll()
+
+    def handle_callback(self, callback_data: str) -> Optional[DialogResponse]:
+        """Handle button press - set value and complete, or show more items."""
+        if callback_data == self.CANCEL_CALLBACK:
+            return self.cancel()
+        
+        if callback_data == self.MORE_CALLBACK:
+            # Switch to text input mode for remaining items
+            self._showing_more = True
+            self.state = DialogState.AWAITING_TEXT
+            
+            # Build numbered list of remaining items
+            remaining = self._get_remaining_items()
+            lines = [f"{i + 1}. {label}" for i, (label, _) in enumerate(remaining)]
+            text = f"{self.prompt}\n\n" + "\n".join(lines) + "\n\nEnter the number of your choice:"
+            
+            keyboard = None
+            if self.include_cancel:
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)]
+                ])
+            
+            get_logger().info("paginated_choice_dialog_showing_more remaining_count=%d", len(remaining))
+            
+            return DialogResponse(
+                text=text,
+                keyboard=keyboard,
+                edit_message=False,
+            )
+        
+        # Verify callback is valid (from first page)
+        valid_callbacks = [cb for _, cb in self._get_first_page_items()]
+        if callback_data not in valid_callbacks:
+            return None  # Unknown callback
+        
+        self._value = callback_data
+        self.state = DialogState.COMPLETE
+        
+        # Find the label for the selected choice
+        label = next((lbl for lbl, cb in self.get_items() if cb == callback_data), callback_data)
+        
+        # Log selection
+        get_logger().info("paginated_choice_dialog_selected label=%s value=%s", label, callback_data)
+        
+        # Only send confirmation message if debug mode is enabled
+        if DIALOG_DEBUG:
+            return DialogResponse(
+                text=f"Selected: {label}",
+                keyboard=None,
+                edit_message=False,
+            )
+        return DialogResponse.NO_CHANGE
+
+    def handle_text_input(self, text: str) -> Optional[DialogResponse]:
+        """Handle text input when in 'showing more' mode."""
+        if not self._showing_more:
+            return None
+        
+        remaining = self._get_remaining_items()
+        
+        # Try to parse as number
+        try:
+            choice_num = int(text)
+        except ValueError:
+            # Re-prompt with error
+            return self._build_error_response(remaining)
+        
+        # Validate range
+        if choice_num < 1 or choice_num > len(remaining):
+            return self._build_error_response(remaining)
+        
+        # Valid choice - get the selected item
+        selected_label, selected_callback = remaining[choice_num - 1]
+        self._value = selected_callback
+        self.state = DialogState.COMPLETE
+        
+        # Log selection
+        get_logger().info(
+            "paginated_choice_dialog_selected label=%s value=%s",
+            selected_label,
+            selected_callback,
+        )
+        
+        # Only send confirmation message if debug mode is enabled
+        if DIALOG_DEBUG:
+            return DialogResponse(
+                text=f"Selected: {selected_label}",
+                keyboard=None,
+                edit_message=False,
+            )
+        return DialogResponse.NO_CHANGE
+
+    def _build_keyboard(self) -> InlineKeyboardMarkup:
+        """Build keyboard from first page items, plus More and Cancel buttons."""
+        buttons = [
+            [InlineKeyboardButton(label, callback_data=callback)]
+            for label, callback in self._get_first_page_items()
+        ]
+        if self._has_more_items():
+            buttons.append([InlineKeyboardButton(self.more_label, callback_data=self.MORE_CALLBACK)])
+        if self.include_cancel:
+            buttons.append([InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)])
+        return InlineKeyboardMarkup(buttons)
+
+    def reset(self) -> None:
+        """Reset dialog for reuse."""
+        super().reset()
+        self._showing_more = False
+        self._text_reminder_sent = False
+        self._prompt_message_id = None
 
 
 class UserInputDialog(Dialog, UpdatePollerMixin):

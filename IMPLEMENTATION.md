@@ -255,6 +255,7 @@ Dialogs use the Composite pattern to build complex flows from simple components.
 
 **Leaf Dialogs** (one question each):
 - `ChoiceDialog` - User selects from keyboard options
+- `PaginatedChoiceDialog` - User selects from paginated keyboard options (shows first page_size items as buttons, remaining items as numbered text list)
 - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input)
 - `ConfirmDialog` - Yes/No prompt
 - `EditEventDialog` - Edit an event's editable attributes via inline keyboard
@@ -268,6 +269,7 @@ Dialogs use the Composite pattern to build complex flows from simple components.
 ```mermaid
 classDiagram
     Dialog <|-- ChoiceDialog
+    Dialog <|-- PaginatedChoiceDialog
     Dialog <|-- UserInputDialog
     Dialog <|-- ConfirmDialog
     Dialog <|-- EditEventDialog
@@ -697,7 +699,7 @@ pattern using the Template Method:
 ```
 
 Classes that inherit `UpdatePollerMixin`:
-- **Leaf Dialogs**: `ChoiceDialog`, `UserInputDialog`, `ConfirmDialog`, `EditEventDialog`
+- **Leaf Dialogs**: `ChoiceDialog`, `PaginatedChoiceDialog`, `UserInputDialog`, `ConfirmDialog`, `EditEventDialog`
 - **Hybrid Dialogs**: `ChoiceBranchDialog` (polls for selection, then delegates)
 - **Events**: `CommandsEvent`
 
@@ -732,11 +734,11 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
    │(+ Mixin)   │    │                 │   │              │
    ├────────────┤    ├─────────────────┤   ├──────────────┤
    │ Choice     │    │ Sequence        │   │ Wrap dialog  │
-   │ UserInput  │    │ Branch          │   │ Call callback│
-   │ Confirm    │    │ ChoiceBranch*   │   │ on complete  │
-   └────────────┘    │ Loop            │   └──────────────┘
-                     └─────────────────┘
-                     (* hybrid - has Mixin)
+   │ Paginated  │    │ Branch          │   │ Call callback│
+   │ Choice     │    │ ChoiceBranch*   │   │ on complete  │
+   │ UserInput  │    │ Loop            │   └──────────────┘
+   │ Confirm    │    └─────────────────┘
+   └────────────┘    (* hybrid - has Mixin)
 ```
 
 ### Cancellation with CANCELLED Sentinel

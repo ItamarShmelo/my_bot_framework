@@ -259,6 +259,7 @@ The framework provides built-in dialog types for common interactions:
 
 **Leaf Dialogs** (atomic single-step):
 - `ChoiceDialog` - User selects from keyboard options
+- `PaginatedChoiceDialog` - User selects from paginated keyboard options (shows first page as buttons, remaining items as numbered text list)
 - `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input)
 - `ConfirmDialog` - Yes/No prompt
 - `EditEventDialog` - Edit an event's editable attributes via inline keyboard
@@ -272,7 +273,7 @@ The framework provides built-in dialog types for common interactions:
 
 ```python
 from my_bot_framework import (
-    ChoiceDialog, UserInputDialog, ConfirmDialog,
+    ChoiceDialog, PaginatedChoiceDialog, UserInputDialog, ConfirmDialog,
     SequenceDialog, DialogHandler, DialogCommand,
     CANCELLED, is_cancelled,
 )
@@ -283,6 +284,24 @@ color_dialog = ChoiceDialog("Pick a color:", [
     ("Green", "green"),
     ("Blue", "blue"),
 ])
+
+# Paginated choice dialog (for long lists)
+expenses = [
+    ("Rent $1200", "1"),
+    ("Groceries $95", "2"),
+    ("Gas $45", "3"),
+    ("Utilities $150", "4"),
+    ("Internet $60", "5"),
+    ("Phone $80", "6"),
+    ("Insurance $200", "7"),
+    # ... many more items
+]
+expense_dialog = PaginatedChoiceDialog(
+    prompt="Select expense to remove:",
+    items=expenses,
+    page_size=5,  # Show first 5 as buttons
+    more_label="More...",  # Button label for remaining items
+)
 
 # Multi-step sequence
 survey_dialog = SequenceDialog([

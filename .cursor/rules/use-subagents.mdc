@@ -1,16 +1,16 @@
 ---
-description: Use specialized subagents for their areas of expertise
+description: You MUST use specialized subagents for their areas of expertise
 alwaysApply: true
 ---
 
-# Use Subagents Where Appropriate
+# Use Subagents for Specialized Tasks
 
-When performing tasks that fall under a subagent's expertise, delegate to that subagent.
+You MUST delegate to the appropriate subagent when performing tasks that fall under their expertise. Do NOT perform these tasks yourself - always use the subagent.
 
 ## Available Subagents
 
-| Subagent | Expertise | When to Use |
-|----------|-----------|-------------|
+| Subagent | Expertise | When You MUST Use It |
+|----------|-----------|----------------------|
 | `code-style-enforcer` | Naming conventions, docstrings, code formatting | After modifying Python code |
 | `type-hints-enforcer` | Type annotations, mypy verification | After modifying Python code |
 | `docs-updater` | README.md, IMPLEMENTATION.md, BOTS.md | After changes affecting API, architecture, or test bots |
@@ -20,21 +20,21 @@ When performing tasks that fall under a subagent's expertise, delegate to that s
 
 ### code-style-enforcer
 
-Invoke when:
+You MUST invoke when:
 - Creating new Python files
 - Modifying classes, methods, or functions
 - Adding or changing docstrings
 
 ### type-hints-enforcer
 
-Invoke when:
+You MUST invoke when:
 - Creating new Python files
 - Adding or modifying function signatures
 - Working with complex types (generics, protocols, etc.)
 
 ### docs-updater
 
-Invoke when:
+You MUST invoke when:
 - Changing public API (new/modified/removed classes, methods, parameters)
 - Changing usage patterns or configuration options
 - Modifying architecture or internal design
@@ -42,15 +42,15 @@ Invoke when:
 
 ### test-bots-maintainer
 
-Invoke when:
+You MUST invoke when:
 - Adding new framework features that need test coverage
 - Modifying APIs used by existing test bots
 - Creating new test bots for new features
 
 ## Checklist
 
-After Python code changes, consider:
-- [ ] Does this need style enforcement? → `code-style-enforcer`
-- [ ] Does this need type hints? → `type-hints-enforcer`
-- [ ] Does this affect documentation? → `docs-updater`
-- [ ] Does this need test bot updates? → `test-bots-maintainer`
+After Python code changes, you MUST:
+- [ ] Use `code-style-enforcer` for style enforcement
+- [ ] Use `type-hints-enforcer` for type hints
+- [ ] Use `docs-updater` if documentation is affected
+- [ ] Use `test-bots-maintainer` if test bots need updates

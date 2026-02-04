@@ -17,7 +17,7 @@ When modifying the framework's public API, you MUST update the relevant test bot
 | `event_examples/time_event.py` | basic_bot.py |
 | `event_examples/threshold_event.py` | threshold_bot.py |
 | `event_examples/factories.py` | file_watcher_bot.py |
-| `dialog.py` | dialog_bot.py, dialog_handler_bot.py, editable_bot.py |
+| `dialog.py` | dialog_bot.py, dialog_handler_bot.py, editable_bot.py, paginated_dialog_bot.py |
 | `telegram_utilities.py` | ALL test bots (they all use message types) |
 | `utilities.py` | Depends on which utility is changed |
 | `__init__.py` | ALL test bots (imports may change) |
@@ -35,6 +35,7 @@ Each test bot tests specific features:
 | `editable_bot.py` | EditableField editing via dialogs, EditableMixin |
 | `threshold_bot.py` | ThresholdEvent class, threshold property editing |
 | `file_watcher_bot.py` | create_file_change_event factory |
+| `paginated_dialog_bot.py` | PaginatedChoiceDialog with pagination |
 
 ## Checklist
 
