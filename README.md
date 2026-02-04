@@ -382,6 +382,102 @@ def on_complete(result):
     print(f"Got result: {result}")
 ```
 
+#### Validators
+
+The framework provides reusable validation functions for `UserInputDialog`. All validators follow the pattern `(value: str) -> tuple[bool, str]` where the tuple contains `(is_valid, error_message)`.
+
+**Basic Validators:**
+
+```python
+from my_bot_framework import (
+    UserInputDialog,
+    validate_positive_float,
+    validate_positive_int,
+    validate_non_empty,
+)
+
+# Validate positive decimal numbers
+price_dialog = UserInputDialog(
+    prompt="Enter price:",
+    validator=validate_positive_float,
+)
+
+# Validate positive integers
+age_dialog = UserInputDialog(
+    prompt="Enter age:",
+    validator=validate_positive_int,
+)
+
+# Validate non-empty strings
+name_dialog = UserInputDialog(
+    prompt="Enter name:",
+    validator=validate_non_empty,
+)
+```
+
+**Factory Validators:**
+
+Factory functions create validators with custom parameters:
+
+```python
+from my_bot_framework import (
+    validate_int_range,
+    validate_float_range,
+    validate_date_format,
+    validate_regex,
+)
+
+# Integer range validation (1-100 inclusive)
+age_validator = validate_int_range(1, 100)
+age_dialog = UserInputDialog(
+    prompt="Enter age (1-100):",
+    validator=age_validator,
+)
+
+# Float range validation (0.0-1.0 inclusive)
+probability_validator = validate_float_range(0.0, 1.0)
+prob_dialog = UserInputDialog(
+    prompt="Enter probability (0.0-1.0):",
+    validator=probability_validator,
+)
+
+# Date format validation
+date_validator = validate_date_format("%Y-%m-%d", "YYYY-MM-DD")
+date_dialog = UserInputDialog(
+    prompt="Enter date (YYYY-MM-DD):",
+    validator=date_validator,
+)
+
+# Regex pattern validation
+identifier_validator = validate_regex(
+    r"^[a-z_][a-z0-9_]*$",
+    "Invalid identifier. Use lowercase letters, numbers, and underscores.",
+)
+name_dialog = UserInputDialog(
+    prompt="Enter identifier:",
+    validator=identifier_validator,
+)
+```
+
+**Custom Validators:**
+
+You can create your own validator functions:
+
+```python
+def validate_email(value: str) -> tuple[bool, str]:
+    """Validate email format."""
+    import re
+    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    if re.match(pattern, value):
+        return True, ""
+    return False, "Invalid email format."
+
+email_dialog = UserInputDialog(
+    prompt="Enter email:",
+    validator=validate_email,
+)
+```
+
 ### Message Types
 
 The framework provides several message wrappers:

@@ -47,7 +47,8 @@ my_bot_framework/
 │   └── factories.py      # Factory functions (create_file_change_event)
 ├── dialog.py             # Interactive dialog system
 ├── telegram_utilities.py # Message type wrappers
-└── utilities.py          # Helper functions
+├── utilities.py          # Helper functions
+└── validators.py         # Reusable validation functions for UserInputDialog
 ```
 
 ## Module Dependency Graph
@@ -127,6 +128,7 @@ graph TD
 | `event_examples/time_event.py` | `event`, `telegram_utilities` |
 | `event_examples/threshold_event.py` | `event`, `telegram_utilities` |
 | `dialog.py` | `accessors`, `polling`, `telegram_utilities` |
+| `validators.py` | *(no internal dependencies - uses stdlib only)* |
 | `bot_application.py` | `accessors`, `polling`, `event`, `telegram_utilities` |
 | `__init__.py` | all modules (re-exports public API) |
 
@@ -566,6 +568,109 @@ The `editable.py` module contains:
 - **`MessageBuilder`** - Abstract interface for editable message builders
 - **`FunctionCondition`** - Wrapper for no-arg callables as conditions
 - **`FunctionMessageBuilder`** - Wrapper for no-arg callables as message builders
+
+## Validators Module
+
+The `validators.py` module provides reusable validation functions for `UserInputDialog`. All validators follow a consistent interface pattern.
+
+### Validator Interface
+
+All validators implement the `Validator` type alias:
+
+```python
+Validator = Callable[[str], Tuple[bool, str]]
+```
+
+The function signature is:
+- **Input**: `value: str` - The user input string to validate
+- **Output**: `tuple[bool, str]` - A tuple containing:
+  - `bool`: `True` if valid, `False` if invalid
+  - `str`: Error message (empty string `""` on success, descriptive message on failure)
+
+### Basic Validators
+
+The module provides three simple validators:
+
+1. **`validate_positive_float(value: str)`** - Validates that input is a positive decimal number (accepts both integers and decimals like "5", "3.14", "0.5")
+2. **`validate_positive_int(value: str)`** - Validates that input is a positive integer
+3. **`validate_non_empty(value: str)`** - Validates that input is non-empty after stripping whitespace
+
+### Factory Validators
+
+Factory functions create validators with custom parameters using closures:
+
+1. **`validate_int_range(min_val: int, max_val: int) -> Validator`**
+   - Returns a validator checking if input is an integer within the specified range (inclusive)
+   - Example: `validate_int_range(1, 100)` validates integers from 1 to 100
+
+2. **`validate_float_range(min_val: float, max_val: float) -> Validator`**
+   - Returns a validator checking if input is a float within the specified range (inclusive)
+   - Example: `validate_float_range(0.0, 1.0)` validates floats from 0.0 to 1.0
+
+3. **`validate_date_format(fmt: str = "%m/%Y", description: str = "MM/YYYY") -> Validator`**
+   - Returns a validator checking if input matches a datetime format string
+   - Uses `datetime.strptime()` for parsing
+   - The `description` parameter provides a human-readable format description for error messages
+   - Example: `validate_date_format("%Y-%m-%d", "YYYY-MM-DD")`
+
+4. **`validate_regex(pattern: str, error_msg: str) -> Validator`**
+   - Returns a validator checking if input matches a regular expression pattern (full match)
+   - Compiles the pattern once at factory call time for efficiency
+   - Uses `re.fullmatch()` to ensure the entire string matches
+   - Example: `validate_regex(r"^[a-z_][a-z0-9_]*$", "Invalid identifier format.")`
+
+### Design Patterns
+
+**Closure Pattern**: Factory validators use closures to capture parameters:
+
+```python
+def validate_int_range(min_val: int, max_val: int) -> Validator:
+    def validator(value: str) -> Tuple[bool, str]:
+        # Closure captures min_val and max_val
+        try:
+            num = int(value)
+            if num < min_val or num > max_val:
+                return False, f"Value must be between {min_val} and {max_val}."
+            return True, ""
+        except ValueError:
+            return False, "Invalid integer. Please enter a whole number."
+    return validator
+```
+
+**Pattern Compilation**: `validate_regex` compiles the pattern once at factory time:
+
+```python
+def validate_regex(pattern: str, error_msg: str) -> Validator:
+    compiled = re.compile(pattern)  # Compile once
+    
+    def validator(value: str) -> Tuple[bool, str]:
+        if compiled.fullmatch(value):  # Reuse compiled pattern
+            return True, ""
+        return False, error_msg
+    return validator
+```
+
+### Integration with UserInputDialog
+
+Validators are used with `UserInputDialog` to validate user input:
+
+```python
+dialog = UserInputDialog(
+    prompt="Enter age:",
+    validator=validate_int_range(1, 100),
+)
+```
+
+When the user submits text, `UserInputDialog` calls the validator function. If validation fails, the error message is displayed to the user and they can retry.
+
+### Module Structure
+
+The `validators.py` module contains:
+- **`Validator`** - Type alias for validator functions
+- **Basic validators** - `validate_positive_float`, `validate_positive_int`, `validate_non_empty`
+- **Factory functions** - `validate_int_range`, `validate_float_range`, `validate_date_format`, `validate_regex`
+
+All validators are synchronous functions (no async/await) and are designed to be fast and lightweight for real-time user input validation.
 
 ## Async Patterns
 
