@@ -502,6 +502,8 @@ These factories encapsulate common condition patterns with internal state manage
 | `TelegramOptionsMessage` | Text + keyboard | Inline buttons |
 | `TelegramEditMessage` | Edit existing | Update text/keyboard |
 | `TelegramCallbackAnswerMessage` | Callback ACK | Toast notifications |
+| `TelegramReplyKeyboardMessage` | Text + reply keyboard | Persistent keyboard at bottom of chat (ReplyKeyboardMarkup) |
+| `TelegramRemoveReplyKeyboardMessage` | Text | Removes persistent reply keyboard (ReplyKeyboardRemove) |
 
 **Note:** All message types use `parse_mode=HTML`. If text contains unescaped HTML special characters, an `InvalidHtmlError` is raised with instructions to use `html.escape()`.
 

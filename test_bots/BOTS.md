@@ -409,6 +409,43 @@ python test_bots/utilities_bot.py
 
 ---
 
+### reply_keyboard_bot.py
+
+**Purpose:** Tests the TelegramReplyKeyboardMessage and TelegramRemoveReplyKeyboardMessage classes.
+
+**Features tested:**
+- `TelegramReplyKeyboardMessage` - Sending messages with persistent reply keyboards
+- `TelegramRemoveReplyKeyboardMessage` - Removing persistent reply keyboards
+- Keyboard layouts (2x2, single row, single column)
+- `resize_keyboard` parameter (resized vs full-size buttons)
+- `one_time_keyboard` parameter (keyboard hides after use)
+- Combined parameters (one_time_keyboard + resize_keyboard together)
+- HTML formatting in message text
+- Custom removal messages with HTML formatting
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/info` | Shows what this bot tests |
+| `/keyboard` | Show a simple 2x2 reply keyboard |
+| `/row` | Show a single row reply keyboard |
+| `/column` | Show a single column reply keyboard |
+| `/onetime` | Show a one-time keyboard (hides after use) |
+| `/noresize` | Show keyboard without resize (tall buttons) |
+| `/html` | Show keyboard with HTML-formatted text |
+| `/combined` | Show keyboard with combined parameters (one-time + no-resize) |
+| `/remove` | Remove the reply keyboard |
+| `/remove_custom` | Remove keyboard with custom HTML message |
+| `/commands` | Lists all commands (built-in) |
+| `/terminate` | Shuts down the bot (built-in) |
+
+**Run:**
+```bash
+python test_bots/reply_keyboard_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:

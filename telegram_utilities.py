@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Final, Optional
 
-from telegram import Bot, Message
+from telegram import Bot, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import MessageLimit, ParseMode
 from telegram.error import BadRequest
 
@@ -21,14 +21,14 @@ CHUNK_PREFIX_OVERHEAD = 20
 
 class InvalidHtmlError(Exception):
     """Raised when message text contains invalid HTML that Telegram cannot parse.
-    
+
     Users should escape their text using html.escape() before passing it to
     TelegramMessage classes if the text may contain HTML special characters.
     """
 
     def __init__(self, original_error: Exception, text: str) -> None:
         """Create an InvalidHtmlError with context about the failure.
-        
+
         Args:
             original_error: The original Telegram API error.
             text: The text that caused the parsing error (truncated for display).
@@ -67,7 +67,7 @@ class TelegramMessage:
 
 class TelegramTextMessage(TelegramMessage):
     """Plain text message with automatic chunking for long messages."""
-    
+
     message: str
 
     def __init__(self, message: str) -> None:
@@ -118,7 +118,7 @@ class TelegramTextMessage(TelegramMessage):
 
 class TelegramImageMessage(TelegramMessage):
     """Image message with optional caption."""
-    
+
     image_path: str | Path
     caption: str | None
 
@@ -204,7 +204,7 @@ class TelegramDocumentMessage(TelegramMessage):
 class TelegramOptionsMessage(TelegramMessage):
     """Message with inline keyboard buttons."""
 
-    def __init__(self, text: str, reply_markup) -> None:
+    def __init__(self, text: str, reply_markup: InlineKeyboardMarkup) -> None:
         """Create a message with inline keyboard.
         
         Args:
@@ -244,7 +244,7 @@ class TelegramEditMessage(TelegramMessage):
         self,
         message_id: int,
         text: str,
-        reply_markup=None,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
         """Create an edit message payload.
         
@@ -284,7 +284,7 @@ class TelegramCallbackAnswerMessage(TelegramMessage):
 
     def __init__(self, callback_query_id: str, text: Optional[str] = None) -> None:
         """Create a callback answer payload.
-        
+
         Args:
             callback_query_id: The callback query ID to answer.
             text: Optional text to show as a toast notification.
@@ -314,7 +314,7 @@ class TelegramRemoveKeyboardMessage(TelegramMessage):
 
     def __init__(self, message_id: int) -> None:
         """Create a remove keyboard payload.
-        
+
         Args:
             message_id: The ID of the message to remove keyboard from.
         """
@@ -338,6 +338,112 @@ class TelegramRemoveKeyboardMessage(TelegramMessage):
             # Ignore "message not modified" errors (keyboard already removed)
             if "message is not modified" not in str(exc).lower():
                 logger.error("telegram_remove_keyboard_failed error=%s", exc)
+
+
+class TelegramReplyKeyboardMessage(TelegramMessage):
+    """Message with a persistent reply keyboard at the bottom of the chat."""
+
+    text: str
+    keyboard: list[list[str]]
+    resize_keyboard: bool
+    one_time_keyboard: bool
+    sent_message: Optional[Message]
+
+    def __init__(
+        self,
+        text: str,
+        keyboard: list[list[str]],
+        resize_keyboard: bool = True,
+        one_time_keyboard: bool = False,
+    ) -> None:
+        """Create a message with reply keyboard.
+
+        Args:
+            text: The message text.
+            keyboard: 2D list of button labels (rows x columns).
+            resize_keyboard: If True, keyboard will be resized to fit buttons.
+            one_time_keyboard: If True, keyboard hides after one use.
+        """
+        self.text = text
+        self.keyboard = keyboard
+        self.resize_keyboard = resize_keyboard
+        self.one_time_keyboard = one_time_keyboard
+        self.sent_message = None
+
+    async def send(
+        self,
+        bot: Bot,
+        chat_id: str,
+        logger: logging.Logger,
+    ) -> None:
+        """Send a message with a persistent reply keyboard.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID to send the message to.
+            logger: Logger for recording send status.
+        """
+        try:
+            reply_markup = ReplyKeyboardMarkup(
+                self.keyboard,
+                resize_keyboard=self.resize_keyboard,
+                one_time_keyboard=self.one_time_keyboard,
+            )
+            self.sent_message = await bot.send_message(
+                chat_id=chat_id,
+                text=self.text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML,
+            )
+            logger.info('reply_keyboard_message_sent')
+        except Exception as exc:
+            if _is_html_parse_error(exc):
+                raise InvalidHtmlError(exc, self.text) from exc
+            logger.error("telegram_reply_keyboard_message_failed error=%s", exc)
+            await _try_send_error_message(bot, chat_id, logger, exc)
+
+
+class TelegramRemoveReplyKeyboardMessage(TelegramMessage):
+    """Remove the persistent reply keyboard."""
+
+    text: str
+    sent_message: Optional[Message]
+
+    def __init__(self, text: str = "Keyboard removed.") -> None:
+        """Create a message that removes the reply keyboard.
+
+        Args:
+            text: Message text to send along with keyboard removal.
+        """
+        self.text = text
+        self.sent_message = None
+
+    async def send(
+        self,
+        bot: Bot,
+        chat_id: str,
+        logger: logging.Logger,
+    ) -> None:
+        """Send a message that removes the reply keyboard.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID to send the message to.
+            logger: Logger for recording send status.
+        """
+        try:
+            self.sent_message = await bot.send_message(
+                chat_id=chat_id,
+                text=self.text,
+                reply_markup=ReplyKeyboardRemove(),
+                parse_mode=ParseMode.HTML,
+            )
+            logger.info('reply_keyboard_removed')
+        except Exception as exc:
+            if _is_html_parse_error(exc):
+                raise InvalidHtmlError(exc, self.text) from exc
+            logger.error("telegram_remove_reply_keyboard_failed error=%s", exc)
+            await _try_send_error_message(bot, chat_id, logger, exc)
 
 
 async def _try_send_error_message(

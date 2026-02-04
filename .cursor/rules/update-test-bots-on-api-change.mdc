@@ -36,6 +36,9 @@ Each test bot tests specific features:
 | `threshold_bot.py` | ThresholdEvent class, threshold property editing |
 | `file_watcher_bot.py` | create_file_change_event factory |
 | `paginated_dialog_bot.py` | PaginatedChoiceDialog with pagination |
+| `document_bot.py` | TelegramDocumentMessage, captions, file paths |
+| `utilities_bot.py` | Formatting utilities, validators |
+| `reply_keyboard_bot.py` | TelegramReplyKeyboardMessage, TelegramRemoveReplyKeyboardMessage |
 
 ## Checklist
 
@@ -51,13 +54,19 @@ When making API changes:
 
 ## When to Create NEW Test Bots
 
-Create a new test bot when adding:
+**MANDATORY: You MUST create a new test bot when adding ANY of the following:**
 
-- A new Event subclass (like ThresholdEvent) → Create dedicated test bot
-- A new factory function → Create dedicated test bot
-- A new Dialog type → Add to dialog_bot.py or create new bot
-- A new Command type → Create dedicated test bot
-- Significant new pattern/feature → Create dedicated test bot
+| New Feature Type | Action Required |
+|------------------|-----------------|
+| New TelegramMessage type | **CREATE** dedicated test bot (e.g., `reply_keyboard_bot.py`) |
+| New Event subclass | **CREATE** dedicated test bot |
+| New factory function | **CREATE** dedicated test bot |
+| New Dialog type | **ADD** to `dialog_bot.py` OR **CREATE** new bot |
+| New Command type | **CREATE** dedicated test bot |
+| New utility functions | **EXTEND** `utilities_bot.py` OR **CREATE** new bot |
+| Significant new pattern | **CREATE** dedicated test bot |
+
+**A feature is NOT complete until its test bot exists and compiles successfully.**
 
 ## Examples
 

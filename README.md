@@ -489,6 +489,8 @@ from my_bot_framework import (
     TelegramDocumentMessage,
     TelegramOptionsMessage,
     TelegramEditMessage,
+    TelegramReplyKeyboardMessage,
+    TelegramRemoveReplyKeyboardMessage,
 )
 
 # Plain text (auto-chunked for long messages)
@@ -505,6 +507,20 @@ TelegramOptionsMessage("Choose an option:", keyboard_markup)
 
 # Edit existing message
 TelegramEditMessage(message_id=123, text="Updated text")
+
+# Message with persistent reply keyboard (buttons at bottom of chat)
+TelegramReplyKeyboardMessage(
+    text="Select an option:",
+    keyboard=[
+        ["Option 1", "Option 2"],
+        ["Option 3"],
+    ],
+    resize_keyboard=True,  # Auto-resize buttons to fit
+    one_time_keyboard=False,  # Keyboard stays visible after use
+)
+
+# Remove the persistent reply keyboard
+TelegramRemoveReplyKeyboardMessage("Keyboard removed.")
 ```
 
 #### HTML Escaping

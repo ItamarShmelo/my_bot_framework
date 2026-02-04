@@ -5,7 +5,7 @@ with event-driven architecture, interactive dialogs, and message queuing.
 
 Usage:
     from my_bot_framework import BotApplication
-    
+
     app = BotApplication.initialize(
         token="YOUR_BOT_TOKEN",
         chat_id="YOUR_CHAT_ID",
@@ -57,6 +57,8 @@ from .telegram_utilities import (
     TelegramEditMessage,
     TelegramCallbackAnswerMessage,
     TelegramRemoveKeyboardMessage,
+    TelegramReplyKeyboardMessage,
+    TelegramRemoveReplyKeyboardMessage,
     InvalidHtmlError,
 )
 from .dialog import (
@@ -133,6 +135,8 @@ __all__ = [
     "TelegramEditMessage",
     "TelegramCallbackAnswerMessage",
     "TelegramRemoveKeyboardMessage",
+    "TelegramReplyKeyboardMessage",
+    "TelegramRemoveReplyKeyboardMessage",
     "InvalidHtmlError",
     # Dialog
     "Dialog",

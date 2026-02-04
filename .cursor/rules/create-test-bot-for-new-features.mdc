@@ -1,21 +1,27 @@
 ---
-description: Create test bot when adding new framework functionality
+description: MANDATORY - Create test bot when adding new framework functionality
 globs:
 alwaysApply: true
 ---
 
 # Create Test Bot for New Features
 
-When adding significant new functionality to the framework, create a test bot to validate it.
+**MANDATORY REQUIREMENT:** When adding ANY new functionality to the framework, you MUST create a test bot to validate it. This is NOT optional.
 
-## When to Create a New Test Bot
+## When You MUST Create a New Test Bot
 
-Create a new test bot when adding:
-- New Event types (like `ActivateOnConditionEvent`, `TimeEvent`, `ThresholdEvent`)
-- New Command types (like `SimpleCommand`, `DialogCommand`)
-- New Dialog patterns or states
-- New TelegramMessage types
-- Major new utilities or patterns
+**You are REQUIRED to create a test bot when adding:**
+
+| New Feature | Action | Example |
+|-------------|--------|---------|
+| New TelegramMessage type | **CREATE** test bot | `TelegramReplyKeyboardMessage` → `reply_keyboard_bot.py` |
+| New Event type | **CREATE** test bot | `ThresholdEvent` → `threshold_bot.py` |
+| New Command type | **CREATE** test bot | `DialogCommand` → dedicated bot |
+| New Dialog type | **CREATE** or extend `dialog_bot.py` | `PaginatedChoiceDialog` → `paginated_dialog_bot.py` |
+| New factory function | **CREATE** test bot | `create_file_change_event` → `file_watcher_bot.py` |
+| New utilities | **EXTEND** `utilities_bot.py` or **CREATE** new bot | formatting functions |
+
+**DO NOT consider a feature complete until its test bot exists and compiles successfully.**
 
 ## Test Bot Requirements
 
