@@ -371,6 +371,44 @@ python test_bots/paginated_dialog_bot.py
 
 ---
 
+### utilities_bot.py
+
+**Purpose:** Tests formatting utilities and validation functions.
+
+**Features tested:**
+- `format_numbered_list` - Format items as numbered list with custom start
+- `format_bullet_list` - Format items as bullet list with custom bullet character
+- `format_key_value_pairs` - Format key-value pairs with custom separator
+- `divide_message_to_chunks` - Split messages into fixed-size chunks
+- `validate_positive_int` - Validate positive integers
+- `validate_positive_float` - Validate positive floats
+- `validate_int_range` - Validate integers within a range
+- `validate_float_range` - Validate floats within a range
+- `validate_date_format` - Validate date strings matching a format
+- `validate_regex` - Validate strings matching a regex pattern
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/info` | Shows what this bot tests |
+| `/numbered` | Demonstrates format_numbered_list with examples |
+| `/bullet` | Demonstrates format_bullet_list with examples |
+| `/keyvalue` | Demonstrates format_key_value_pairs with examples |
+| `/chunks` | Demonstrates divide_message_to_chunks with examples |
+| `/validate_int` | Test validate_positive_int on user input |
+| `/validate_float` | Test validate_positive_float on user input |
+| `/validate_range` | Test validate_int_range(1, 100) on user input |
+| `/validate_float_range` | Test validate_float_range(0.0, 1.0) on user input |
+| `/validate_date` | Test validate_date_format("%Y-%m-%d") on user input |
+| `/validate_email` | Test validate_regex with email pattern on user input |
+
+**Run:**
+```bash
+python test_bots/utilities_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:

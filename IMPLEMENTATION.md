@@ -242,12 +242,11 @@ Message builders are pluggable callables that generate content:
 def simple_builder():
     return "Hello!"
 
-class ComplexBuilder(CallUpdatesInternalState):
+class ComplexBuilder:
     def __init__(self, threshold: int):
         self.threshold = threshold
 
-    async def __call__(self, **kwargs):
-        super().__call__(**kwargs)  # Update self.threshold from kwargs
+    async def __call__(self):
         return f"Threshold: {self.threshold}"
 ```
 
@@ -671,6 +670,47 @@ The `validators.py` module contains:
 - **Factory functions** - `validate_int_range`, `validate_float_range`, `validate_date_format`, `validate_regex`
 
 All validators are synchronous functions (no async/await) and are designed to be fast and lightweight for real-time user input validation.
+
+## Utilities Module
+
+The `utilities.py` module provides helper functions for common formatting and message processing tasks. All formatting functions automatically escape HTML special characters to ensure safe display in Telegram messages when using HTML parse mode.
+
+### List Formatting Functions
+
+Three functions format lists for Telegram messages with automatic HTML escaping:
+
+1. **`format_numbered_list(items: list[str], start: int = 1) -> str`**
+   - Formats items as a numbered list ("1. Item\n2. Item\n...")
+   - Each item is HTML-escaped using `html.escape()`
+   - Returns empty string if `items` is empty
+   - Example: `format_numbered_list(["Apple", "Banana"])` → `"1. Apple\n2. Banana"`
+
+2. **`format_bullet_list(items: list[str], bullet: str = "•") -> str`**
+   - Formats items as a bullet list ("• Item\n• Item\n...")
+   - Each item is HTML-escaped using `html.escape()`
+   - Returns empty string if `items` is empty
+   - Example: `format_bullet_list(["One", "Two"], bullet="-")` → `"- One\n- Two"`
+
+3. **`format_key_value_pairs(pairs: list[tuple[str, str]], separator: str = ": ") -> str`**
+   - Formats key-value pairs ("Key: Value\n...")
+   - Both keys and values are HTML-escaped using `html.escape()`
+   - Returns empty string if `pairs` is empty
+   - Example: `format_key_value_pairs([("Name", "John")], separator=" = ")` → `"Name = John"`
+
+### HTML Escaping
+
+All three formatting functions use Python's `html.escape()` function to escape HTML special characters (`<`, `>`, `&`) in user-provided content. This ensures that user input containing these characters is displayed literally in Telegram messages rather than being interpreted as HTML markup.
+
+**Design Pattern**: These functions follow a consistent pattern:
+- Accept a list/sequence of items
+- Return empty string for empty input
+- Apply `html.escape()` to all user-provided strings
+- Join items with newlines
+
+### Other Utilities
+
+The module also contains:
+- **`divide_message_to_chunks()`** - Splits messages into fixed-size chunks for Telegram's message limits
 
 ## Async Patterns
 

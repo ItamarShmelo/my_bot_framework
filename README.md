@@ -613,19 +613,6 @@ field = EditableAttribute(
 
 ## Utilities
 
-### HTML Message Formatting
-
-```python
-from my_bot_framework import format_message_html
-
-html = format_message_html([
-    ("Status", "Running", None),
-    ("Memory", 85.5, ".1f"),
-    ("Uptime", "2 days", None),
-])
-# Returns formatted <pre> block with aligned labels
-```
-
 ### Message Chunking
 
 Long messages are automatically chunked to fit Telegram's message limit:
@@ -635,6 +622,46 @@ from my_bot_framework import divide_message_to_chunks
 
 chunks = divide_message_to_chunks(long_text, chunk_size=4000)
 ```
+
+### List Formatting
+
+Format lists for Telegram messages with automatic HTML escaping:
+
+```python
+from my_bot_framework import (
+    format_numbered_list,
+    format_bullet_list,
+    format_key_value_pairs,
+)
+
+# Numbered list (default starts at 1)
+items = ["First item", "Second item", "Third item"]
+numbered = format_numbered_list(items)
+# Returns: "1. First item\n2. Second item\n3. Third item"
+
+# Custom starting number
+numbered = format_numbered_list(items, start=5)
+# Returns: "5. First item\n6. Second item\n7. Third item"
+
+# Bullet list (default uses "•")
+bulleted = format_bullet_list(items)
+# Returns: "• First item\n• Second item\n• Third item"
+
+# Custom bullet character
+bulleted = format_bullet_list(items, bullet="-")
+# Returns: "- First item\n- Second item\n- Third item"
+
+# Key-value pairs (default separator is ": ")
+pairs = [("Name", "John"), ("Age", "30"), ("City", "New York")]
+kv_pairs = format_key_value_pairs(pairs)
+# Returns: "Name: John\nAge: 30\nCity: New York"
+
+# Custom separator
+kv_pairs = format_key_value_pairs(pairs, separator=" = ")
+# Returns: "Name = John\nAge = 30\nCity = New York"
+```
+
+**Note:** All three functions automatically escape HTML special characters (`<`, `>`, `&`) in the input strings, making them safe for use with Telegram's HTML parse mode. Empty lists return an empty string.
 
 ## License
 

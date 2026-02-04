@@ -80,9 +80,10 @@ from .dialog import (
     set_dialog_debug,
 )
 from .utilities import (
-    CallUpdatesInternalState,
     divide_message_to_chunks,
-    format_message_html,
+    format_numbered_list,
+    format_bullet_list,
+    format_key_value_pairs,
 )
 from .event_examples import (
     TimeEvent,
@@ -156,9 +157,10 @@ __all__ = [
     "DIALOG_DEBUG",
     "set_dialog_debug",
     # Utilities
-    "CallUpdatesInternalState",
     "divide_message_to_chunks",
-    "format_message_html",
+    "format_numbered_list",
+    "format_bullet_list",
+    "format_key_value_pairs",
     "flush_pending_updates",
     "poll_updates",
     "get_chat_id_from_update",
