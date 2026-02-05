@@ -2336,6 +2336,7 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
                 TelegramRemoveReplyKeyboardMessage("Cancelled.")
             )
             self.cancel()
+            self._choosing = False  # Stop polling
             return
 
         # Check if text matches a branch label
