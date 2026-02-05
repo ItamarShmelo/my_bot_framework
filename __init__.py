@@ -78,11 +78,6 @@ from .dialog import (
     ReplyKeyboardConfirmDialog,
     ReplyKeyboardPaginatedChoiceDialog,
     ReplyKeyboardChoiceBranchDialog,
-    # Backward compatibility aliases
-    ChoiceDialog,
-    PaginatedChoiceDialog,
-    ConfirmDialog,
-    ChoiceBranchDialog,
     # Other dialogs
     UserInputDialog,
     SequenceDialog,
@@ -174,11 +169,6 @@ __all__ = [
     "ReplyKeyboardConfirmDialog",
     "ReplyKeyboardPaginatedChoiceDialog",
     "ReplyKeyboardChoiceBranchDialog",
-    # Backward compatibility aliases
-    "ChoiceDialog",
-    "PaginatedChoiceDialog",
-    "ConfirmDialog",
-    "ChoiceBranchDialog",
     # Other dialogs
     "UserInputDialog",
     "SequenceDialog",

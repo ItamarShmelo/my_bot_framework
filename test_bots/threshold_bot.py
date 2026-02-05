@@ -12,6 +12,7 @@ import logging
 import random
 import sys
 from pathlib import Path
+from typing import Any
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -28,20 +29,27 @@ from my_bot_framework import (
 )
 
 
-def get_credentials():
-    """Get bot credentials from .token and .chat_id files in test_bots directory."""
+def get_credentials() -> tuple[str, str]:
+    """Get bot credentials from .token and .chat_id files in test_bots directory.
+
+    Returns:
+        Tuple of (token, chat_id) from credential files.
+
+    Raises:
+        RuntimeError: If .token or .chat_id files are missing or empty.
+    """
     test_bots_dir = Path(__file__).resolve().parent
     token_file = test_bots_dir / ".token"
     chat_id_file = test_bots_dir / ".chat_id"
-    
+
     if not token_file.exists() or not chat_id_file.exists():
         raise RuntimeError(
             "Missing credential files. Create .token and .chat_id files in test_bots directory."
         )
-    
+
     token = token_file.read_text().strip()
     chat_id = chat_id_file.read_text().strip()
-    
+
     if not token or not chat_id:
         raise RuntimeError(
             "Empty credential files. Ensure .token and .chat_id contain valid values."
@@ -72,23 +80,24 @@ def get_memory_value() -> float:
     return _memory_value
 
 
-def main():
+def main() -> None:
+    """Run the threshold test bot."""
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logger = logging.getLogger("threshold_bot")
-    
+
     token, chat_id = get_credentials()
-    
+
     # Initialize the bot
     app = BotApplication.initialize(
         token=token,
         chat_id=chat_id,
         logger=logger,
     )
-    
+
     # Create CPU threshold event
     cpu_event = ThresholdEvent(
         event_name="high_cpu",
@@ -100,7 +109,7 @@ def main():
         cooldown_seconds=30.0,  # 30 second cooldown
     )
     app.register_event(cpu_event)
-    
+
     # Create memory threshold event
     memory_event = ThresholdEvent(
         event_name="high_memory",
@@ -112,7 +121,7 @@ def main():
         cooldown_seconds=30.0,
     )
     app.register_event(memory_event)
-    
+
     # Command to show current values
     app.register_command(SimpleCommand(
         command="/status",
@@ -123,7 +132,7 @@ def main():
             f"Memory: <code>{_memory_value:.1f}%</code> (threshold: {memory_event.threshold})"
         ),
     ))
-    
+
     # Command to show thresholds
     app.register_command(SimpleCommand(
         command="/thresholds",
@@ -134,14 +143,18 @@ def main():
             f"Memory: <code>{memory_event.threshold}</code>"
         ),
     ))
-    
+
     # Dialog command to edit CPU threshold
-    async def on_cpu_threshold_edited(result):
-        """Handle CPU threshold edit."""
+    async def on_cpu_threshold_edited(result: Any) -> None:
+        """Handle CPU threshold edit.
+        
+        Args:
+            result: The dialog result containing the new threshold value or CANCELLED.
+        """
         if is_cancelled(result):
             await get_app().send_messages("❌ CPU threshold edit cancelled.")
             return
-        
+
         try:
             new_value = float(result)
             cpu_event.threshold = new_value
@@ -150,7 +163,7 @@ def main():
             )
         except ValueError as e:
             await get_app().send_messages(f"❌ Invalid value: {e}")
-    
+
     cpu_dialog = DialogHandler(
         UserInputDialog(
             "Enter new CPU threshold (0-100):",
@@ -161,20 +174,24 @@ def main():
         ),
         on_complete=on_cpu_threshold_edited,
     )
-    
+
     app.register_command(DialogCommand(
         command="/edit_cpu",
         description="Edit CPU threshold",
         dialog=cpu_dialog,
     ))
-    
+
     # Dialog command to edit memory threshold
-    async def on_memory_threshold_edited(result):
-        """Handle memory threshold edit."""
+    async def on_memory_threshold_edited(result: Any) -> None:
+        """Handle memory threshold edit.
+        
+        Args:
+            result: The dialog result containing the new threshold value or CANCELLED.
+        """
         if is_cancelled(result):
             await get_app().send_messages("❌ Memory threshold edit cancelled.")
             return
-        
+
         try:
             new_value = float(result)
             memory_event.threshold = new_value
@@ -183,7 +200,7 @@ def main():
             )
         except ValueError as e:
             await get_app().send_messages(f"❌ Invalid value: {e}")
-    
+
     memory_dialog = DialogHandler(
         UserInputDialog(
             "Enter new memory threshold (0-100):",
@@ -194,13 +211,13 @@ def main():
         ),
         on_complete=on_memory_threshold_edited,
     )
-    
+
     app.register_command(DialogCommand(
         command="/edit_memory",
         description="Edit memory threshold",
         dialog=memory_dialog,
     ))
-    
+
     # Info command
     info_text = (
         "<b>Threshold Bot</b>\n\n"
@@ -220,9 +237,9 @@ def main():
         description="Show what this bot tests",
         message_builder=lambda: info_text,
     ))
-    
+
     # Send startup message and run
-    async def send_startup_and_run():
+    async def send_startup_and_run() -> None:
         await app.send_messages(
             f"🤖 <b>Threshold Bot Started</b>\n\n"
             f"{info_text}\n\n"
@@ -230,7 +247,7 @@ def main():
         )
         logger.info("Starting threshold_bot...")
         await app.run()
-    
+
     asyncio.run(send_startup_and_run())
 
 

@@ -259,9 +259,9 @@ The framework provides built-in dialog types for common interactions:
 
 **Leaf Dialogs** (atomic single-step):
 - **Inline Keyboard** (attached to message):
-  - `InlineKeyboardChoiceDialog` / `ChoiceDialog` (alias) - User selects from inline keyboard options
-  - `InlineKeyboardPaginatedChoiceDialog` / `PaginatedChoiceDialog` (alias) - User selects from paginated inline keyboard options (shows first page as buttons, remaining items as numbered text list)
-  - `InlineKeyboardConfirmDialog` / `ConfirmDialog` (alias) - Yes/No prompt with inline keyboard
+  - `InlineKeyboardChoiceDialog` - User selects from inline keyboard options
+  - `InlineKeyboardPaginatedChoiceDialog` - User selects from paginated inline keyboard options (shows first page as buttons, remaining items as numbered text list)
+  - `InlineKeyboardConfirmDialog` - Yes/No prompt with inline keyboard
 - **Reply Keyboard** (buttons at bottom of chat):
   - `ReplyKeyboardChoiceDialog` - User selects from reply keyboard options
   - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
@@ -273,14 +273,15 @@ The framework provides built-in dialog types for common interactions:
 **Composite Dialogs** (multi-step):
 - `SequenceDialog` - Run dialogs in order
 - `BranchDialog` - Condition-based branching
-- `InlineKeyboardChoiceBranchDialog` / `ChoiceBranchDialog` (alias) - User selects branch via inline keyboard
+- `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard
 - `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard
 - `LoopDialog` - Repeat until exit condition
 - `DialogHandler` - Wrap dialog with completion callback
 
 ```python
 from my_bot_framework import (
-    ChoiceDialog, PaginatedChoiceDialog, UserInputDialog, ConfirmDialog,
+    InlineKeyboardChoiceDialog, InlineKeyboardPaginatedChoiceDialog,
+    InlineKeyboardConfirmDialog, UserInputDialog,
     ReplyKeyboardChoiceDialog, ReplyKeyboardConfirmDialog,
     SequenceDialog, DialogHandler, DialogCommand,
     KeyboardType, create_choice_dialog, create_confirm_dialog,
@@ -400,18 +401,6 @@ branch = create_choice_branch_dialog(
     keyboard_type=KeyboardType.INLINE,
     include_cancel=True,
 )
-```
-
-#### Backward Compatibility
-
-The old dialog class names (`ChoiceDialog`, `ConfirmDialog`, `PaginatedChoiceDialog`, `ChoiceBranchDialog`) are still available as aliases for the inline keyboard versions. They work exactly as before:
-
-```python
-# These are equivalent:
-ChoiceDialog(...) == InlineKeyboardChoiceDialog(...)
-ConfirmDialog(...) == InlineKeyboardConfirmDialog(...)
-PaginatedChoiceDialog(...) == InlineKeyboardPaginatedChoiceDialog(...)
-ChoiceBranchDialog(...) == InlineKeyboardChoiceBranchDialog(...)
 ```
 
 #### EditEventDialog

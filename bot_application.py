@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Awaitable, Callable, List, Optional, Union
+from typing import List, Optional, Union
 
 from telegram import Bot
 
@@ -109,58 +109,66 @@ class BotApplication:
     async def run(self) -> int:
         """Run the bot application.
         
-        Starts all registered events and the commands handler.
-        Automatically registers built-in commands (/terminate, /commands).
-        Blocks until stop_event is set.
+        Initializes the bot's HTTP session, starts all registered events and
+        the commands handler. Automatically registers built-in commands
+        (/terminate, /commands). Blocks until stop_event is set.
+        Ensures the bot's HTTP session is properly shut down in a finally block.
         
         Returns:
             Exit code (0 for success).
         """
-        # Register built-in commands
-        self.commands.insert(0, SimpleCommand(
-            command="/terminate",
-            description="Terminate the bot and shut down.",
-            message_builder=self.terminate,
-        ))
-        self.commands.append(SimpleCommand(
-            command="/commands",
-            description="List all available commands.",
-            message_builder=self.list_commands,
-        ))
+        # Initialize the bot's HTTP session
+        await self.bot.initialize()
         
-        # Flush pending updates to only process new messages
-        await flush_pending_updates(self.bot)
-        
-        # Create the commands event
-        commands_event = CommandsEvent(
-            event_name="commands",
-            commands=self.commands,
-        )
-        self.events.append(commands_event)
-        
-        # Start all event tasks
-        event_tasks = [
-            asyncio.create_task(event.submit(self.stop_event))
-            for event in self.events
-        ]
-        
-        self.logger.info("bot_application_started events=%d commands=%d",
-                         len(self.events), len(self.commands))
-        
-        # Wait for stop signal
-        await self.stop_event.wait()
-        
-        self.logger.info("bot_application_stopping")
-        
-        # Cancel all tasks
-        for task in event_tasks:
-            task.cancel()
-        
-        # Wait for cancellation
-        await asyncio.gather(*event_tasks, return_exceptions=True)
-        
-        self.logger.info("bot_application_stopped")
-        return 0
+        try:
+            # Register built-in commands
+            self.commands.insert(0, SimpleCommand(
+                command="/terminate",
+                description="Terminate the bot and shut down.",
+                message_builder=self.terminate,
+            ))
+            self.commands.append(SimpleCommand(
+                command="/commands",
+                description="List all available commands.",
+                message_builder=self.list_commands,
+            ))
+            
+            # Flush pending updates to only process new messages
+            await flush_pending_updates(self.bot)
+            
+            # Create the commands event
+            commands_event = CommandsEvent(
+                event_name="commands",
+                commands=self.commands,
+            )
+            self.events.append(commands_event)
+            
+            # Start all event tasks
+            event_tasks = [
+                asyncio.create_task(event.submit(self.stop_event))
+                for event in self.events
+            ]
+            
+            self.logger.info("bot_application_started events=%d commands=%d",
+                             len(self.events), len(self.commands))
+            
+            # Wait for stop signal
+            await self.stop_event.wait()
+            
+            self.logger.info("bot_application_stopping")
+            
+            # Cancel all tasks
+            for task in event_tasks:
+                task.cancel()
+            
+            # Wait for cancellation
+            await asyncio.gather(*event_tasks, return_exceptions=True)
+            
+            self.logger.info("bot_application_stopped")
+            return 0
+        finally:
+            # Always close the HTTP session properly
+            await self.bot.shutdown()
     
     async def send_messages(
         self,

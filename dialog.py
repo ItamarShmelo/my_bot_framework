@@ -2437,17 +2437,6 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
 
 
 # =============================================================================
-# BACKWARD COMPATIBILITY ALIASES
-# =============================================================================
-
-# Keep old names as aliases for backward compatibility
-ChoiceDialog = InlineKeyboardChoiceDialog
-ConfirmDialog = InlineKeyboardConfirmDialog
-PaginatedChoiceDialog = InlineKeyboardPaginatedChoiceDialog
-ChoiceBranchDialog = InlineKeyboardChoiceBranchDialog
-
-
-# =============================================================================
 # FACTORY FUNCTIONS
 # =============================================================================
 

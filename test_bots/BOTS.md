@@ -75,26 +75,27 @@ python test_bots/condition_bot.py
 
 ### dialog_bot.py
 
-**Purpose:** Tests the new Dialog Composite system.
+**Purpose:** Tests the Dialog Composite system.
 
 **Features tested:**
-- `ChoiceDialog` - Keyboard selection with static and dynamic choices
+- `InlineKeyboardChoiceDialog` - Inline keyboard selection with static and dynamic choices
 - `UserInputDialog` - Text input with optional validation
-- `ConfirmDialog` - Yes/No prompts
+- `InlineKeyboardConfirmDialog` - Yes/No prompts with inline keyboard
 - `SequenceDialog` - Sequential dialogs with named values
 - `BranchDialog` - Condition-based branching
-- `ChoiceBranchDialog` - Keyboard-driven branching
-- `LoopDialog` - Repeat until exit condition
+- `InlineKeyboardChoiceBranchDialog` - Inline keyboard-driven branching
+- `LoopDialog` - Repeat until exit condition (with exit_value and exit_condition)
 - Shared context across all dialogs
+- Dynamic choices via callable functions
 
 **Commands:**
 | Command | Description |
 |---------|-------------|
 | `/simple` | SequenceDialog: name + mood selection |
-| `/confirm` | ConfirmDialog with custom labels |
+| `/confirm` | InlineKeyboardConfirmDialog with custom labels |
 | `/validated` | UserInputDialog with validation (1-100) |
 | `/dynamic` | Dynamic choices based on previous selection |
-| `/branch` | ChoiceBranchDialog (quick vs full setup) |
+| `/branch` | InlineKeyboardChoiceBranchDialog (quick vs full setup) |
 | `/condition` | BranchDialog with age-based condition |
 | `/loop` | LoopDialog until 'done' entered |
 | `/loopvalid` | LoopDialog until valid email (max 5) |
@@ -105,12 +106,12 @@ python test_bots/condition_bot.py
 
 | Dialog Type | Description |
 |-------------|-------------|
-| `ChoiceDialog` | Static/dynamic keyboard options |
+| `InlineKeyboardChoiceDialog` | Static/dynamic inline keyboard options |
 | `UserInputDialog` | Text input with validator |
-| `ConfirmDialog` | Yes/No with custom labels |
+| `InlineKeyboardConfirmDialog` | Yes/No with custom labels |
 | `SequenceDialog` | Named dialogs in sequence |
 | `BranchDialog` | Condition function branching |
-| `ChoiceBranchDialog` | User-driven branching |
+| `InlineKeyboardChoiceBranchDialog` | User-driven branching |
 | `LoopDialog` | Exit by value/condition/max |
 
 **Run:**
@@ -122,15 +123,17 @@ python test_bots/dialog_bot.py
 
 ### dialog_handler_bot.py
 
-**Purpose:** Tests the new DialogHandler and cancellation features.
+**Purpose:** Tests the DialogHandler and cancellation features.
 
 **Features tested:**
 - `DialogHandler` - Wrap dialogs with on_complete callback
 - `CANCELLED` sentinel - Unambiguous cancellation detection
 - `is_cancelled()` - Helper function for checking cancellation
 - Nested `DialogHandler` - Multiple handlers in a chain
-- `DialogResult` - Standardized result structure
+- `DialogResult` - Standardized result structure from `build_result()`
 - Async `on_complete` callbacks
+- Integration with `InlineKeyboardChoiceDialog` and `InlineKeyboardConfirmDialog`
+- Integration with `SequenceDialog`
 
 **Commands:**
 | Command | Description |
@@ -140,8 +143,9 @@ python test_bots/dialog_bot.py
 | `/async_handler` | DialogHandler with async on_complete callback |
 | `/nested_handler` | Nested DialogHandlers |
 | `/cancel_test` | Cancellation handling with CANCELLED sentinel |
+| `/info` | Shows what this bot tests |
 
-**New Features Demonstrated:**
+**Features Demonstrated:**
 
 | Feature | Description |
 |---------|-------------|
@@ -174,7 +178,7 @@ python test_bots/dialog_handler_bot.py
 | `/sensor` | Show current simulated sensor value |
 | `/settings` | Show current threshold and alert level |
 | `/edit_threshold` | Edit threshold via UserInputDialog |
-| `/edit_level` | Edit alert level via ChoiceDialog |
+| `/edit_level` | Edit alert level via InlineKeyboardChoiceDialog |
 | `/edit_all` | Edit all settings via SequenceDialog |
 | `/info` | Shows what this bot tests |
 
@@ -330,16 +334,17 @@ python test_bots/document_bot.py
 
 ### paginated_dialog_bot.py
 
-**Purpose:** Tests the PaginatedChoiceDialog class for displaying long lists with pagination.
+**Purpose:** Tests the InlineKeyboardPaginatedChoiceDialog class for displaying long lists with pagination.
 
 **Features tested:**
-- `PaginatedChoiceDialog` - Paginated keyboard selection
+- `InlineKeyboardPaginatedChoiceDialog` - Paginated inline keyboard selection
 - Static items list
 - Dynamic items via callable
-- Different page sizes
-- "More..." button behavior
-- Text input selection for remaining items
-- Cancel functionality
+- Different page sizes (3, 4, 5 items per page)
+- "More..." button behavior (only shown when items exceed page_size)
+- Text input selection for remaining items (numbered list)
+- Cancel functionality (with and without cancel button)
+- Integration with `DialogHandler` for result processing
 
 **Commands:**
 | Command | Description |
@@ -382,10 +387,11 @@ python test_bots/paginated_dialog_bot.py
 - `divide_message_to_chunks` - Split messages into fixed-size chunks
 - `validate_positive_int` - Validate positive integers
 - `validate_positive_float` - Validate positive floats
-- `validate_int_range` - Validate integers within a range
-- `validate_float_range` - Validate floats within a range
-- `validate_date_format` - Validate date strings matching a format
-- `validate_regex` - Validate strings matching a regex pattern
+- `validate_int_range` - Validate integers within a range (factory function)
+- `validate_float_range` - Validate floats within a range (factory function)
+- `validate_date_format` - Validate date strings matching a format (factory function)
+- `validate_regex` - Validate strings matching a regex pattern (factory function)
+- Integration with `UserInputDialog` and `DialogHandler` for interactive validation
 
 **Commands:**
 | Command | Description |
@@ -452,7 +458,7 @@ python test_bots/reply_keyboard_bot.py
 
 **Features tested:**
 - `ReplyKeyboardChoiceDialog` - Choice dialog using reply keyboard
-- `ReplyKeyboardConfirmDialog` - Confirm dialog using reply keyboard
+- `ReplyKeyboardConfirmDialog` - Confirm dialog using reply keyboard (with and without cancel)
 - `ReplyKeyboardPaginatedChoiceDialog` - Paginated choice dialog using reply keyboard
 - `ReplyKeyboardChoiceBranchDialog` - Choice branch dialog using reply keyboard
 - Factory functions with `keyboard_type=KeyboardType.REPLY`:
@@ -460,10 +466,11 @@ python test_bots/reply_keyboard_bot.py
   - `create_confirm_dialog()` with `KeyboardType.REPLY`
   - `create_paginated_choice_dialog()` with `KeyboardType.REPLY`
   - `create_choice_branch_dialog()` with `KeyboardType.REPLY`
-- Text matching for button labels
-- Cancel functionality
-- Dynamic choices via callable
+- Text matching for button labels (reply keyboards send text messages)
+- Cancel functionality (with `include_cancel` parameter)
+- Dynamic choices via callable functions
 - Integration with `DialogHandler` and `SequenceDialog`
+- Custom yes/no labels for confirm dialogs
 
 **Commands:**
 | Command | Description |

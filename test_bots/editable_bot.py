@@ -12,7 +12,7 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Tuple
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -25,7 +25,7 @@ from my_bot_framework import (
     EditableAttribute,
     Condition,
     MessageBuilder,
-    ChoiceDialog,
+    InlineKeyboardChoiceDialog,
     UserInputDialog,
     SequenceDialog,
     DialogHandler,
@@ -34,20 +34,27 @@ from my_bot_framework import (
 )
 
 
-def get_credentials():
-    """Get bot credentials from .token and .chat_id files in test_bots directory."""
+def get_credentials() -> tuple[str, str]:
+    """Get bot credentials from .token and .chat_id files in test_bots directory.
+
+    Returns:
+        Tuple of (token, chat_id) from credential files.
+
+    Raises:
+        RuntimeError: If .token or .chat_id files are missing or empty.
+    """
     test_bots_dir = Path(__file__).resolve().parent
     token_file = test_bots_dir / ".token"
     chat_id_file = test_bots_dir / ".chat_id"
-    
+
     if not token_file.exists() or not chat_id_file.exists():
         raise RuntimeError(
             "Missing credential files. Create .token and .chat_id files in test_bots directory."
         )
-    
+
     token = token_file.read_text().strip()
     chat_id = chat_id_file.read_text().strip()
-    
+
     if not token or not chat_id:
         raise RuntimeError(
             "Empty credential files. Ensure .token and .chat_id contain valid values."
@@ -80,12 +87,12 @@ class SensorCondition(Condition):
         )
         self.editable_attributes = [threshold_attr]
         self._edited = False
-    
+
     def check(self) -> bool:
         """Check if sensor value exceeds threshold."""
         value = get_sensor_value()
         return value > self.get("threshold")
-    
+
 
 class AlertMessageBuilder(MessageBuilder):
     def __init__(self, condition: SensorCondition, alert_level: str) -> None:
@@ -105,47 +112,47 @@ class AlertMessageBuilder(MessageBuilder):
         self._edited = False
         self._condition = condition
         self._alert_count = 0
-    
+
     def build(self) -> Optional[str]:
         """Build alert message with current value and level."""
         max_alerts = self.get("max_alerts")
-        
+
         # Check if we've hit the limit (if set)
         if max_alerts is not None and self._alert_count >= max_alerts:
             return None  # Suppress alert
-        
+
         self._alert_count += 1
-        
+
         alert_level = self.get("alert_level")
         threshold = self._condition.get("threshold")
         icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
         icon = icons.get(alert_level, "⚠️")
-        
+
         limit_text = f" ({self._alert_count}/{max_alerts})" if max_alerts else ""
         return (
             f"{icon} <b>{alert_level.upper()}</b>{limit_text}\n\n"
             f"Sensor value: <code>{_sensor_value}</code>\n"
             f"Threshold: <code>{threshold}</code>"
         )
-    
 
-def main():
+
+def main() -> None:
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logger = logging.getLogger("editable_bot")
-    
+
     token, chat_id = get_credentials()
-    
+
     # Initialize the bot
     app = BotApplication.initialize(
         token=token,
         chat_id=chat_id,
         logger=logger,
     )
-    
+
     # Register condition event with editable attributes
     condition = SensorCondition(threshold=80)
     builder = AlertMessageBuilder(condition=condition, alert_level="warning")
@@ -157,16 +164,16 @@ def main():
         fire_when_edited=False,  # Don't fire just because settings were edited
     )
     app.register_event(sensor_event)
-    
+
     # --- Commands to view current values ---
-    
+
     app.register_command(SimpleCommand(
         command="/sensor",
         description="Show current sensor value",
         message_builder=lambda: f"Current sensor value: <code>{_sensor_value}</code>",
     ))
-    
-    def get_settings_text():
+
+    def get_settings_text() -> str:
         max_alerts = sensor_event.get("builder.max_alerts")
         max_alerts_text = "unlimited" if max_alerts is None else str(max_alerts)
         return (
@@ -175,21 +182,25 @@ def main():
             f"Alert Level: <code>{sensor_event.get('builder.alert_level')}</code>\n"
             f"Max Alerts: <code>{max_alerts_text}</code>"
         )
-    
+
     app.register_command(SimpleCommand(
         command="/settings",
         description="Show current settings",
         message_builder=get_settings_text,
     ))
-    
+
     # --- Dialog command to edit threshold ---
-    
-    async def on_threshold_edited(result):
-        """Handle threshold edit completion."""
+
+    async def on_threshold_edited(result: Any) -> None:
+        """Handle threshold edit completion.
+        
+        Args:
+            result: The dialog result containing the new threshold value or CANCELLED.
+        """
         if is_cancelled(result):
             await get_app().send_messages("❌ Threshold edit cancelled.")
             return
-        
+
         try:
             sensor_event.edit("condition.threshold", result)
             await get_app().send_messages(
@@ -197,7 +208,7 @@ def main():
             )
         except ValueError as e:
             await get_app().send_messages(f"❌ Invalid threshold: {e}")
-    
+
     threshold_dialog = DialogHandler(
         UserInputDialog(
             lambda: (
@@ -211,73 +222,81 @@ def main():
         ),
         on_complete=on_threshold_edited,
     )
-    
+
     app.register_command(DialogCommand(
         command="/edit_threshold",
         description="Edit the alert threshold",
         dialog=threshold_dialog,
     ))
-    
+
     # --- Dialog command to edit alert level ---
-    
-    async def on_level_edited(result):
-        """Handle alert level edit completion."""
+
+    async def on_level_edited(result: Any) -> None:
+        """Handle alert level edit completion.
+        
+        Args:
+            result: The dialog result containing the new alert level or CANCELLED.
+        """
         if is_cancelled(result):
             await get_app().send_messages("❌ Alert level edit cancelled.")
             return
-        
+
         sensor_event.edit("builder.alert_level", result)
-        
+
         icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
         icon = icons.get(sensor_event.get("builder.alert_level"), "")
         await get_app().send_messages(
             f"✅ Alert level updated to {icon} <code>{sensor_event.get('builder.alert_level')}</code>"
         )
-    
+
     level_dialog = DialogHandler(
-        ChoiceDialog("Select alert level:", [
+        InlineKeyboardChoiceDialog("Select alert level:", [
             ("ℹ️ Info", "info"),
             ("⚠️ Warning", "warning"),
             ("🚨 Critical", "critical"),
         ]),
         on_complete=on_level_edited,
     )
-    
+
     app.register_command(DialogCommand(
         command="/edit_level",
         description="Edit the alert level",
         dialog=level_dialog,
     ))
-    
+
     # --- Combined edit dialog ---
-    
-    async def on_all_edited(result):
-        """Handle combined settings edit."""
+
+    async def on_all_edited(result: Any) -> None:
+        """Handle combined settings edit.
+        
+        Args:
+            result: The dialog result containing edited fields as a dict or CANCELLED.
+        """
         if is_cancelled(result):
             await get_app().send_messages("❌ Settings edit cancelled.")
             return
-        
+
         # Result is a dict: {"threshold": "75", "level": "critical"}
         new_threshold = result.get("threshold")
         new_level = result.get("level")
         errors = []
-        
+
         if new_threshold:
             try:
                 sensor_event.edit("condition.threshold", new_threshold)
             except ValueError as e:
                 errors.append(f"Threshold: {e}")
-        
+
         if new_level:
             try:
                 sensor_event.edit("builder.alert_level", new_level)
             except ValueError as e:
                 errors.append(f"Alert Level: {e}")
-        
+
         # Build confirmation message
         icons = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
         icon = icons.get(sensor_event.get("builder.alert_level"), "")
-        
+
         if errors:
             error_text = "\n".join(f"• {e}" for e in errors)
             await get_app().send_messages(f"⚠️ Settings updated with errors:\n{error_text}")
@@ -287,7 +306,7 @@ def main():
                 f"Threshold: <code>{sensor_event.get('condition.threshold')}</code>\n"
                 f"Alert Level: {icon} <code>{sensor_event.get('builder.alert_level')}</code>"
             )
-    
+
     combined_dialog = DialogHandler(
         SequenceDialog([
             ("threshold", UserInputDialog(
@@ -297,7 +316,7 @@ def main():
                     "Enter a number between 0 and 100"
                 ),
             )),
-            ("level", ChoiceDialog("Select alert level:", [
+            ("level", InlineKeyboardChoiceDialog("Select alert level:", [
                 ("ℹ️ Info", "info"),
                 ("⚠️ Warning", "warning"),
                 ("🚨 Critical", "critical"),
@@ -305,15 +324,15 @@ def main():
         ]),
         on_complete=on_all_edited,
     )
-    
+
     app.register_command(DialogCommand(
         command="/edit_all",
         description="Edit all settings",
         dialog=combined_dialog,
     ))
-    
+
     # --- Info command ---
-    
+
     info_text = (
         "<b>Editable Bot</b>\n\n"
         "Tests runtime-editable parameters:\n"
@@ -332,9 +351,9 @@ def main():
         description="Show what this bot tests",
         message_builder=lambda: info_text,
     ))
-    
+
     # Send startup message and run
-    async def send_startup_and_run():
+    async def send_startup_and_run() -> None:
         await app.send_messages(
             f"🤖 <b>Editable Bot Started</b>\n\n"
             f"{info_text}\n\n"
@@ -342,9 +361,11 @@ def main():
         )
         logger.info("Starting editable_bot...")
         await app.run()
-    
+
     asyncio.run(send_startup_and_run())
 
 
+if __name__ == "__main__":
+    main()
 if __name__ == "__main__":
     main()

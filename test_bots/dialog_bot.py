@@ -1,12 +1,12 @@
 """Dialog bot testing the new Dialog composite system.
 
 Tests ALL dialog types:
-- ChoiceDialog: User selects from keyboard options
+- InlineKeyboardChoiceDialog: User selects from inline keyboard options
 - UserInputDialog: User enters text with optional validation
-- ConfirmDialog: Yes/No prompt
+- InlineKeyboardConfirmDialog: Yes/No prompt with inline keyboard
 - SequenceDialog: Run dialogs in order with named values
 - BranchDialog: Condition-based branching
-- ChoiceBranchDialog: User selects branch via keyboard
+- InlineKeyboardChoiceBranchDialog: User selects branch via inline keyboard
 - LoopDialog: Repeat until exit condition
 """
 
@@ -22,31 +22,38 @@ from my_bot_framework import (
     BotApplication,
     SimpleCommand,
     DialogCommand,
-    # New dialog types
-    ChoiceDialog,
+    # Dialog types
+    InlineKeyboardChoiceDialog,
     UserInputDialog,
-    ConfirmDialog,
+    InlineKeyboardConfirmDialog,
     SequenceDialog,
     BranchDialog,
-    ChoiceBranchDialog,
+    InlineKeyboardChoiceBranchDialog,
     LoopDialog,
 )
 
 
-def get_credentials():
-    """Get bot credentials from .token and .chat_id files in test_bots directory."""
+def get_credentials() -> tuple[str, str]:
+    """Get bot credentials from .token and .chat_id files in test_bots directory.
+
+    Returns:
+        Tuple of (token, chat_id) from credential files.
+
+    Raises:
+        RuntimeError: If .token or .chat_id files are missing or empty.
+    """
     test_bots_dir = Path(__file__).resolve().parent
     token_file = test_bots_dir / ".token"
     chat_id_file = test_bots_dir / ".chat_id"
-    
+
     if not token_file.exists() or not chat_id_file.exists():
         raise RuntimeError(
             "Missing credential files. Create .token and .chat_id files in test_bots directory."
         )
-    
+
     token = token_file.read_text().strip()
     chat_id = chat_id_file.read_text().strip()
-    
+
     if not token or not chat_id:
         raise RuntimeError(
             "Empty credential files. Ensure .token and .chat_id contain valid values."
@@ -58,10 +65,10 @@ def get_credentials():
 # DIALOG DEFINITIONS
 # =============================================================================
 
-# /simple - Tests SequenceDialog with ChoiceDialog and UserInputDialog
+# /simple - Tests SequenceDialog with InlineKeyboardChoiceDialog and UserInputDialog
 simple_dialog = SequenceDialog([
     ("name", UserInputDialog("Enter your name:")),
-    ("mood", ChoiceDialog("How are you?", [
+    ("mood", InlineKeyboardChoiceDialog("How are you?", [
         ("Great", "great"),
         ("Good", "good"),
         ("Okay", "okay"),
@@ -69,8 +76,8 @@ simple_dialog = SequenceDialog([
 ])
 
 
-# /confirm - Tests ConfirmDialog with custom labels
-confirm_dialog = ConfirmDialog(
+# /confirm - Tests InlineKeyboardConfirmDialog with custom labels
+confirm_dialog = InlineKeyboardConfirmDialog(
     prompt="Do you want to continue?",
     yes_label="Yes, continue",
     no_label="No, cancel",
@@ -96,11 +103,11 @@ validated_dialog = UserInputDialog(
 
 # /dynamic - Tests dynamic choices based on context
 dynamic_dialog = SequenceDialog([
-    ("category", ChoiceDialog("Select category:", [
+    ("category", InlineKeyboardChoiceDialog("Select category:", [
         ("Programming", "prog"),
         ("Design", "design"),
     ])),
-    ("tool", ChoiceDialog(
+    ("tool", InlineKeyboardChoiceDialog(
         prompt="Select tool:",
         choices=lambda ctx: [
             ("Python", "python"),
@@ -115,15 +122,15 @@ dynamic_dialog = SequenceDialog([
 ])
 
 
-# /branch - Tests ChoiceBranchDialog (keyboard-driven branching)
-branch_dialog = ChoiceBranchDialog(
+# /branch - Tests InlineKeyboardChoiceBranchDialog (keyboard-driven branching)
+branch_dialog = InlineKeyboardChoiceBranchDialog(
     prompt="Select your path:",
     branches={
         "quick": ("Quick Setup", UserInputDialog("Enter your name:")),
         "full": ("Full Setup", SequenceDialog([
             ("name", UserInputDialog("Enter your name:")),
             ("email", UserInputDialog("Enter your email:")),
-            ("notify", ConfirmDialog("Enable notifications?")),
+            ("notify", InlineKeyboardConfirmDialog("Enable notifications?")),
         ])),
     }
 )
@@ -138,11 +145,11 @@ condition_dialog = SequenceDialog([
     ("content", BranchDialog(
         condition=lambda ctx: "adult" if int(ctx.get("age", "0")) >= 18 else "minor",
         branches={
-            "adult": ChoiceDialog("Select plan:", [
+            "adult": InlineKeyboardChoiceDialog("Select plan:", [
                 ("Pro", "pro"),
                 ("Enterprise", "ent"),
             ]),
-            "minor": ChoiceDialog("Select plan:", [
+            "minor": InlineKeyboardChoiceDialog("Select plan:", [
                 ("Student", "student"),
                 ("Free", "free"),
             ]),
@@ -174,11 +181,11 @@ loop_valid_dialog = LoopDialog(
 # /full - Tests full composite: Sequence + Branch + Loop + Confirm
 full_onboarding = SequenceDialog([
     ("name", UserInputDialog("Enter your name:")),
-    ("role", ChoiceBranchDialog(
+    ("role", InlineKeyboardChoiceBranchDialog(
         prompt="Select your role:",
         branches={
             "dev": ("Developer", SequenceDialog([
-                ("lang", ChoiceDialog("Primary language:", [
+                ("lang", InlineKeyboardChoiceDialog("Primary language:", [
                     ("Python", "py"),
                     ("TypeScript", "ts"),
                     ("Go", "go"),
@@ -186,7 +193,7 @@ full_onboarding = SequenceDialog([
                 ("experience", UserInputDialog("Years of experience:")),
             ])),
             "design": ("Designer", SequenceDialog([
-                ("tool", ChoiceDialog("Primary tool:", [
+                ("tool", InlineKeyboardChoiceDialog("Primary tool:", [
                     ("Figma", "figma"),
                     ("Sketch", "sketch"),
                 ])),
@@ -198,7 +205,7 @@ full_onboarding = SequenceDialog([
         dialog=UserInputDialog("Add a skill (or 'done'):"),
         exit_value="done",
     )),
-    ("confirm", ConfirmDialog("Save your profile?")),
+    ("confirm", InlineKeyboardConfirmDialog("Save your profile?")),
 ])
 
 
@@ -206,87 +213,88 @@ full_onboarding = SequenceDialog([
 # MAIN
 # =============================================================================
 
-def main():
+def main() -> None:
+    """Run the dialog test bot."""
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logger = logging.getLogger("dialog_bot")
-    
+
     token, chat_id = get_credentials()
-    
+
     # Initialize the bot
     app = BotApplication.initialize(
         token=token,
         chat_id=chat_id,
         logger=logger,
     )
-    
+
     # Register dialog commands
     app.register_command(DialogCommand(
         command="/simple",
         description="Simple sequence: name + mood",
         dialog=simple_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         command="/confirm",
         description="Yes/No confirmation dialog",
         dialog=confirm_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         command="/validated",
         description="Input with validation (number 1-100)",
         dialog=validated_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         command="/dynamic",
         description="Dynamic choices based on previous selection",
         dialog=dynamic_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         command="/branch",
         description="Keyboard-driven branching",
         dialog=branch_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         command="/condition",
         description="Condition-based branching (age check)",
         dialog=condition_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         command="/loop",
         description="Loop until 'done' entered",
         dialog=loop_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         command="/loopvalid",
         description="Loop until valid email (max 5 attempts)",
         dialog=loop_valid_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         command="/full",
         description="Full onboarding: name + role + skills + confirm",
         dialog=full_onboarding,
     ))
-    
+
     # Register info command
     info_text = (
         "<b>Dialog Bot</b>\n\n"
         "Tests the new Dialog composite system:\n"
-        "• <b>/simple</b> - SequenceDialog, ChoiceDialog, UserInputDialog\n"
-        "• <b>/confirm</b> - ConfirmDialog with custom labels\n"
+        "• <b>/simple</b> - SequenceDialog, InlineKeyboardChoiceDialog, UserInputDialog\n"
+        "• <b>/confirm</b> - InlineKeyboardConfirmDialog with custom labels\n"
         "• <b>/validated</b> - UserInputDialog with validation\n"
         "• <b>/dynamic</b> - Dynamic choices based on context\n"
-        "• <b>/branch</b> - ChoiceBranchDialog (keyboard branching)\n"
+        "• <b>/branch</b> - InlineKeyboardChoiceBranchDialog (keyboard branching)\n"
         "• <b>/condition</b> - BranchDialog with condition function\n"
         "• <b>/loop</b> - LoopDialog with exit_value\n"
         "• <b>/loopvalid</b> - LoopDialog with exit_condition\n"
@@ -297,9 +305,9 @@ def main():
         description="Show what this bot tests",
         message_builder=lambda: info_text,
     ))
-    
+
     # Send startup message and run
-    async def send_startup_and_run():
+    async def send_startup_and_run() -> None:
         await app.send_messages(
             f"🤖 <b>Dialog Bot Started</b>\n\n"
             f"{info_text}\n\n"
@@ -307,7 +315,7 @@ def main():
         )
         logger.info("Starting dialog_bot...")
         await app.run()
-    
+
     asyncio.run(send_startup_and_run())
 
 

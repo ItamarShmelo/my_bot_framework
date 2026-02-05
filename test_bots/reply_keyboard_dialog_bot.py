@@ -15,7 +15,7 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -319,7 +319,7 @@ def main() -> None:
     ))
 
     # Handler commands to show results
-    async def handle_choice_result(result: str) -> None:
+    async def handle_choice_result(result: Any) -> None:
         """Handle choice dialog result."""
         if is_cancelled(result):
             await app.send_messages("❌ Choice dialog was cancelled.")
@@ -335,7 +335,7 @@ def main() -> None:
         ),
     ))
 
-    async def handle_confirm_result(result: bool) -> None:
+    async def handle_confirm_result(result: Any) -> None:
         """Handle confirm dialog result."""
         if is_cancelled(result):
             await app.send_messages("❌ Confirm dialog was cancelled.")

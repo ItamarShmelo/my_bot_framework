@@ -256,10 +256,10 @@ Dialogs use the Composite pattern to build complex flows from simple components.
 
 **Leaf Dialogs** (one question each):
 - **Inline Keyboard Dialogs**:
-  - `InlineKeyboardChoiceDialog` / `ChoiceDialog` (alias) - User selects from inline keyboard options
-  - `InlineKeyboardPaginatedChoiceDialog` / `PaginatedChoiceDialog` (alias) - User selects from paginated inline keyboard options
-  - `InlineKeyboardConfirmDialog` / `ConfirmDialog` (alias) - Yes/No prompt with inline keyboard
-  - `InlineKeyboardChoiceBranchDialog` / `ChoiceBranchDialog` (alias) - User selects branch via inline keyboard
+  - `InlineKeyboardChoiceDialog` - User selects from inline keyboard options
+  - `InlineKeyboardPaginatedChoiceDialog` - User selects from paginated inline keyboard options
+  - `InlineKeyboardConfirmDialog` - Yes/No prompt with inline keyboard
+  - `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard
 - **Reply Keyboard Dialogs**:
   - `ReplyKeyboardChoiceDialog` - User selects from reply keyboard options (buttons at bottom of chat)
   - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
@@ -340,15 +340,18 @@ await app.run()
 **Inside `app.run()`:**
 
 ```
-1. Register built-in commands (/terminate, /commands)
-2. Flush pending updates (ignore messages sent before startup)
-3. Create CommandsEvent with initial offset
-4. Start all event tasks concurrently (each runs submit(stop_event))
-5. Wait for stop_event to be set
-6. Cancel all event tasks
-7. Wait for tasks to complete cancellation
-8. Return exit code (0)
+1. Initialize bot's HTTP session (await bot.initialize())
+2. Register built-in commands (/terminate, /commands)
+3. Flush pending updates (ignore messages sent before startup)
+4. Create CommandsEvent with initial offset
+5. Start all event tasks concurrently (each runs submit(stop_event))
+6. Wait for stop_event to be set
+7. Cancel all event tasks
+8. Wait for tasks to complete cancellation
+9. Return exit code (0)
 ```
+
+**HTTP Session Management:** The bot's HTTP session is initialized at step 1 and always shut down in a `finally` block (executes after step 9, even on return or exception). This ensures proper cleanup and prevents "Event loop is closed" errors when terminating the bot.
 
 **Fresh Start:** The bot calls `flush_pending_updates()` on startup to clear any old messages. This ensures the bot only processes commands sent after it started.
 
@@ -834,7 +837,12 @@ async def _try_send_error_message(bot, chat_id, title, logger, exc):
        │
        ▼
 5. Return exit code (0)
+       │
+       ▼
+6. Finally block: await bot.shutdown()  # Always close HTTP session
 ```
+
+**HTTP Session Cleanup:** The bot's HTTP session is always shut down in a `finally` block, ensuring proper cleanup even if an exception occurs during shutdown. This prevents "Event loop is closed" errors.
 
 ## UpdatePollerMixin Pattern
 
@@ -936,7 +944,6 @@ The framework supports two keyboard types via the `KeyboardType` enum:
 
 - **Inline keyboard dialogs**: `InlineKeyboard*Dialog` (e.g., `InlineKeyboardChoiceDialog`)
 - **Reply keyboard dialogs**: `ReplyKeyboard*Dialog` (e.g., `ReplyKeyboardChoiceDialog`)
-- **Backward compatibility**: Old names (`ChoiceDialog`, `ConfirmDialog`, etc.) are aliases for inline versions
 
 **Factory Functions:**
 

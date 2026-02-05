@@ -1,8 +1,8 @@
-"""Test bot for PaginatedChoiceDialog.
+"""Test bot for InlineKeyboardPaginatedChoiceDialog.
 
 Tests:
-- PaginatedChoiceDialog with static items
-- PaginatedChoiceDialog with dynamic items (callable)
+- InlineKeyboardPaginatedChoiceDialog with static items
+- InlineKeyboardPaginatedChoiceDialog with dynamic items (callable)
 - Different page sizes
 - "More..." button behavior and text input selection
 - Cancel functionality
@@ -22,7 +22,7 @@ from my_bot_framework import (
     SimpleCommand,
     DialogCommand,
     DialogHandler,
-    PaginatedChoiceDialog,
+    InlineKeyboardPaginatedChoiceDialog,
     is_cancelled,
     get_app,
     get_logger,
@@ -34,15 +34,15 @@ def get_credentials() -> Tuple[str, str]:
     test_bots_dir = Path(__file__).resolve().parent
     token_file = test_bots_dir / ".token"
     chat_id_file = test_bots_dir / ".chat_id"
-    
+
     if not token_file.exists() or not chat_id_file.exists():
         raise RuntimeError(
             "Missing credential files. Create .token and .chat_id files in test_bots directory."
         )
-    
+
     token = token_file.read_text().strip()
     chat_id = chat_id_file.read_text().strip()
-    
+
     if not token or not chat_id:
         raise RuntimeError(
             "Empty credential files. Ensure .token and .chat_id contain valid values."
@@ -104,10 +104,10 @@ COUNTRY_ITEMS: List[Tuple[str, str]] = [
 
 def get_dynamic_items(context: Dict[str, Any]) -> List[Tuple[str, str]]:
     """Generate items dynamically based on context.
-    
+
     Args:
         context: Dialog context dictionary.
-        
+
     Returns:
         List of (label, callback_data) tuples.
     """
@@ -131,7 +131,7 @@ def get_dynamic_items(context: Dict[str, Any]) -> List[Tuple[str, str]]:
 
 async def on_short_complete(result: Any) -> None:
     """Handle short dialog result.
-    
+
     Args:
         result: The dialog result.
     """
@@ -146,7 +146,7 @@ async def on_short_complete(result: Any) -> None:
 
 async def on_expenses_complete(result: Any) -> None:
     """Handle expenses dialog result.
-    
+
     Args:
         result: The dialog result.
     """
@@ -163,7 +163,7 @@ async def on_expenses_complete(result: Any) -> None:
 
 async def on_countries_complete(result: Any) -> None:
     """Handle countries dialog result.
-    
+
     Args:
         result: The dialog result.
     """
@@ -179,7 +179,7 @@ async def on_countries_complete(result: Any) -> None:
 
 async def on_tasks_complete(result: Any) -> None:
     """Handle tasks dialog result.
-    
+
     Args:
         result: The dialog result.
     """
@@ -194,7 +194,7 @@ async def on_tasks_complete(result: Any) -> None:
 
 async def on_nocancel_complete(result: Any) -> None:
     """Handle nocancel dialog result.
-    
+
     Args:
         result: The dialog result.
     """
@@ -213,7 +213,7 @@ async def on_nocancel_complete(result: Any) -> None:
 
 # /short - Tests with a short list (no "More..." button)
 short_dialog = DialogHandler(
-    PaginatedChoiceDialog(
+    InlineKeyboardPaginatedChoiceDialog(
         prompt="Select a fruit:",
         items=SHORT_ITEMS,
         page_size=5,
@@ -223,7 +223,7 @@ short_dialog = DialogHandler(
 
 # /expenses - Tests with a longer list (shows "More..." button)
 expenses_dialog = DialogHandler(
-    PaginatedChoiceDialog(
+    InlineKeyboardPaginatedChoiceDialog(
         prompt="Select expense to remove:",
         items=EXPENSE_ITEMS,
         page_size=5,
@@ -233,7 +233,7 @@ expenses_dialog = DialogHandler(
 
 # /countries - Tests with many items and smaller page size
 countries_dialog = DialogHandler(
-    PaginatedChoiceDialog(
+    InlineKeyboardPaginatedChoiceDialog(
         prompt="Select your country:",
         items=COUNTRY_ITEMS,
         page_size=3,
@@ -244,7 +244,7 @@ countries_dialog = DialogHandler(
 
 # /tasks - Tests with dynamic items
 tasks_dialog = DialogHandler(
-    PaginatedChoiceDialog(
+    InlineKeyboardPaginatedChoiceDialog(
         prompt="Select a task to work on:",
         items=get_dynamic_items,
         page_size=4,
@@ -255,7 +255,7 @@ tasks_dialog = DialogHandler(
 
 # /nocancel - Tests without cancel button
 nocancel_dialog = DialogHandler(
-    PaginatedChoiceDialog(
+    InlineKeyboardPaginatedChoiceDialog(
         prompt="Select an option (no cancel):",
         items=EXPENSE_ITEMS[:8],
         page_size=3,
@@ -269,15 +269,15 @@ def main() -> None:
     """Run the paginated dialog test bot."""
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("paginated_dialog_bot")
-    
+
     token, chat_id = get_credentials()
     app = BotApplication.initialize(token=token, chat_id=chat_id, logger=logger)
-    
+
     # Register info command (REQUIRED for all test bots)
     info_text = (
         "<b>Paginated Dialog Bot</b>\n\n"
         "Tests:\n"
-        "• <b>PaginatedChoiceDialog</b> - Paginated keyboard selection\n"
+        "• <b>InlineKeyboardPaginatedChoiceDialog</b> - Paginated keyboard selection\n"
         "• Static items list\n"
         "• Dynamic items via callable\n"
         "• Different page sizes\n"
@@ -290,7 +290,7 @@ def main() -> None:
         description="Show what this bot tests",
         message_builder=lambda: info_text,
     ))
-    
+
     # Register commands
     app.register_command(SimpleCommand(
         "/start",
@@ -305,37 +305,37 @@ def main() -> None:
             "/nocancel - List without cancel button"
         ),
     ))
-    
+
     app.register_command(DialogCommand(
         "/short",
         "Test short list (no More button)",
         short_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         "/expenses",
         "Test expense list with pagination",
         expenses_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         "/countries",
         "Test country list with small page size",
         countries_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         "/tasks",
         "Test dynamic items",
         tasks_dialog,
     ))
-    
+
     app.register_command(DialogCommand(
         "/nocancel",
         "Test without cancel button",
         nocancel_dialog,
     ))
-    
+
     # Send startup message and run
     async def send_startup_and_run() -> None:
         await app.send_messages(
@@ -345,7 +345,7 @@ def main() -> None:
         )
         logger.info("Starting paginated_dialog_bot...")
         await app.run()
-    
+
     asyncio.run(send_startup_and_run())
 
 
