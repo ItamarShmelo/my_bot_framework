@@ -741,6 +741,33 @@ All three formatting functions use Python's `html.escape()` function to escape H
 The module also contains:
 - **`divide_message_to_chunks()`** - Splits messages into fixed-size chunks for Telegram's message limits
 
+## Telegram API Considerations
+
+### Group Privacy Mode
+
+Telegram's **Group Privacy Mode** affects how bots receive messages in group chats. This is a Telegram platform-level setting, not a framework feature.
+
+**Default behavior (privacy mode enabled):**
+- Bot receives: commands (`/`), replies to bot messages, @mentions, service messages
+- Bot does NOT receive: regular text messages from users
+
+**Impact on dialog polling:**
+
+The `UpdatePollerMixin` polls for updates via `getUpdates`. When privacy mode is enabled, updates for regular text messages in groups are simply not returned by the Telegram API. This means:
+
+1. **Inline keyboard dialogs** work normally — they use `callback_query` updates, which are always delivered
+2. **Reply keyboard dialogs** work normally — button presses are sent as replies to the bot's keyboard message
+3. **`UserInputDialog`** fails silently in groups — the user's text input is never delivered to the bot unless they explicitly reply to the prompt message
+
+**Solution:** Disable Group Privacy Mode via BotFather (`/setprivacy` → Disable) to receive all messages in groups.
+
+**Why this isn't handled in code:**
+- The framework cannot detect that a message was "missed" — it simply never arrives
+- There's no API to query or change the privacy mode setting programmatically
+- This is a one-time bot configuration, not a runtime setting
+
+See the README's "Group Chat Setup" section for user-facing documentation.
+
 ## Async Patterns
 
 ### Cancelable Sleep

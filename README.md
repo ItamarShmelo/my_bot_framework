@@ -626,6 +626,43 @@ The `InvalidHtmlError` exception provides:
 - The offending text (truncated for display)
 - Clear instructions to use `html.escape()`
 
+## Group Chat Setup
+
+When running a bot in Telegram group chats (as opposed to private chats), you may need to configure Group Privacy Mode for full functionality.
+
+### Default Behavior
+
+By default, Telegram's **Group Privacy Mode** is **enabled** for all bots. In this mode, bots only receive:
+- Messages starting with `/` (commands)
+- Replies to the bot's own messages
+- Messages that @mention the bot by username
+- Service messages (users joining/leaving, etc.)
+
+### Why This Matters
+
+Group Privacy Mode can cause issues with dialogs that expect free-form text input (like `UserInputDialog`). If a user types a response without replying to the bot's prompt message, the bot never receives it — the message silently doesn't arrive.
+
+**What works with privacy mode enabled:**
+- All commands (`/start`, `/settings`, etc.)
+- Reply keyboard buttons (sent as replies to the bot's keyboard message)
+- Inline keyboard buttons (use callback queries, not text messages)
+
+**What fails silently:**
+- `UserInputDialog` prompts like "Enter a description:" — if the user types their response without explicitly replying to the prompt message, the bot won't see it
+
+### Disabling Group Privacy Mode
+
+To allow your bot to receive **all messages** in group chats (required for text input dialogs):
+
+1. Open [@BotFather](https://t.me/BotFather) on Telegram
+2. Send `/setprivacy`
+3. Select your bot
+4. Choose **Disable**
+
+After disabling privacy mode, your bot will receive all messages in group chats, and `UserInputDialog` will work correctly.
+
+> **Note:** This setting only affects group chats. In private (one-on-one) chats, bots always receive all messages regardless of this setting.
+
 ## Built-in Commands
 
 The framework automatically registers:
