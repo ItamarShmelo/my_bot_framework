@@ -10,6 +10,7 @@ A modular, event-driven Telegram bot framework built on `python-telegram-bot`.
 - **Direct Message Sending** - Async message sending with automatic chunking
 - **Interactive Dialogs** - Multi-step conversations with inline keyboards
 - **Editable Parameters** - Runtime-configurable event parameters
+- **Resilient Polling** - Automatic handling of transient Telegram network errors
 
 ## Installation
 
@@ -614,7 +615,7 @@ user_input = "Use <script> tags for JavaScript"
 safe_text = html.escape(user_input)  # "Use &lt;script&gt; tags for JavaScript"
 message = TelegramTextMessage(safe_text)
 
-# If you forget to escape, InvalidHtmlError is raised
+# If you forget to escape, InvalidHtmlError is raised (fatal - terminates the bot)
 try:
     message = TelegramTextMessage("Invalid <unclosed tag")
     await app.send_messages(message)
@@ -623,7 +624,7 @@ except InvalidHtmlError as e:
     # Fix: html.escape() your text
 ```
 
-The `InvalidHtmlError` exception provides:
+**Important:** `InvalidHtmlError` is a **fatal error** that propagates up and terminates the bot. This ensures developers notice and fix HTML escaping issues during development. The exception provides:
 - The original Telegram API error
 - The offending text (truncated for display)
 - Clear instructions to use `html.escape()`

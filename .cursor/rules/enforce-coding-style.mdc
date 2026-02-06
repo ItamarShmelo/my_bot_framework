@@ -63,6 +63,39 @@ def function_name(param1: Type1, param2: Type2) -> ReturnType:
 - No code duplication (3+ similar blocks → extract to helper)
 - No trailing whitespace
 
+## Exception Handling
+
+### TelegramMessage subclasses
+
+All Telegram API send errors are handled in the `TelegramMessage.send()` base class.
+Subclasses MUST override `_send_impl()` with their happy-path logic and MUST NOT
+add their own try/except blocks (except for expected non-error exceptions like
+"message is not modified" in `TelegramRemoveKeyboardMessage`).
+
+Subclasses that send HTML-parsed text MUST override `_get_error_text()` to return
+the text that could trigger `InvalidHtmlError`.
+
+`InvalidHtmlError` is a fatal error -- it propagates up and terminates the bot.
+
+### Polling
+
+Telegram API receive errors (`TimedOut`, `NetworkError`) are handled in `poll_updates()`.
+Do NOT add redundant try/except for these errors in callers of `poll_updates()`.
+
+### Conditions and message builders
+
+Conditions and message builders should never raise. Do NOT wrap calls to
+`condition.check()`, `message_builder.build()`, or `send_messages()` in try/except.
+If they do raise, it is a fatal bug that should propagate up and terminate the bot.
+
+### Logging exceptions
+
+Use `exc_info=True` (or `logger.exception()` at ERROR level) for all exception logging
+to include the full traceback. Do NOT use `logger.error("... error=%s", exc)`.
+
+- **CRITICAL** -- fatal errors that terminate the bot
+- **ERROR** -- recoverable errors that are logged and swallowed
+
 ## Subagent
 
 For comprehensive style enforcement, use the `code-style-enforcer` subagent.

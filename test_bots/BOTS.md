@@ -505,6 +505,31 @@ python test_bots/reply_keyboard_dialog_bot.py
 
 ---
 
+### bad_html_bot.py
+
+**Purpose:** Tests InvalidHtmlError handling and fatal error propagation.
+
+**Features tested:**
+- `InvalidHtmlError` is raised when sending unescaped HTML
+- Fatal error propagates up and terminates the bot
+- CRITICAL-level log with full traceback is produced
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/info` | Shows what this bot tests |
+| `/bad_html` | Send a message with invalid HTML (triggers fatal InvalidHtmlError) |
+
+**Usage:**
+Start the bot and send `/bad_html`. The bot will attempt to send a message containing raw '<' and '>' characters, which Telegram cannot parse as HTML. This triggers `InvalidHtmlError`, which propagates up and terminates the bot with a CRITICAL log and full traceback.
+
+**Run:**
+```bash
+python test_bots/bad_html_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:

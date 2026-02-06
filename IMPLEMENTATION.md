@@ -339,16 +339,19 @@ await app.run()
 
 **Inside `app.run()`:**
 
+The `run()` method is structured as a clean orchestrator that delegates to three private methods:
+
 ```
-1. Initialize bot's HTTP session (await bot.initialize())
-2. Register built-in commands (/terminate, /commands)
-3. Flush pending updates (ignore messages sent before startup)
-4. Create CommandsEvent with initial offset
-5. Start all event tasks concurrently (each runs submit(stop_event))
-6. Wait for stop_event to be set
-7. Cancel all event tasks
-8. Wait for tasks to complete cancellation
-9. Return exit code (0)
+1. _register_builtin_commands() - Register /terminate, /commands, and CommandsEvent
+2. _initialize_http_session() - Initialize bot's HTTP session (await bot.initialize())
+3. _run_event_loop() - Main event loop:
+   a. Flush pending updates (ignore messages sent before startup)
+   b. Start all event tasks concurrently (each runs submit(stop_event))
+   c. Wait for either stop_event or a task failure (fatal error)
+   d. If a task failed, re-raise its exception (fatal - terminates bot)
+   e. Normal shutdown: cancel remaining tasks and wait for cleanup
+   f. Return exit code (0)
+   g. Finally block: always shut down HTTP session
 ```
 
 **HTTP Session Management:** The bot's HTTP session is initialized at step 1 and always shut down in a `finally` block (executes after step 9, even on return or exception). This ensures proper cleanup and prevents "Event loop is closed" errors when terminating the bot.
@@ -386,7 +389,7 @@ while not stop_event.is_set():
 **CommandsEvent polling:**
 ```
 while not stop_event.is_set():
-    updates = await poll_updates(bot)
+    updates = await poll_updates(bot)  # Handles TimedOut/NetworkError internally
 
     for update in updates:
         if update.message.text.startswith("/"):
@@ -401,6 +404,8 @@ while not stop_event.is_set():
 
     await _wait_or_stop(stop_event, poll_seconds)
 ```
+
+**Note:** `poll_updates()` catches transient network errors (`TimedOut`, `NetworkError`) and returns an empty list, allowing the polling loop to continue. The `UpdatePollerMixin.poll()` method includes a safety-net around the `poll_updates()` call. Send errors are handled by `TelegramMessage.send()`, and conditions/message builders should never raise (if they do, it's a fatal bug).
 
 **SimpleCommand execution:**
 ```
@@ -441,18 +446,33 @@ async def run():
 ### 4. Message Sending Flow
 
 ```
-send_messages() ──► TelegramMessage
+send_messages() ──► TelegramMessage.send()
                         │
                         ▼
-                message.send(bot, chat_id, logger)
+            ┌─────────────────────────────┐
+            │  Error handling wrapper     │
+            │  - Catches InvalidHtmlError │
+            │  - Re-raises as fatal       │
+            │  - Logs other errors        │
+            └───────────┬─────────────────┘
                         │
-              ┌─────────┴─────────────┐
-              │  TelegramTextMessage  │
-              │  - Chunk if > 4096    │
-              │  - Send each chunk    │
-              │  - 0.05s delay between│
-              └───────────────────────┘
+                        ▼
+            message._send_impl(bot, chat_id, logger)
+                        │
+              ┌─────────┴──────────────┐
+              │  TelegramTextMessage   │
+              │  - Chunk if > 4096     │
+              │  - Send each chunk     │
+              │  - 0.05s delay between │
+              └────────────────────────┘
 ```
+
+**Architecture:** `TelegramMessage` is an abstract base class (ABC) with:
+- `send()` - Public concrete method that handles errors uniformly
+- `_send_impl()` - Abstract method that subclasses override with send logic
+- `_get_error_text()` - Optional override for HTML error context
+
+All error handling is centralized in the base class `send()` method. `InvalidHtmlError` is re-raised as a fatal error (terminates the bot). All other exceptions are logged at ERROR level and swallowed so the bot keeps running.
 
 Note: Event logging (event_name) happens at the call site before sending,
 not during message sending.
@@ -477,7 +497,10 @@ not during message sending.
 | `register_event(event)` | Register an event to run |
 | `register_command(command)` | Register a command handler |
 | `send_messages(messages)` | Send message(s) immediately (str, TelegramMessage, or list) |
-| `run()` | Start the bot (blocks until shutdown) |
+| `run()` | Start the bot (blocks until shutdown or fatal error) |
+| `_register_builtin_commands()` | Private: Register /terminate, /commands, and CommandsEvent |
+| `_initialize_http_session()` | Private: Initialize bot's HTTP session |
+| `_run_event_loop()` | Private: Main event loop with fatal error detection |
 
 ### Event Types
 
@@ -515,6 +538,13 @@ These factories encapsulate common condition patterns with internal state manage
 
 ### Message Types
 
+**Base Class:** `TelegramMessage` is an abstract base class (ABC) with:
+- `send()` - Public concrete method that handles errors uniformly
+- `_send_impl()` - Abstract method that subclasses override with send logic
+- `_get_error_text()` - Optional override for HTML error context
+
+All error handling is centralized in the base class `send()` method. `InvalidHtmlError` is re-raised as a fatal error (terminates the bot). All other exceptions are logged at ERROR level and swallowed so the bot keeps running.
+
 | Class | Content | Features |
 |-------|---------|----------|
 | `TelegramTextMessage` | Plain text | Auto-chunking for long messages |
@@ -532,7 +562,7 @@ These factories encapsulate common condition patterns with internal state manage
 - **Inline keyboards** (`TelegramOptionsMessage`): Buttons attached to messages, send `callback_query` events when pressed. Used by `InlineKeyboard*Dialog` classes.
 - **Reply keyboards** (`TelegramReplyKeyboardMessage`): Persistent buttons at bottom of chat, send text messages (button labels) when pressed. Used by `ReplyKeyboard*Dialog` classes. Auto-hide with `one_time_keyboard=True`.
 
-**Note:** All message types use `parse_mode=HTML`. If text contains unescaped HTML special characters, an `InvalidHtmlError` is raised with instructions to use `html.escape()`.
+**Note:** All message types use `parse_mode=HTML`. If text contains unescaped HTML special characters, an `InvalidHtmlError` is raised (fatal - terminates the bot) with instructions to use `html.escape()`.
 
 ## Editable Attributes System
 
@@ -801,26 +831,82 @@ condition_result = await asyncio.to_thread(self.condition.check)
 
 ## Error Handling
 
-### Message Sending
+### Polling Layer Error Handling
+
+The polling layer (`polling.py`) includes comprehensive error handling for transient Telegram network errors to ensure the bot continues operating during network issues:
+
+**`poll_updates()` error handling:**
 
 ```python
-async def send(self, bot, chat_id, title, logger):
+async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
     try:
-        await bot.send_message(...)
+        updates_tuple = await bot.get_updates(...)
+    except TimedOut:
+        logger.warning("poll_updates: request timed out, will retry on next cycle")
+        return []  # Continue polling on next cycle
+    except NetworkError as exc:
+        logger.error("poll_updates: network_error error=%s, will retry on next cycle", exc)
+        await asyncio.sleep(1)  # Brief delay before retry
+        return []  # Continue polling on next cycle
+    # ... process updates
+```
+
+**`UpdatePollerMixin.poll()` error handling:**
+
+The `poll()` method includes a safety-net around `poll_updates()` call:
+
+```python
+while not self.should_stop_polling():
+    try:
+        updates = await poll_updates(bot)
+    except Exception as exc:
+        logger.error("UpdatePollerMixin.poll: poll_updates_failed, retrying in 2s", exc_info=True)
+        await asyncio.sleep(2)
+        continue  # Retry polling
+```
+
+**Note:** Send-side errors are handled inside `TelegramMessage.send()`. The handler dispatch (`handle_callback_update()`, `handle_text_update()`) is not wrapped in try/except because:
+- Conditions and message builders should never raise (if they do, it's a fatal bug)
+- Send errors are already handled by `TelegramMessage.send()`
+- Fatal errors (like `InvalidHtmlError`) should propagate up and terminate the bot
+
+**Design rationale:**
+- Transient network errors (`TimedOut`, `NetworkError`) are caught and logged, allowing the polling loop to continue
+- Send errors are handled uniformly in `TelegramMessage.send()` (fatal `InvalidHtmlError` propagates, others are logged)
+- Conditions and message builders are expected to never raise (if they do, it's a fatal bug that terminates the bot)
+- Brief sleep delays prevent tight retry loops during network issues
+
+### Message Sending
+
+Error handling is centralized in the `TelegramMessage.send()` base class method:
+
+```python
+async def send(self, bot, chat_id, logger):
+    """Public method with uniform error handling."""
+    try:
+        await self._send_impl(bot, chat_id, logger)  # Subclass override
+    except InvalidHtmlError:
+        raise  # Fatal -- propagates up and terminates the bot
     except Exception as exc:
         if _is_html_parse_error(exc):
-            raise InvalidHtmlError(exc, self.message) from exc
-        logger.error("telegram_send_failed error=%s", exc)
-        await _try_send_error_message(bot, chat_id, title, logger, exc)
+            raise InvalidHtmlError(exc, self._get_error_text()) from exc
+        logger.error("%s.send: failed", type(self).__name__, exc_info=True)
+        # Error logged, bot continues running
 ```
+
+Subclasses override `_send_impl()` with their happy-path send logic. They must NOT add their own try/except blocks (except for expected non-error exceptions like "message is not modified").
 
 ### HTML Parse Errors
 
-All messages are sent with `parse_mode=HTML`. If the text contains invalid HTML (e.g., unescaped `<`, `>`, `&`), Telegram will reject the message. The framework catches these errors and raises an `InvalidHtmlError` to provide clear guidance:
+All messages are sent with `parse_mode=HTML`. If the text contains invalid HTML (e.g., unescaped `<`, `>`, `&`), Telegram will reject the message. The framework catches these errors and raises an `InvalidHtmlError`:
 
 ```python
 class InvalidHtmlError(Exception):
-    """Raised when message text contains invalid HTML that Telegram cannot parse."""
+    """Raised when message text contains invalid HTML that Telegram cannot parse.
+    
+    This is a fatal error -- it propagates up and terminates the bot so the
+    developer notices and fixes it.
+    """
     
     def __init__(self, original_error: Exception, text: str) -> None:
         # Message tells user to use html.escape()
@@ -834,19 +920,9 @@ class InvalidHtmlError(Exception):
         self.text = text
 ```
 
-Detection is done via `_is_html_parse_error()` which checks for Telegram's `BadRequest` with "can't parse entities" in the message.
+**Fatal Error Behavior:** `InvalidHtmlError` is a fatal error that propagates up and terminates the bot. This ensures developers notice and fix HTML escaping issues during development. Detection is done via `_is_html_parse_error()` which checks for Telegram's `BadRequest` with "can't parse entities" in the message.
 
-### Graceful Degradation
-
-```python
-async def _try_send_error_message(bot, chat_id, title, logger, exc):
-    """Best-effort error notification without raising."""
-    try:
-        # Sent without parse_mode to avoid HTML issues in error messages
-        await bot.send_message(text=f"Error: {exc}")
-    except Exception as error_exc:
-        logger.error("error_message_also_failed error=%s", error_exc)
-```
+Subclasses that send HTML-parsed text should override `_get_error_text()` to return the text that could trigger `InvalidHtmlError`.
 
 ## Shutdown Sequence
 
@@ -883,12 +959,18 @@ pattern using the Template Method:
 ├─────────────────────────────────────────────────────────────┤
 │  poll() -> result:                                          │
 │      while not should_stop_polling():                       │
-│          updates = poll_updates(bot)                        │
+│          try:                                               │
+│              updates = poll_updates(bot)                    │
+│          except Exception:                                  │
+│              log error, sleep 2s, continue                  │
 │          for update in updates:                             │
-│              if callback_query:                             │
-│                  handle_callback_update(update)             │
-│              elif text_message:                             │
-│                  handle_text_update(update)                 │
+│              try:                                           │
+│                  if callback_query:                         │
+│                      handle_callback_update(update)         │
+│                  elif text_message:                         │
+│                      handle_text_update(update)             │
+│              except Exception:                              │
+│                  log error, continue to next update         │
 │      return _get_poll_result()                              │
 ├─────────────────────────────────────────────────────────────┤
 │  Abstract methods (subclasses implement):                   │
@@ -898,6 +980,10 @@ pattern using the Template Method:
 │                                                             │
 │  Update offset is managed globally via:                     │
 │    • get_next_update_id() / set_next_update_id()            │
+│                                                             │
+│  Error handling:                                            │
+│    • poll_updates() catches TimedOut/NetworkError           │
+│    • poll() has safety-nets around polling and handling     │
 │                                                             │
 │  Uses singleton accessors: get_bot(), get_chat_id(),        │
 │  get_logger() for dependencies.                             │

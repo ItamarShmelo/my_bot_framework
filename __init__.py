@@ -16,8 +16,8 @@ Usage:
     await app.run()
 """
 
-from .bot_application import (
-    BotApplication,
+from .bot_application import BotApplication
+from .accessors import (
     get_app,
     get_bot,
     get_chat_id,
