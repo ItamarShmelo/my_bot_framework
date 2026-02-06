@@ -113,27 +113,37 @@ class BotApplication:
         lines = [f"{cmd.command}: {cmd.description}" for cmd in self.commands]
         return "\n".join(lines)
 
-    async def run(self) -> int:
+    async def run(self, skip_commands: bool = False) -> int:
         """Run the bot application.
 
         Registers built-in commands, initializes the HTTP session, then
         enters the event loop. Blocks until stop_event is set or a fatal
         error terminates the bot.
 
+        Args:
+            skip_commands: If True, skip registering the CommandsEvent
+                (commands will not be polled from Telegram).
+
         Returns:
             Exit code (0 for success).
         """
-        self._register_builtin_commands()
+        self._register_commands(skip_commands=skip_commands)
         self.logger.info(
-            "BotApplication.run: starting events=%d commands=%d",
+            "BotApplication.run: starting events=%d commands=%d skip_commands=%s",
             len(self.events),
             len(self.commands),
+            skip_commands,
         )
         await self._initialize_http_session()
         return await self._run_event_loop()
 
-    def _register_builtin_commands(self) -> None:
-        """Register /terminate, /commands, and the CommandsEvent."""
+    def _register_commands(self, skip_commands: bool = False) -> None:
+        """Register /terminate, /commands, and optionally the CommandsEvent.
+
+        Args:
+            skip_commands: If True, skip registering the CommandsEvent.
+        """
+        self.logger.debug("BotApplication._register_commands: registering built-in commands skip_commands=%s", skip_commands)
         self.commands.insert(0, SimpleCommand(
             command="/terminate",
             description="Terminate the bot and shut down.",
@@ -144,11 +154,15 @@ class BotApplication:
             description="List all available commands.",
             message_builder=self.list_commands,
         ))
-        commands_event = CommandsEvent(
-            event_name="commands",
-            commands=self.commands,
-        )
-        self.events.append(commands_event)
+        if not skip_commands:
+            commands_event = CommandsEvent(
+                event_name="commands",
+                commands=self.commands,
+            )
+            self.events.append(commands_event)
+            self.logger.debug("BotApplication._register_commands: registered CommandsEvent event_name=%s commands_count=%d", commands_event.event_name, len(self.commands))
+        else:
+            self.logger.info("BotApplication._register_commands: skipped CommandsEvent registration skip_commands=True")
 
     async def _initialize_http_session(self) -> None:
         """Initialize the Telegram bot's HTTP session.

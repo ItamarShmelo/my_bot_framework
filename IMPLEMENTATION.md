@@ -339,10 +339,11 @@ await app.run()
 
 **Inside `app.run()`:**
 
-The `run()` method is structured as a clean orchestrator that delegates to three private methods:
+The `run()` method accepts an optional `skip_commands` parameter and is structured as a clean orchestrator that delegates to three private methods:
 
 ```
-1. _register_builtin_commands() - Register /terminate, /commands, and CommandsEvent
+1. _register_commands(skip_commands) - Register /terminate, /commands, and optionally CommandsEvent
+   - If skip_commands=True, CommandsEvent is not registered (commands won't be polled)
 2. _initialize_http_session() - Initialize bot's HTTP session (await bot.initialize())
 3. _run_event_loop() - Main event loop:
    a. Flush pending updates (ignore messages sent before startup)
@@ -491,8 +492,8 @@ not during message sending.
 | `register_event(event)` | Register an event to run |
 | `register_command(command)` | Register a command handler |
 | `send_messages(messages)` | Send message(s) immediately (str, TelegramMessage, or list) |
-| `run()` | Start the bot (blocks until shutdown or fatal error) |
-| `_register_builtin_commands()` | Private: Register /terminate, /commands, and CommandsEvent |
+| `run(skip_commands=False)` | Start the bot (blocks until shutdown or fatal error). If `skip_commands=True`, CommandsEvent is not registered. |
+| `_register_commands(skip_commands=False)` | Private: Register /terminate, /commands, and optionally CommandsEvent |
 | `_initialize_http_session()` | Private: Initialize bot's HTTP session |
 | `_run_event_loop()` | Private: Main event loop with fatal error detection |
 

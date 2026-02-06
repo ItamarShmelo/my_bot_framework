@@ -61,6 +61,10 @@ app.register_event(TimeEvent(
 
 # Run the bot
 asyncio.run(app.run())
+
+# Or run without command polling (skip_commands=True)
+# Useful when you only want events, not interactive commands
+asyncio.run(app.run(skip_commands=True))
 ```
 
 ## Core Components
@@ -72,6 +76,20 @@ The singleton entry point for the framework. Manages:
 - Direct message sending for outgoing messages
 - Event and command registration
 - Graceful shutdown via `/terminate`
+
+#### Running the Bot
+
+The `run()` method starts the bot and blocks until shutdown:
+
+```python
+# Run with command polling (default)
+await app.run()
+
+# Run without command polling (events only)
+await app.run(skip_commands=True)
+```
+
+When `skip_commands=True`, the `CommandsEvent` is not registered, so commands won't be polled from Telegram. This is useful for bots that only use events and don't need interactive commands.
 
 ```python
 from my_bot_framework import BotApplication, get_app, get_bot, get_logger
