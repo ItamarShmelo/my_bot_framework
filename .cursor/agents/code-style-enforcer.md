@@ -23,7 +23,7 @@ You are a code style specialist for the my_bot_framework project. Your role is t
 | Element | Convention | Example |
 |---------|------------|---------|
 | Classes | CamelCase | `BotApplication`, `TimeEvent`, `DialogState` |
-| Methods | snake_case | `register_event`, `send_messages`, `handle_callback` |
+| Methods | snake_case | `register_event`, `send_messages`, `handle_callback_update` |
 | Attributes | snake_case | `stop_event`, `chat_id`, `editable_attributes` |
 | Functions | snake_case | `get_credentials`, `format_message_html` |
 | Variables | snake_case | `event_tasks`, `is_valid`, `error_msg` |
@@ -87,16 +87,16 @@ def simple_function():
 
 ```python
 # ALLOWED - base class defines interface, subclass uses it
-class Dialog(ABC):
+class UpdatePollerMixin(ABC):
     @abstractmethod
-    async def handle_callback(self, data: str) -> DialogResponse:
-        """Handle callback - subclasses implement."""
+    async def handle_callback_update(self, update: Update) -> None:
+        """Handle callback update - subclasses implement."""
         pass
 
-class ChoiceDialog(Dialog):
-    async def handle_callback(self, data: str) -> DialogResponse:
-        self._value = data  # Uses the parameter
-        return DialogResponse(text=f"Selected: {data}")
+class ChoiceDialog(Dialog, UpdatePollerMixin):
+    async def handle_callback_update(self, update: Update) -> None:
+        callback_data = update.callback_query.data  # Uses the parameter
+        self._value = callback_data
 ```
 
 **Variables:** Inline variables when logically equivalent and improves readability.

@@ -427,18 +427,10 @@ async def run():
 
         for update in updates:
             if update.callback_query:
-                answer_callback(update.callback_query.id)
-                response = dialog.handle_callback(callback_data)
-                if response.edit_message:
-                    edit_message(response)
-                else:
-                    send_new_message(response)
+                handle_callback_update(update)   # answer, remove keyboard, process
 
             elif update.message.text:
-                response = dialog.handle_text_input(text)
-                if response is None and dialog.is_active:
-                    send_clarifying_message()
-                    resend_keyboard()
+                handle_text_update(update)       # validate, accept, or clarify
 
     return current_offset
 ```
@@ -1032,13 +1024,11 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
 │    start():                                                 │
 │      1. reset() - clean state                               │
 │      2. Set context                                         │
-│      3. _run_dialog() - delegate to subclass              │
+│      3. _run_dialog() - delegate to subclass                │
 │                                                             │
 │  Abstract:                                                  │
 │    • _run_dialog() -> DialogResult                          │
 │    • build_result() -> DialogResult                         │
-│    • handle_callback(data) -> DialogResponse                 │
-│    • handle_text_input(text) -> DialogResponse               │
 └─────────────────────────────────────────────────────────────┘
                               │
           ┌───────────────────┼───────────────────┐
