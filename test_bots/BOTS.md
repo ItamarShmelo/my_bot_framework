@@ -530,6 +530,44 @@ python test_bots/bad_html_bot.py
 
 ---
 
+### network_error_bot.py
+
+**Purpose:** Tests exception safety of the polling layer by monkey-patching `bot.get_updates` to inject intermittent failures.
+
+**Features tested:**
+- Exception handling in `poll_updates()` for `TimedOut` errors
+- Exception handling in `poll_updates()` for `NetworkError` errors
+- `UpdatePollerMixin.poll()` safety net for unexpected errors (e.g., `RuntimeError`)
+- Normal polling resumption after transient failures
+- Monkey-patching pattern for testing error scenarios
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/stats` | Show error injection statistics (poll cycles, injected error counts) |
+| `/hello` | Say hello (proves bot is responsive despite errors) |
+| `/info` | Show what this bot tests |
+| `/commands` | Lists all commands (built-in) |
+| `/terminate` | Shuts down the bot (built-in) |
+
+**Events:**
+- Heartbeat every 5 minutes (proves bot continues running despite errors)
+
+**Error Injection Schedule:**
+- Every 3rd poll cycle: `TimedOut` error
+- Every 5th poll cycle: `NetworkError` error
+- Every 11th poll cycle: `RuntimeError` (unexpected error)
+
+**Usage:**
+The bot automatically injects errors on a fixed schedule. Use `/stats` to see how many errors have been injected and verify the bot continues running normally. The bot should handle all injected errors gracefully and continue polling.
+
+**Run:**
+```bash
+python test_bots/network_error_bot.py
+```
+
+---
+
 ## Adding New Test Bots
 
 When adding a new test bot:
