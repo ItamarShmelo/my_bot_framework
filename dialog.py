@@ -200,7 +200,7 @@ class Dialog(ABC):
         self._value = CANCELLED
         self.state = DialogState.COMPLETE
         logger = get_logger()
-        logger.info("dialog_cancelled")
+        logger.info("Dialog.cancel: cancelled")
         return DialogResponse(text="Cancelled.", keyboard=None, edit_message=False)
 
     def reset(self) -> None:
@@ -334,7 +334,7 @@ class InlineKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
         label = next((lbl for lbl, cb in self.get_choices() if cb == callback_data), callback_data)
 
         # Log selection
-        get_logger().info("choice_dialog_selected label=%s value=%s", label, callback_data)
+        get_logger().info("InlineKeyboardChoiceDialog.handle_callback: selected label=%s value=%s", label, callback_data)
 
         # Only send confirmation message if debug mode is enabled
         if DIALOG_DEBUG:
@@ -558,7 +558,7 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
                     [InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)]
                 ])
 
-            get_logger().info("paginated_choice_dialog_showing_more remaining_count=%d", len(remaining))
+            get_logger().info("InlineKeyboardPaginatedChoiceDialog.handle_callback: showing_more remaining_count=%d", len(remaining))
 
             return DialogResponse(
                 text=text,
@@ -578,7 +578,7 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
         label = next((lbl for lbl, cb in self.get_items() if cb == callback_data), callback_data)
 
         # Log selection
-        get_logger().info("paginated_choice_dialog_selected label=%s value=%s", label, callback_data)
+        get_logger().info("InlineKeyboardPaginatedChoiceDialog.handle_callback: selected label=%s value=%s", label, callback_data)
 
         # Only send confirmation message if debug mode is enabled
         if DIALOG_DEBUG:
@@ -614,7 +614,7 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
 
         # Log selection
         get_logger().info(
-            "paginated_choice_dialog_selected label=%s value=%s",
+            "InlineKeyboardPaginatedChoiceDialog.handle_text_input: selected label=%s value=%s",
             selected_label,
             selected_callback,
         )
@@ -799,7 +799,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
 
         # Log input
         text_preview = text[:50] if len(text) > 50 else text
-        get_logger().info("user_input_dialog_received text=%s", text_preview)
+        get_logger().info("UserInputDialog.handle_text_input: received text=%s", text_preview)
 
         # Only send confirmation message if debug mode is enabled
         if DIALOG_DEBUG:
@@ -927,7 +927,7 @@ class InlineKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
         if callback_data == self.YES_CALLBACK:
             self._value = True
             self.state = DialogState.COMPLETE
-            get_logger().info("confirm_dialog_selected value=True label=%s", self.yes_label)
+            get_logger().info("InlineKeyboardConfirmDialog.handle_callback: selected value=True label=%s", self.yes_label)
             if DIALOG_DEBUG:
                 return DialogResponse(
                     text=f"{self.yes_label}",
@@ -939,7 +939,7 @@ class InlineKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
         if callback_data == self.NO_CALLBACK:
             self._value = False
             self.state = DialogState.COMPLETE
-            get_logger().info("confirm_dialog_selected value=False label=%s", self.no_label)
+            get_logger().info("InlineKeyboardConfirmDialog.handle_callback: selected value=False label=%s", self.no_label)
             if DIALOG_DEBUG:
                 return DialogResponse(
                     text=f"{self.no_label}",
@@ -1091,7 +1091,7 @@ class BranchDialog(Dialog):
 
         if branch_key not in self.branches:
             logger = get_logger()
-            logger.error("branch_key_not_found key=%s", branch_key)
+            logger.error("BranchDialog._run_dialog: key_not_found key=%s", branch_key)
             self._value = CANCELLED
             self.state = DialogState.COMPLETE
             return CANCELLED
@@ -1251,7 +1251,7 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
             self._choosing = False
 
             # Log selection
-            get_logger().info("choice_branch_dialog_selected key=%s label=%s", callback_data, label)
+            get_logger().info("InlineKeyboardChoiceBranchDialog.handle_callback: selected key=%s label=%s", callback_data, label)
 
             if DIALOG_DEBUG:
                 return DialogResponse(
@@ -1584,7 +1584,7 @@ class EditEventDialog(Dialog):
             result = await bool_dialog.start(self.context)
 
             if is_cancelled(result):
-                logger.info("edit_event_dialog_field_cancelled field=%s", field_name)
+                logger.info("EditEventDialog._edit_bool_field: cancelled field=%s", field_name)
                 return False
 
             new_value = result  # ConfirmDialog returns bool directly
@@ -1592,7 +1592,7 @@ class EditEventDialog(Dialog):
 
             if success:
                 logger.info(
-                    "edit_event_dialog_field_staged field=%s value=%s",
+                    "EditEventDialog._edit_bool_field: staged field=%s value=%s",
                     field_name,
                     new_value,
                 )
@@ -1600,7 +1600,7 @@ class EditEventDialog(Dialog):
 
             # Validation failed - show error and loop to re-prompt
             logger.info(
-                "edit_event_dialog_validation_failed field=%s error=%s",
+                "EditEventDialog._edit_bool_field: validation_failed field=%s error=%s",
                 field_name,
                 error,
             )
@@ -1659,7 +1659,7 @@ class EditEventDialog(Dialog):
         result = await text_dialog.start(self.context)
 
         if is_cancelled(result):
-            logger.info("edit_event_dialog_field_cancelled field=%s", field_name)
+            logger.info("EditEventDialog._edit_text_field: cancelled field=%s", field_name)
             return False
 
         # Parse and stage the value (validator already checked it's valid)
@@ -1669,7 +1669,7 @@ class EditEventDialog(Dialog):
         parsed_value = attr.parse(result)
         self.context[field_name] = parsed_value
         logger.info(
-            "edit_event_dialog_field_staged field=%s value=%s",
+            "EditEventDialog._edit_text_field: staged field=%s value=%s",
             field_name,
             parsed_value,
         )
@@ -1693,7 +1693,7 @@ class EditEventDialog(Dialog):
                 # Cancel from field list - exit without applying edits
                 self._value = CANCELLED
                 self.state = DialogState.COMPLETE
-                logger.info("edit_event_dialog_cancelled")
+                logger.info("EditEventDialog._run_dialog: cancelled")
                 return CANCELLED
 
             if result == self.DONE_VALUE:
@@ -1701,7 +1701,7 @@ class EditEventDialog(Dialog):
                 self._apply_all_edits()
                 self._value = dict(self.context)
                 self.state = DialogState.COMPLETE
-                logger.info("edit_event_dialog_done edits=%s", self.context)
+                logger.info("EditEventDialog._run_dialog: done edits=%s", self.context)
                 return self.build_result()
 
             # Field selected - edit it
@@ -1829,7 +1829,7 @@ class ReplyKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
 
             # Log selection
             get_logger().info(
-                "reply_keyboard_choice_dialog_selected label=%s value=%s",
+                "ReplyKeyboardChoiceDialog.handle_text_update: selected label=%s value=%s",
                 text,
                 callback_data,
             )
@@ -1955,7 +1955,7 @@ class ReplyKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
             self._value = True
             self.state = DialogState.COMPLETE
             get_logger().info(
-                "reply_keyboard_confirm_dialog_selected value=True label=%s",
+                "ReplyKeyboardConfirmDialog.handle_text_update: selected value=True label=%s",
                 self.yes_label,
             )
             if DIALOG_DEBUG:
@@ -1970,7 +1970,7 @@ class ReplyKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
             self._value = False
             self.state = DialogState.COMPLETE
             get_logger().info(
-                "reply_keyboard_confirm_dialog_selected value=False label=%s",
+                "ReplyKeyboardConfirmDialog.handle_text_update: selected value=False label=%s",
                 self.no_label,
             )
             if DIALOG_DEBUG:
@@ -2141,7 +2141,7 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
             self.state = DialogState.COMPLETE
 
             get_logger().info(
-                "reply_keyboard_paginated_choice_dialog_selected label=%s value=%s",
+                "ReplyKeyboardPaginatedChoiceDialog.handle_text_update: selected label=%s value=%s",
                 selected_label,
                 selected_callback,
             )
@@ -2174,7 +2174,7 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
             )
 
             get_logger().info(
-                "reply_keyboard_paginated_choice_dialog_showing_more remaining_count=%d",
+                "ReplyKeyboardPaginatedChoiceDialog.handle_text_update: showing_more remaining_count=%d",
                 len(remaining),
             )
             return
@@ -2191,7 +2191,7 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
             self.state = DialogState.COMPLETE
 
             get_logger().info(
-                "reply_keyboard_paginated_choice_dialog_selected label=%s value=%s",
+                "ReplyKeyboardPaginatedChoiceDialog.handle_text_update: selected label=%s value=%s",
                 text,
                 callback_data,
             )
@@ -2354,7 +2354,7 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
             self._choosing = False
 
             get_logger().info(
-                "reply_keyboard_choice_branch_dialog_selected key=%s label=%s",
+                "ReplyKeyboardChoiceBranchDialog.handle_text_update: selected key=%s label=%s",
                 branch_key,
                 text,
             )

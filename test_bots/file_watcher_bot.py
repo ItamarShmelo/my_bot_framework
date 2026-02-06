@@ -77,7 +77,7 @@ def main() -> None:
 
     # Ensure test file exists
     test_file = ensure_test_file()
-    logger.info("Monitoring file: %s", test_file)
+    logger.info("create_file_change_event: monitoring file=%s", test_file)
 
     # Initialize the bot
     app = BotApplication.initialize(
@@ -164,7 +164,7 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting file_watcher_bot...")
+        logger.info("send_startup_and_run: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())

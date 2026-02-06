@@ -6,51 +6,274 @@ alwaysApply: false
 
 # Comprehensive Logging
 
-Async code flow is hard to trace. Logging is the primary debugging tool.
+Async code flow is hard to trace. Logging is the primary debugging tool for this framework.
 
-## Requirements
+## Logging Configuration
 
-1. **Log every significant action** - entry, exit, state changes
-2. **Include context** - correlation IDs, object state, parameters
-3. **Log before AND after** async operations
+Use this format in test bots and entry points:
+
+```python
+LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+logging.basicConfig(
+    level=logging.DEBUG,  # capture everything; filter at handler level
+    format=LOG_FORMAT,
+    datefmt=DATE_FORMAT,
+)
+```
+
+Output example:
+
+```
+2026-02-06 14:23:01 | INFO     | my_bot | BotApplication.run: started events=3 commands=5
+2026-02-06 14:23:06 | DEBUG    | my_bot | UpdatePollerMixin.poll: received count=2
+2026-02-06 14:23:06 | WARNING  | my_bot | BotApplication.initialize: already initialized, returning existing
+2026-02-06 14:23:07 | ERROR    | my_bot | TelegramTextMessage.send: failed error=NetworkError(...)
+2026-02-06 14:23:07 | CRITICAL | my_bot | BotApplication.run: http_session_init_failed error=InvalidToken
+```
+
+## Log Message Format
+
+Every log message MUST be prefixed with the source location for traceability:
+
+- **Methods:** `ClassName.method_name: description key=value`
+- **Functions:** `function_name: description key=value`
+
+Use structured `key=value` pairs after the description for machine-parseable context.
+
+```python
+# Methods - prefix with ClassName.method_name
+class BotApplication:
+    def register_event(self, event: "Event") -> None:
+        self.logger.debug("BotApplication.register_event: registered event_name=%s", event.event_name)
+
+    async def run(self) -> int:
+        self.logger.info("BotApplication.run: started events=%d commands=%d", len(self.events), len(self.commands))
+
+# Functions - prefix with function_name
+async def flush_pending_updates(bot: Bot) -> None:
+    logger.info("flush_pending_updates: cleared=%d next_id=%d", len(updates), next_id)
+
+# Private/internal methods - still use full prefix
+class ActivateOnConditionEvent(Event):
+    async def submit(self, stop_event: asyncio.Event) -> None:
+        logger.debug("ActivateOnConditionEvent.submit: checking_condition event=%s", self.event_name)
+```
+
+## Log Levels
+
+| Level | Audience | Purpose | When to Use |
+|-------|----------|---------|-------------|
+| `DEBUG` | Developer | Internal state, routing, loop iterations | Condition checks, poll results, update routing, intermediate values, branch decisions |
+| `INFO` | User/Operator | Meaningful lifecycle events, successful actions | Bot started/stopped, command executed, message sent, dialog completed, event fired |
+| `WARNING` | User/Operator | Unexpected but handled situations | Reinitializing singleton, message builder returned None, stale callback, unexpected input |
+| `ERROR` | User/Operator | Recoverable failures, operation failed but bot continues | Telegram API error, file not found, validation failure, command execution failure |
+| `CRITICAL` | User/Operator | Unrecoverable, bot cannot continue | Initialization failure, HTTP session gone, event loop crash |
+
+**Note:** Python's `logging.FATAL` is an alias for `logging.CRITICAL`. Use `logger.critical()` for unrecoverable situations.
+
+## Loop Logging Rules
+
+**CRITICAL: Never log at INFO or above inside rapidly executing loops.**
+
+### Polling loops (continuous, every few seconds) - DEBUG only
+
+These loops run every 2-5 seconds. Logging inside them at INFO would flood the logs.
+
+```python
+# CORRECT - DEBUG inside polling loop
+while not stop_event.is_set():
+    logger.debug("ActivateOnConditionEvent.submit: checking_condition event=%s", self.event_name)
+    condition_result = await asyncio.to_thread(self.condition.check)
+    # ...
+    await _wait_or_stop(stop_event, self.poll_seconds)
+
+# CORRECT - DEBUG for poll results
+if updates:
+    logger.debug("poll_updates: received count=%d", len(updates))
+```
+
+### User-paced loops (dialog iteration, retry) - INFO is safe
+
+These loops only iterate on user interaction (blocked waiting for input).
+
+```python
+# OK - user-paced loop, each iteration waits for human input
+while True:
+    logger.debug("LoopDialog._run_dialog: iteration=%d", self._iterations + 1)
+    result = await self.dialog.start(self.context)
+    if result is CANCELLED:
+        logger.info("LoopDialog._run_dialog: cancelled iteration=%d", self._iterations)
+        break
+```
+
+### Iteration loops (for loops over collections) - case by case
+
+- Small collections (commands, events, fields): `DEBUG` is fine
+- Large/unbounded collections: log summary AFTER the loop, not inside
+
+```python
+# BAD - logs inside loop over potentially large collection
+for chunk in chunks:
+    logger.info("TelegramTextMessage.send: sending chunk=%d", index)
+    await bot.send_message(...)
+
+# GOOD - log summary after
+for chunk in chunks:
+    await bot.send_message(...)
+logger.info("TelegramTextMessage.send: sent chunks=%d message='%.200s'", len(chunks), self.message)
+```
+
+## What to Log at Each Point
+
+### Lifecycle Events (INFO)
+
+```python
+# Initialization
+logger.info("BotApplication.initialize: initialized chat_id=%s", chat_id)
+
+# Startup
+logger.info("BotApplication.run: started events=%d commands=%d", len(self.events), len(self.commands))
+
+# Shutdown
+logger.info("BotApplication.run: stopping")
+logger.info("BotApplication.run: stopped")
+
+# Event lifecycle
+logger.info("ActivateOnConditionEvent.submit: started event=%s poll_seconds=%.1f", self.event_name, self.poll_seconds)
+logger.info("ActivateOnConditionEvent.submit: stopped event=%s", self.event_name)
+```
+
+### User Actions (INFO)
+
+```python
+# Command handling
+logger.info("CommandsEvent.handle_text_update: matched command=%s", command.command)
+logger.info("SimpleCommand.run: executed command=%s", self.command)
+
+# Dialog interactions
+logger.info("InlineKeyboardChoiceDialog._run_dialog: selected label=%s value=%s", label, value)
+logger.info("Dialog.cancel: cancelled")
+```
+
+### Internal State (DEBUG)
+
+```python
+# Polling internals
+logger.debug("poll_updates: received count=%d", len(updates))
+logger.debug("UpdatePollerMixin.poll: filtered update wrong_chat=%s expected=%s", update_chat_id, chat_id)
+
+# Condition evaluation
+logger.debug("ActivateOnConditionEvent.submit: checking_condition event=%s", self.event_name)
+
+# Routing decisions
+logger.debug("CommandsEvent.handle_callback_update: stale_callback id=%s", callback_query.id)
+```
+
+### Before AND After Async Operations (DEBUG/INFO)
+
+```python
+# Before: DEBUG (about to attempt)
+logger.debug("TelegramImageMessage.send: sending path='%s'", image_path)
+
+# After success: INFO (meaningful outcome)
+logger.info("TelegramImageMessage.send: sent path='%s'", image_path)
+
+# After failure: ERROR (with full context)
+logger.error("TelegramImageMessage.send: failed path='%s' error=%s", image_path, exc)
+```
+
+### Warnings
+
+```python
+# Unexpected but handled
+logger.warning("BotApplication.initialize: already_initialized, returning existing")
+logger.warning("ActivateOnConditionEvent.submit: message_builder_returned_none event=%s", self.event_name)
+logger.warning("CommandsEvent.handle_text_update: unknown_command text=%s", text)
+```
+
+### Errors (Recoverable)
+
+```python
+# Telegram API failure - bot continues
+logger.error("TelegramTextMessage.send: failed error=%s", exc)
+
+# Condition check crashed - event survives
+logger.error("ActivateOnConditionEvent.submit: condition_check_failed event=%s error=%s", self.event_name, exc)
+
+# Command execution failed - bot continues
+logger.error("CommandsEvent.handle_text_update: command_run_failed command=%s error=%s", command.command, exc)
+
+# Branch routing error
+logger.error("BranchDialog._run_dialog: key_not_found key=%s", branch_key)
+```
+
+### Critical (Unrecoverable)
+
+```python
+# Bot cannot start
+logger.critical("BotApplication.run: http_session_init_failed error=%s", exc)
+
+# Accessor called before initialization
+logger.critical("get_app: BotApplication not initialized")
+
+# Cannot notify user about errors
+logger.critical("_try_send_error_message: error_notification_failed error=%s", error_exc)
+```
+
+## Error Handling and Logging
+
+Always log exceptions with full context BEFORE handling them:
+
+```python
+# GOOD - log with context, then handle gracefully
+try:
+    condition_result = await asyncio.to_thread(self.condition.check)
+except Exception as exc:
+    logger.error("ActivateOnConditionEvent.submit: condition_check_failed event=%s error=%s", self.event_name, exc)
+    await _wait_or_stop(stop_event, self.poll_seconds)
+    continue
+
+# GOOD - critical for unrecoverable
+try:
+    await self.bot.initialize()
+except Exception as exc:
+    self.logger.critical("BotApplication.run: http_session_init_failed error=%s", exc)
+    raise
+```
 
 ## Patterns
 
 ```python
-# ❌ BAD - No visibility into what happened
+# BAD - No visibility, no source location
 async def process_update(self, update: Update) -> None:
     result = await self._handle_command(update.message.text)
     await self._send_response(result)
 
-# ✅ GOOD - Full traceability
+# GOOD - Full traceability with ClassName.method prefix
 async def process_update(self, update: Update) -> None:
-    self.logger.info("process_update: received update_id=%s text=%r", 
-                     update.update_id, update.message.text)
-    
+    logger.info("CommandsEvent.process_update: received update_id=%s text=%r",
+                update.update_id, update.message.text)
+
     result = await self._handle_command(update.message.text)
-    self.logger.debug("process_update: command result=%r", result)
-    
+    logger.debug("CommandsEvent.process_update: command_result=%r", result)
+
     await self._send_response(result)
-    self.logger.info("process_update: completed update_id=%s", update.update_id)
+    logger.info("CommandsEvent.process_update: completed update_id=%s", update.update_id)
 ```
 
-## What to Log
+## Checklist
 
-| Level | When |
-|-------|------|
-| `INFO` | Function entry/exit, state transitions, external calls |
-| `DEBUG` | Intermediate values, loop iterations, conditional branches |
-| `WARNING` | Recoverable issues, retries, fallbacks |
-| `ERROR` | Failures with full context (args, state, exception) |
+After modifying code, verify:
 
-## Log Format
-
-Always include:
-- **Function/method name** as prefix
-- **Key parameters** that identify the operation
-- **State changes** (before → after)
-
-```python
-self.logger.info("check_condition: event=%s condition=%s result=%s",
-                 self.event_name, condition_name, result)
-```
+- [ ] Every public method has at least one INFO log (entry or meaningful outcome)
+- [ ] Every private method has at least one DEBUG log
+- [ ] All log messages are prefixed with `ClassName.method_name:` or `function_name:`
+- [ ] Structured `key=value` pairs used for context
+- [ ] No INFO/WARNING/ERROR/CRITICAL logs inside polling loops
+- [ ] All `except` blocks log the exception with full context
+- [ ] Async operations have before (DEBUG) and after (INFO) logging
+- [ ] CRITICAL used for unrecoverable failures only
+- [ ] ERROR used for recoverable failures only
+- [ ] WARNING used for unexpected-but-handled situations only

@@ -41,15 +41,16 @@ async def flush_pending_updates(bot: Bot) -> None:
         bot: The Telegram Bot instance.
     """
     logger = get_logger()
+    logger.debug("flush_pending_updates: fetching pending updates")
     updates = await bot.get_updates(offset=-1, timeout=0)
     
     if updates:
         next_id = updates[-1].update_id + 1
         set_next_update_id(next_id)
-        logger.info("flush_pending_updates cleared=%d next_id=%d", len(updates), next_id)
+        logger.info("flush_pending_updates: cleared=%d next_id=%d", len(updates), next_id)
     else:
         set_next_update_id(0)
-        logger.info("flush_pending_updates no_pending_updates")
+        logger.info("flush_pending_updates: no_pending_updates")
 
 
 async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
@@ -62,7 +63,7 @@ async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
     updates = list(updates_tuple)
     if updates:
         set_next_update_id(max(updates, key=lambda u: u.update_id).update_id + 1)
-        get_logger().debug("poll_updates_received count=%d", len(updates))
+        get_logger().debug("poll_updates: received count=%d", len(updates))
     return updates
 
 
@@ -110,6 +111,7 @@ class UpdatePollerMixin(ABC):
         """
         bot = get_bot()
         chat_id = get_chat_id()
+        logger = get_logger()
         
         while not self.should_stop_polling():
             updates = await poll_updates(bot)
@@ -117,6 +119,7 @@ class UpdatePollerMixin(ABC):
             for update in updates:
                 update_chat_id = get_chat_id_from_update(update)
                 if update_chat_id is None or str(update_chat_id) != chat_id:
+                    logger.debug("UpdatePollerMixin.poll: filtered update wrong_chat=%s expected=%s", update_chat_id, chat_id)
                     continue
                 
                 if update.callback_query:

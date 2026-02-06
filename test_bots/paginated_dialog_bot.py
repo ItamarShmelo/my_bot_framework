@@ -137,10 +137,10 @@ async def on_short_complete(result: Any) -> None:
     """
     logger = get_logger()
     if is_cancelled(result):
-        logger.info("short_dialog: User cancelled")
+        logger.info("on_short_complete: cancelled")
         await get_app().send_messages("Selection cancelled.")
     else:
-        logger.info("short_dialog: Selected %s", result)
+        logger.info("on_short_complete: selected result=%s", result)
         await get_app().send_messages(f"You selected: {result}")
 
 
@@ -152,12 +152,12 @@ async def on_expenses_complete(result: Any) -> None:
     """
     logger = get_logger()
     if is_cancelled(result):
-        logger.info("expenses_dialog: User cancelled")
+        logger.info("on_expenses_complete: cancelled")
         await get_app().send_messages("Expense removal cancelled.")
     else:
         # Find the label for the selected item
         label = next((lbl for lbl, cb in EXPENSE_ITEMS if cb == result), result)
-        logger.info("expenses_dialog: Removed %s", label)
+        logger.info("on_expenses_complete: removed label=%s", label)
         await get_app().send_messages(f"Removed expense: {label}")
 
 
@@ -169,11 +169,11 @@ async def on_countries_complete(result: Any) -> None:
     """
     logger = get_logger()
     if is_cancelled(result):
-        logger.info("countries_dialog: User cancelled")
+        logger.info("on_countries_complete: cancelled")
         await get_app().send_messages("Country selection cancelled.")
     else:
         label = next((lbl for lbl, cb in COUNTRY_ITEMS if cb == result), result)
-        logger.info("countries_dialog: Selected %s (%s)", label, result)
+        logger.info("on_countries_complete: selected label=%s result=%s", label, result)
         await get_app().send_messages(f"Selected country: {label} (code: {result})")
 
 
@@ -185,10 +185,10 @@ async def on_tasks_complete(result: Any) -> None:
     """
     logger = get_logger()
     if is_cancelled(result):
-        logger.info("tasks_dialog: User cancelled")
+        logger.info("on_tasks_complete: cancelled")
         await get_app().send_messages("Task selection cancelled.")
     else:
-        logger.info("tasks_dialog: Starting %s", result)
+        logger.info("on_tasks_complete: starting result=%s", result)
         await get_app().send_messages(f"Starting work on: {result}")
 
 
@@ -200,10 +200,10 @@ async def on_nocancel_complete(result: Any) -> None:
     """
     logger = get_logger()
     if is_cancelled(result):
-        logger.info("nocancel_dialog: Cancelled (unexpected)")
+        logger.info("on_nocancel_complete: cancelled (unexpected)")
         await get_app().send_messages("Cancelled (unexpected).")
     else:
-        logger.info("nocancel_dialog: Selected %s", result)
+        logger.info("on_nocancel_complete: selected result=%s", result)
         await get_app().send_messages(f"Selected: {result}")
 
 
@@ -343,7 +343,7 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting paginated_dialog_bot...")
+        logger.info("main: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())

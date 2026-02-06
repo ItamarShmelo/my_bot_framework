@@ -108,7 +108,7 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting basic_bot...")
+        logger.info("send_startup_and_run: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())

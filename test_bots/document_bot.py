@@ -70,7 +70,7 @@ def main() -> None:
 
     # Create test file
     test_file = create_test_file()
-    logger.info("Created test file at %s", test_file)
+    logger.info("create_test_file: created path=%s", test_file)
 
     # Initialize the bot
     app = BotApplication.initialize(
@@ -170,7 +170,7 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting document_bot...")
+        logger.info("send_startup_and_run: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())

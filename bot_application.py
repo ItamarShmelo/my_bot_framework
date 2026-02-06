@@ -76,28 +76,28 @@ class BotApplication:
             The initialized BotApplication singleton.
         """
         if cls._instance is not None:
-            logger.warning("BotApplication already initialized, returning existing instance")
+            logger.warning("BotApplication.initialize: already_initialized, returning existing")
             return cls._instance
-        
+
         bot = Bot(token=token)
         cls._instance = cls(bot, chat_id, logger)
         _set_instance(cls._instance)  # Set the accessor singleton
-        logger.info("bot_application_initialized chat_id=%s", chat_id)
+        logger.info("BotApplication.initialize: initialized chat_id=%s", chat_id)
         return cls._instance
     
     def register_event(self, event: "Event") -> None:
         """Register an event to be run when the bot starts."""
         self.events.append(event)
-        self.logger.debug("event_registered event_name=%s", event.event_name)
+        self.logger.debug("BotApplication.register_event: registered event_name=%s", event.event_name)
     
     def register_command(self, command: "Command") -> None:
         """Register a command to be available to users."""
         self.commands.append(command)
-        self.logger.debug("command_registered command=%s", command.command)
+        self.logger.debug("BotApplication.register_command: registered command=%s", command.command)
     
     async def terminate(self) -> None:
         """Built-in terminate handler - sends goodbye and sets stop_event."""
-        self.logger.info("bot_terminate_requested")
+        self.logger.info("BotApplication.terminate: requested")
         await self.send_messages("Bot terminating. Goodbye!")
         self.stop_event.set()
     
@@ -117,8 +117,16 @@ class BotApplication:
         Returns:
             Exit code (0 for success).
         """
+        self.logger.info("BotApplication.run: starting events=%d commands=%d", len(self.events), len(self.commands))
+        
         # Initialize the bot's HTTP session
-        await self.bot.initialize()
+        try:
+            self.logger.debug("BotApplication.run: initializing HTTP session")
+            await self.bot.initialize()
+            self.logger.debug("BotApplication.run: HTTP session initialized")
+        except Exception as exc:
+            self.logger.critical("BotApplication.run: http_session_init_failed error=%s", exc)
+            raise
         
         try:
             # Register built-in commands
@@ -149,13 +157,13 @@ class BotApplication:
                 for event in self.events
             ]
             
-            self.logger.info("bot_application_started events=%d commands=%d",
+            self.logger.info("BotApplication.run: started events=%d commands=%d",
                              len(self.events), len(self.commands))
             
             # Wait for stop signal
             await self.stop_event.wait()
             
-            self.logger.info("bot_application_stopping")
+            self.logger.info("BotApplication.run: stopping")
             
             # Cancel all tasks
             for task in event_tasks:
@@ -164,11 +172,19 @@ class BotApplication:
             # Wait for cancellation
             await asyncio.gather(*event_tasks, return_exceptions=True)
             
-            self.logger.info("bot_application_stopped")
+            self.logger.info("BotApplication.run: stopped")
             return 0
+        except Exception as exc:
+            self.logger.error("BotApplication.run: failed error=%s", exc)
+            raise
         finally:
             # Always close the HTTP session properly
-            await self.bot.shutdown()
+            try:
+                self.logger.debug("BotApplication.run: shutting down HTTP session")
+                await self.bot.shutdown()
+                self.logger.debug("BotApplication.run: HTTP session shut down")
+            except Exception as exc:
+                self.logger.error("BotApplication.run: http_session_shutdown_failed error=%s", exc)
     
     async def send_messages(
         self,
@@ -193,10 +209,12 @@ class BotApplication:
         if not isinstance(messages, list):
             messages = [messages]
         
+        self.logger.debug("BotApplication.send_messages: sending count=%d", len(messages))
         for message in messages:
             if isinstance(message, str):
                 message = TelegramTextMessage(message)
             await message.send(bot=self.bot, chat_id=self.chat_id, logger=self.logger)
+        self.logger.debug("BotApplication.send_messages: sent count=%d", len(messages))
 
 
 # Re-export accessor functions from accessors module for backward compatibility

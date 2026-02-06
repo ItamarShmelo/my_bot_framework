@@ -13,6 +13,7 @@ You MUST delegate to the appropriate subagent when performing tasks that fall un
 |----------|-----------|----------------------|
 | `code-style-enforcer` | Naming conventions, docstrings, code formatting | After modifying Python code |
 | `type-hints-enforcer` | Type annotations, mypy verification | After modifying Python code |
+| `logging-enforcer` | Comprehensive traceable logging | After modifying Python code |
 | `docs-updater` | README.md, IMPLEMENTATION.md, BOTS.md | After changes affecting API, architecture, or test bots |
 | `test-bots-maintainer` | Test bot creation and maintenance | After adding features or changing APIs |
 
@@ -31,6 +32,15 @@ You MUST invoke when:
 - Creating new Python files
 - Adding or modifying function signatures
 - Working with complex types (generics, protocols, etc.)
+
+### logging-enforcer
+
+You MUST invoke when:
+- Creating new Python files
+- Modifying methods or functions (ensure logging is added/updated)
+- Adding or modifying error handling (except blocks)
+- Adding or modifying async operations
+- Working in polling loops or event handlers
 
 ### docs-updater
 
@@ -52,5 +62,6 @@ You MUST invoke when:
 After Python code changes, you MUST:
 - [ ] Use `code-style-enforcer` for style enforcement
 - [ ] Use `type-hints-enforcer` for type hints
+- [ ] Use `logging-enforcer` for logging standards
 - [ ] Use `docs-updater` if documentation is affected
 - [ ] Use `test-bots-maintainer` if test bots need updates

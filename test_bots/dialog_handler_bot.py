@@ -76,10 +76,10 @@ async def on_feedback_complete(result: Any) -> None:
     logger = get_logger()
 
     if is_cancelled(result):
-        logger.info("feedback_handler: User cancelled")
+        logger.info("on_feedback_complete: cancelled")
         await get_app().send_messages("Feedback cancelled.")
     else:
-        logger.info("feedback_handler: Got feedback result=%s", result)
+        logger.info("on_feedback_complete: completed result=%s", result)
         await get_app().send_messages(f"Thank you for your feedback: {result}")
 
 feedback_dialog = DialogHandler(
@@ -103,15 +103,15 @@ async def on_survey_complete(result: Any) -> None:
     logger = get_logger()
 
     if is_cancelled(result):
-        logger.info("survey_handler: User cancelled the survey")
+        logger.info("on_survey_complete: cancelled")
         await get_app().send_messages("Survey cancelled.")
     else:
-        logger.info("survey_handler: Survey complete result=%s", result)
+        logger.info("on_survey_complete: completed result=%s", result)
         # Build summary message
         if isinstance(result, dict):
             lines = ["📊 Survey Complete!", ""]
             for key, value in result.items():
-                logger.info("  %s = %s", key, value)
+                logger.debug("on_survey_complete: field key=%s value=%s", key, value)
                 lines.append(f"• {key}: {value}")
             await get_app().send_messages("\n".join(lines))
         else:
@@ -143,14 +143,14 @@ async def on_order_complete(result: Any) -> None:
     logger = get_logger()
 
     if is_cancelled(result):
-        logger.info("order_handler: Order cancelled")
+        logger.info("on_order_complete: cancelled")
         await get_app().send_messages("Order cancelled.")
         return
 
-    logger.info("order_handler: Processing order...")
+    logger.info("on_order_complete: processing")
     # Simulate async processing
     await asyncio.sleep(1)
-    logger.info("order_handler: Order processed! result=%s", result)
+    logger.info("on_order_complete: processed result=%s", result)
 
     # Build order confirmation message
     if isinstance(result, dict):
@@ -183,7 +183,7 @@ async def on_inner_complete(result: Any) -> None:
         result: The dialog result (selected choice or CANCELLED).
     """
     logger = get_logger()
-    logger.info("inner_handler: Got result=%s", result)
+    logger.info("on_inner_complete: completed result=%s", result)
 
     if is_cancelled(result):
         await get_app().send_messages("Inner handler: Cancelled")
@@ -197,7 +197,7 @@ async def on_outer_complete(result: Any) -> None:
         result: The dialog result (selected choice or CANCELLED).
     """
     logger = get_logger()
-    logger.info("outer_handler: Final result=%s", result)
+    logger.info("on_outer_complete: completed result=%s", result)
 
     if is_cancelled(result):
         await get_app().send_messages("Outer handler: Cancelled")
@@ -228,11 +228,11 @@ async def on_cancel_test_complete(result: Any) -> None:
 
     # Using the is_cancelled() helper
     if is_cancelled(result):
-        logger.info("cancel_test: Dialog was cancelled (detected via is_cancelled)")
+        logger.info("on_cancel_test_complete: cancelled")
         await get_app().send_messages("❌ Dialog was cancelled!")
         return
 
-    logger.info("cancel_test: Dialog completed with result=%s", result)
+    logger.info("on_cancel_test_complete: completed result=%s", result)
     await get_app().send_messages(f"✅ Dialog completed with: {result}")
 
 cancel_test_dialog = DialogHandler(
@@ -320,7 +320,7 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting dialog_handler_bot...")
+        logger.info("main: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())

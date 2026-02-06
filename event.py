@@ -208,31 +208,39 @@ class ActivateOnConditionEvent(Event, EditableMixin):
 
     async def submit(self, stop_event: asyncio.Event) -> None:
         logger = get_logger()
-        logger.info("[%s] event_started poll_seconds=%.1f", self.event_name, self.poll_seconds)
+        logger.info("ActivateOnConditionEvent.submit: started event=%s poll_seconds=%.1f", self.event_name, self.poll_seconds)
         
         while not stop_event.is_set():
-            logger.debug("[%s] checking_condition", self.event_name)
+            logger.debug("ActivateOnConditionEvent.submit: checking_condition event=%s", self.event_name)
             
             was_edited = self.edited
             if was_edited:
                 self.edited = False
             
-            condition_result = await asyncio.to_thread(
-                self.condition.check,
-            )
+            try:
+                condition_result = await asyncio.to_thread(
+                    self.condition.check,
+                )
+            except Exception as exc:
+                logger.error("ActivateOnConditionEvent.submit: condition_check_failed event=%s error=%s", self.event_name, exc)
+                await _wait_or_stop(stop_event, self.poll_seconds)
+                continue
             
             # Fire if condition is true, or if edited and fire_when_edited is enabled
             should_fire = condition_result or (was_edited and self.fire_when_edited)
             if should_fire:
-                message = await _maybe_await(self.message_builder.build)
-                if message:
-                    logger.info("event_message_queued event_name=%s", self.event_name)
-                    await get_app().send_messages(message)
-                else:
-                    logger.warning("[%s] message_builder_returned_none", self.event_name)
+                try:
+                    message = await _maybe_await(self.message_builder.build)
+                    if message:
+                        logger.info("ActivateOnConditionEvent.submit: message_queued event=%s", self.event_name)
+                        await get_app().send_messages(message)
+                    else:
+                        logger.warning("ActivateOnConditionEvent.submit: message_builder_returned_none event=%s", self.event_name)
+                except Exception as exc:
+                    logger.error("ActivateOnConditionEvent.submit: message_build_failed event=%s error=%s", self.event_name, exc)
             await _wait_or_stop(stop_event, self.poll_seconds)
         
-        logger.info("[%s] event_stopped", self.event_name)
+        logger.info("ActivateOnConditionEvent.submit: stopped event=%s", self.event_name)
 
 
 class CommandsEvent(Event, UpdatePollerMixin):
@@ -268,7 +276,7 @@ class CommandsEvent(Event, UpdatePollerMixin):
         callback_query = update.callback_query
         if callback_query is None:
             return
-        logger.debug("stale_callback_received id=%s", callback_query.id)
+        logger.debug("CommandsEvent.handle_callback_update: stale_callback id=%s", callback_query.id)
         
         await get_app().send_messages(TelegramCallbackAnswerMessage(
             callback_query.id,
@@ -292,14 +300,16 @@ class CommandsEvent(Event, UpdatePollerMixin):
         command = self._match_command(text)
         if command:
             logger = get_logger()
-            logger.info("command_matched command=%s", command.command)
+            logger.info("CommandsEvent.handle_text_update: matched command=%s", command.command)
             # Set offset past this command before running, so command won't see itself as input
             set_next_update_id(update.update_id + 1)
-            await command.run()
+            try:
+                await command.run()
+            except Exception as exc:
+                logger.error("CommandsEvent.handle_text_update: command_run_failed command=%s error=%s", command.command, exc)
         else:
             logger = get_logger()
-            logger.info("unknown_command text=%s", text)
-            logger.info("event_message_queued event_name=%s", self.event_name)
+            logger.info("CommandsEvent.handle_text_update: unknown_command text=%s", text)
             await get_app().send_messages(
                 TelegramTextMessage(self._commands_help_text(text)),
             )
@@ -393,11 +403,16 @@ class SimpleCommand(Command):
     async def run(self) -> Any:
         """Execute message builder and send result, then complete."""
         logger = get_logger()
-        logger.info("simple_command_executed command=%s", self.command)
-        result = await _maybe_await(self.message_builder)
-        if result:
-            logger.info("command_message_sent command=%s", self.command)
-            await get_app().send_messages(result)
+        logger.info("SimpleCommand.run: executed command=%s", self.command)
+        try:
+            result = await _maybe_await(self.message_builder)
+            if result:
+                logger.debug("SimpleCommand.run: sending message command=%s", self.command)
+                await get_app().send_messages(result)
+                logger.info("SimpleCommand.run: sent command=%s", self.command)
+        except Exception as exc:
+            logger.error("SimpleCommand.run: failed command=%s error=%s", self.command, exc)
+            raise
         return None
 
 
@@ -426,10 +441,13 @@ class DialogCommand(Command):
             DialogResult.
         """
         logger = get_logger()
-        logger.info("dialog_command_started command=%s", self.command)
+        logger.info("DialogCommand.run: started command=%s", self.command)
         
-        # start() handles reset internally - no need to call reset() explicitly
-        result = await self.dialog.start({})
-        
-        logger.info("dialog_command_completed command=%s result=%s", self.command, result)
-        return result
+        try:
+            # start() handles reset internally - no need to call reset() explicitly
+            result = await self.dialog.start({})
+            logger.info("DialogCommand.run: completed command=%s result=%s", self.command, result)
+            return result
+        except Exception as exc:
+            logger.error("DialogCommand.run: failed command=%s error=%s", self.command, exc)
+            raise

@@ -348,7 +348,7 @@ class EditableMixin(ABC):
     def edited(self, value: bool) -> None:
         """Set the edited flag."""
         logger = get_logger()
-        logger.info("[%s] edited_flag_set value=%s", type(self).__name__, value)
+        logger.debug("EditableMixin.edited: set value=%s", value)
         self._edited = value
 
     def edit(self, name: str, value: Any) -> None:
