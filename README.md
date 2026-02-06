@@ -19,8 +19,10 @@ This project uses [uv](https://docs.astral.sh/uv/) for package and virtual envir
 # Install uv if you haven't already
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Add the required dependency
-uv add python-telegram-bot
+# Clone and sync dependencies
+git clone <repo-url>
+cd my_bot_framework
+uv sync
 ```
 
 ## Quick Start
