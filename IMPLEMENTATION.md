@@ -449,12 +449,14 @@ async def run():
 send_messages() ──► TelegramMessage.send()
                         │
                         ▼
-            ┌─────────────────────────────┐
-            │  Error handling wrapper     │
-            │  - Catches InvalidHtmlError │
-            │  - Re-raises as fatal       │
-            │  - Logs other errors        │
-            └───────────┬─────────────────┘
+            ┌──────────────────────────────┐
+            │  Retry loop (up to 3x)       │
+            │  - Retry transient errors    │
+            │  - Exponential backoff       │
+            │  - Handle RetryAfter         │
+            │  - Re-raise InvalidHtmlError │
+            │  - Log permanent errors      │
+            └───────────┬──────────────────┘
                         │
                         ▼
             message._send_impl(bot, chat_id, logger)
@@ -468,11 +470,11 @@ send_messages() ──► TelegramMessage.send()
 ```
 
 **Architecture:** `TelegramMessage` is an abstract base class (ABC) with:
-- `send()` - Public concrete method that handles errors uniformly
+- `send()` - Public concrete method that handles errors uniformly with retry logic
 - `_send_impl()` - Abstract method that subclasses override with send logic
 - `_get_error_text()` - Optional override for HTML error context
 
-All error handling is centralized in the base class `send()` method. `InvalidHtmlError` is re-raised as a fatal error (terminates the bot). All other exceptions are logged at ERROR level and swallowed so the bot keeps running.
+All error handling is centralized in the base class `send()` method. Transient errors (`TimedOut`, `NetworkError`) are retried up to `SEND_MAX_RETRIES` (default 3) times with exponential backoff (base delay `SEND_RETRY_BASE_DELAY_SECONDS` = 1.0s, so delays of 1s, 2s, 4s). `RetryAfter` errors wait for the duration specified by Telegram before retrying. `InvalidHtmlError` is re-raised as a fatal error (terminates the bot). All other exceptions are logged at ERROR level and swallowed so the bot keeps running.
 
 Note: Event logging (event_name) happens at the call site before sending,
 not during message sending.
@@ -878,21 +880,38 @@ while not self.should_stop_polling():
 
 ### Message Sending
 
-Error handling is centralized in the `TelegramMessage.send()` base class method:
+Error handling is centralized in the `TelegramMessage.send()` base class method with automatic retry logic:
 
 ```python
 async def send(self, bot, chat_id, logger):
-    """Public method with uniform error handling."""
-    try:
-        await self._send_impl(bot, chat_id, logger)  # Subclass override
-    except InvalidHtmlError:
-        raise  # Fatal -- propagates up and terminates the bot
-    except Exception as exc:
-        if _is_html_parse_error(exc):
-            raise InvalidHtmlError(exc, self._get_error_text()) from exc
-        logger.error("%s.send: failed", type(self).__name__, exc_info=True)
-        # Error logged, bot continues running
+    """Public method with uniform error handling and retry logic."""
+    for attempt in range(SEND_MAX_RETRIES):
+        try:
+            await self._send_impl(bot, chat_id, logger)  # Subclass override
+            return  # Success -- exit immediately
+        except InvalidHtmlError:
+            raise  # Fatal -- propagates up and terminates the bot
+        except RetryAfter as exc:
+            # Rate limiting -- wait for Telegram-specified duration
+            await asyncio.sleep(exc.retry_after)
+        except (TimedOut, NetworkError) as exc:
+            # Transient error -- exponential backoff (1s, 2s, 4s)
+            backoff = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+            await asyncio.sleep(backoff)
+        except Exception as exc:
+            if _is_html_parse_error(exc):
+                raise InvalidHtmlError(exc, self._get_error_text()) from exc
+            logger.error("%s.send: permanent_error", type(self).__name__, exc_info=True)
+            return  # Non-retryable -- swallow and continue
+    
+    logger.error("%s.send: all_retries_exhausted", type(self).__name__)
 ```
+
+**Retry Strategy:**
+- **Transient errors** (`TimedOut`, `NetworkError`): Retried up to `SEND_MAX_RETRIES` (default 3) times with exponential backoff. Base delay is `SEND_RETRY_BASE_DELAY_SECONDS` (default 1.0s), resulting in delays of 1s, 2s, 4s for attempts 0, 1, 2.
+- **Rate limiting** (`RetryAfter`): Waits for the duration specified by Telegram's `retry_after` field before retrying.
+- **Fatal errors** (`InvalidHtmlError`): Re-raised immediately, terminating the bot.
+- **Permanent errors**: Logged at ERROR level and swallowed after first attempt (no retry).
 
 Subclasses override `_send_impl()` with their happy-path send logic. They must NOT add their own try/except blocks (except for expected non-error exceptions like "message is not modified").
 

@@ -3,12 +3,13 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from pathlib import Path
 from typing import Final, Optional
 
 from telegram import Bot, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import MessageLimit, ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
 
 from .utilities import divide_message_to_chunks
 
@@ -18,6 +19,12 @@ MESSAGE_SEND_DELAY_SECONDS = 0.05
 
 # Reserved space for chunk prefix like "(99/99):\n" to avoid exceeding message limits
 CHUNK_PREFIX_OVERHEAD = 20
+
+# Maximum number of retry attempts for transient send errors
+SEND_MAX_RETRIES: int = 3
+
+# Base delay in seconds for exponential backoff between retries (delay = base * 2^attempt)
+SEND_RETRY_BASE_DELAY_SECONDS: float = 1.0
 
 
 class InvalidHtmlError(Exception):
@@ -76,10 +83,12 @@ class TelegramMessage(ABC):
         chat_id: str,
         logger: logging.Logger,
     ) -> None:
-        """Send this message, handling errors uniformly.
+        """Send this message, handling errors uniformly with retry logic.
 
-        Subclasses must override ``_send_impl()`` with their send logic.
-        ``InvalidHtmlError`` is re-raised as a fatal error. All other
+        Transient errors (``NetworkError``, ``TimedOut``) are retried up to
+        ``SEND_MAX_RETRIES`` times with exponential backoff.  ``RetryAfter``
+        errors wait the duration specified by Telegram before retrying.
+        ``InvalidHtmlError`` is re-raised as a fatal error.  All other
         exceptions are logged at ERROR level and swallowed so the bot
         keeps running.
 
@@ -88,14 +97,72 @@ class TelegramMessage(ABC):
             chat_id: The chat ID to send the message to.
             logger: Logger for recording send status.
         """
-        try:
-            await self._send_impl(bot, chat_id, logger)
-        except InvalidHtmlError:
-            raise  # Fatal -- propagates up and terminates the bot
-        except Exception as exc:
-            if _is_html_parse_error(exc):
-                raise InvalidHtmlError(exc, self._get_error_text()) from exc
-            logger.error("%s.send: failed", type(self).__name__, exc_info=True)
+        class_name: str = type(self).__name__
+
+        for attempt in range(SEND_MAX_RETRIES):
+            logger.debug(
+                "%s.send: attempting_send attempt=%d/%d",
+                class_name,
+                attempt + 1,
+                SEND_MAX_RETRIES,
+            )
+            try:
+                await self._send_impl(bot, chat_id, logger)
+                if attempt > 0:
+                    logger.info(
+                        "%s.send: succeeded_after_retry attempt=%d/%d",
+                        class_name,
+                        attempt + 1,
+                        SEND_MAX_RETRIES,
+                    )
+                return  # Success -- exit immediately
+            except InvalidHtmlError:
+                raise  # Fatal -- propagates up and terminates the bot
+            except RetryAfter as exc:
+                retry_after = exc.retry_after
+                wait_seconds: int = (
+                    int(retry_after.total_seconds())
+                    if isinstance(retry_after, timedelta)
+                    else retry_after
+                )
+                logger.warning(
+                    "%s.send: rate_limited retry_after=%ds attempt=%d/%d",
+                    class_name,
+                    wait_seconds,
+                    attempt + 1,
+                    SEND_MAX_RETRIES,
+                )
+                await asyncio.sleep(wait_seconds)
+            except (TimedOut, NetworkError) as exc:
+                # Exponential backoff: delay = base * 2^attempt (1s, 2s, 4s for attempts 0, 1, 2)
+                backoff_seconds: float = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+                logger.warning(
+                    "%s.send: transient_error error=%s backoff=%.1fs attempt=%d/%d",
+                    class_name,
+                    type(exc).__name__,
+                    backoff_seconds,
+                    attempt + 1,
+                    SEND_MAX_RETRIES,
+                )
+                await asyncio.sleep(backoff_seconds)
+            except Exception as exc:
+                if _is_html_parse_error(exc):
+                    raise InvalidHtmlError(exc, self._get_error_text()) from exc
+                logger.error(
+                    "%s.send: permanent_error error=%s attempt=%d/%d",
+                    class_name,
+                    type(exc).__name__,
+                    attempt + 1,
+                    SEND_MAX_RETRIES,
+                    exc_info=True,
+                )
+                return  # Non-retryable -- swallow and continue
+
+        logger.error(
+            "%s.send: all_retries_exhausted max_retries=%d",
+            class_name,
+            SEND_MAX_RETRIES,
+        )
 
     @abstractmethod
     async def _send_impl(

@@ -60,6 +60,8 @@ from .telegram_utilities import (
     TelegramReplyKeyboardMessage,
     TelegramRemoveReplyKeyboardMessage,
     InvalidHtmlError,
+    SEND_MAX_RETRIES,
+    SEND_RETRY_BASE_DELAY_SECONDS,
 )
 from .dialog import (
     Dialog,
@@ -152,6 +154,8 @@ __all__ = [
     "TelegramReplyKeyboardMessage",
     "TelegramRemoveReplyKeyboardMessage",
     "InvalidHtmlError",
+    "SEND_MAX_RETRIES",
+    "SEND_RETRY_BASE_DELAY_SECONDS",
     # Dialog
     "Dialog",
     "DialogState",
