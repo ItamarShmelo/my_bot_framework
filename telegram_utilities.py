@@ -296,6 +296,7 @@ class TelegramImageMessage(TelegramMessage):
                 photo=handle,
                 caption=caption_text if caption_text else None,
                 parse_mode=ParseMode.HTML if caption_text else None,
+                write_timeout=60,
             )
         logger.info('TelegramImageMessage.send: sent path="%s"', image_path)
 
@@ -342,6 +343,7 @@ class TelegramDocumentMessage(TelegramMessage):
                 document=handle,
                 caption=caption_text if caption_text else None,
                 parse_mode=ParseMode.HTML if caption_text else None,
+                write_timeout=120,
             )
         logger.info('TelegramDocumentMessage.send: sent path="%s"', document_path)
 
