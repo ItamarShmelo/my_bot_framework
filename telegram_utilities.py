@@ -22,7 +22,7 @@ MESSAGE_SEND_DELAY_SECONDS = 0.05
 CHUNK_PREFIX_OVERHEAD = 20
 
 # Maximum number of send attempts for transient send errors
-SEND_MAX_ATTEMPTS: int = 5
+SEND_MAX_ATTEMPTS: int = 6
 
 # Base delay in seconds for exponential backoff with jitter (delay = base * 2^(attempt-1) + uniform jitter)
 SEND_RETRY_BASE_DELAY_SECONDS: float = 1.0
