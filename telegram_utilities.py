@@ -20,10 +20,10 @@ MESSAGE_SEND_DELAY_SECONDS = 0.05
 # Reserved space for chunk prefix like "(99/99):\n" to avoid exceeding message limits
 CHUNK_PREFIX_OVERHEAD = 20
 
-# Maximum number of retry attempts for transient send errors
-SEND_MAX_RETRIES: int = 3
+# Maximum number of send attempts for transient send errors
+SEND_MAX_ATTEMPTS: int = 5
 
-# Base delay in seconds for exponential backoff between retries (delay = base * 2^attempt)
+# Base delay in seconds for exponential backoff between attempts (delay = base * 2^attempt)
 SEND_RETRY_BASE_DELAY_SECONDS: float = 1.0
 
 # Extra buffer added to Telegram's retry_after to avoid immediate re-hit
@@ -92,9 +92,10 @@ class TelegramMessage(ABC):
         """Send this message, handling errors uniformly with retry logic.
 
         Transient errors (``NetworkError``, ``TimedOut``) are retried up to
-        ``SEND_MAX_RETRIES`` times with exponential backoff.  ``RetryAfter``
-        errors wait the duration specified by Telegram plus
-        ``RATE_LIMIT_BUFFER_SECONDS`` before retrying; if the wait exceeds
+        ``SEND_MAX_ATTEMPTS`` times with exponential backoff (attempts start
+        at 1).  ``RetryAfter`` errors wait the duration specified by Telegram
+        plus ``RATE_LIMIT_BUFFER_SECONDS`` before retrying and do **not**
+        count towards the attempt limit; if the wait exceeds
         ``RATE_LIMIT_MAX_WAIT_SECONDS``, a RuntimeError is raised.
         ``InvalidHtmlError`` is re-raised as a fatal error.  All other
         exceptions are logged at ERROR level and swallowed so the bot
@@ -106,28 +107,28 @@ class TelegramMessage(ABC):
             logger: Logger for recording send status.
         """
         class_name: str = type(self).__name__
+        attempt: int = 1
 
-        for attempt in range(SEND_MAX_RETRIES):
+        while attempt <= SEND_MAX_ATTEMPTS:
             logger.debug(
                 "%s.send: attempting_send attempt=%d/%d",
                 class_name,
-                attempt + 1,
-                SEND_MAX_RETRIES,
+                attempt,
+                SEND_MAX_ATTEMPTS,
             )
             try:
                 await self._send_impl(bot, chat_id, logger)
-                if attempt > 0:
+                if attempt > 1:
                     logger.info(
                         "%s.send: succeeded_after_retry attempt=%d/%d",
                         class_name,
-                        attempt + 1,
-                        SEND_MAX_RETRIES,
+                        attempt,
+                        SEND_MAX_ATTEMPTS,
                     )
                 return  # Success -- exit immediately
             except InvalidHtmlError:
                 raise  # Fatal -- propagates up and terminates the bot
             except RetryAfter as exc:
-                # Add buffer to avoid immediate re-hit; raise if wait exceeds max
                 retry_after = exc.retry_after
                 wait_seconds: float = (
                     retry_after.total_seconds()
@@ -144,22 +145,24 @@ class TelegramMessage(ABC):
                     class_name,
                     wait_seconds,
                     RATE_LIMIT_BUFFER_SECONDS,
-                    attempt + 1,
-                    SEND_MAX_RETRIES,
+                    attempt,
+                    SEND_MAX_ATTEMPTS,
+                    exc_info=True,
                 )
                 await asyncio.sleep(wait_seconds)
+                # RetryAfter does not count towards attempts
             except (TimedOut, NetworkError) as exc:
-                # Exponential backoff: delay = base * 2^attempt (1s, 2s, 4s for attempts 0, 1, 2)
                 backoff_seconds: float = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
                 logger.warning(
-                    "%s.send: transient_error error=%s backoff=%.1fs attempt=%d/%d",
+                    "%s.send: transient_error backoff=%.1fs attempt=%d/%d",
                     class_name,
-                    type(exc).__name__,
                     backoff_seconds,
-                    attempt + 1,
-                    SEND_MAX_RETRIES,
+                    attempt,
+                    SEND_MAX_ATTEMPTS,
+                    exc_info=True,
                 )
                 await asyncio.sleep(backoff_seconds)
+                attempt += 1
             except Exception as exc:
                 if _is_html_parse_error(exc):
                     raise InvalidHtmlError(exc, self._get_error_text()) from exc
@@ -167,16 +170,16 @@ class TelegramMessage(ABC):
                     "%s.send: permanent_error error=%s attempt=%d/%d",
                     class_name,
                     type(exc).__name__,
-                    attempt + 1,
-                    SEND_MAX_RETRIES,
+                    attempt,
+                    SEND_MAX_ATTEMPTS,
                     exc_info=True,
                 )
                 return  # Non-retryable -- swallow and continue
 
         logger.error(
-            "%s.send: all_retries_exhausted max_retries=%d",
+            "%s.send: all_attempts_exhausted max_attempts=%d",
             class_name,
-            SEND_MAX_RETRIES,
+            SEND_MAX_ATTEMPTS,
         )
 
     @abstractmethod
@@ -475,7 +478,7 @@ class TelegramCallbackAnswerMessage(TelegramMessage):
             callback_query_id=self.callback_query_id,
             text=self.text,
         )
-        logger.debug('TelegramCallbackAnswerMessage.send: answered id=%s', self.callback_query_id)
+        logger.info('TelegramCallbackAnswerMessage.send: answered id=%s', self.callback_query_id)
 
 
 class TelegramRemoveKeyboardMessage(TelegramMessage):
@@ -517,6 +520,11 @@ class TelegramRemoveKeyboardMessage(TelegramMessage):
             logger.debug('TelegramRemoveKeyboardMessage.send: removed message_id=%d', self.message_id)
         except Exception as exc:
             if "message is not modified" in str(exc).lower():
+                logger.debug(
+                    "TelegramRemoveKeyboardMessage.send: message_not_modified message_id=%d (expected)",
+                    self.message_id,
+                    exc_info=True,
+                )
                 return  # Expected -- keyboard was already removed
             raise  # Let the base class handle other errors
 

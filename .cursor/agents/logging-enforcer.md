@@ -116,10 +116,10 @@ await bot.send_photo(...)
 logger.info("TelegramImageMessage.send: sent path='%s'", image_path)
 ```
 
-**All exception handlers:**
+**All exception handlers (MUST use `exc_info=True`):**
 ```python
-except Exception as exc:
-    logger.error("TelegramTextMessage.send: failed error=%s", exc)
+except Exception:
+    logger.error("TelegramTextMessage.send: failed", exc_info=True)
 ```
 
 **State transitions:**
@@ -128,7 +128,40 @@ logger.info("Dialog.cancel: cancelled")
 self.state = DialogState.COMPLETE
 ```
 
-### 6. Missing Logging Detection
+### 6. Exception Logging with exc_info=True
+
+**ALL logging calls inside `except` blocks MUST include `exc_info=True`** to capture the full traceback. This applies to every log level (`DEBUG`, `WARNING`, `ERROR`, `CRITICAL`).
+
+```python
+# BAD - no traceback, loses stack information
+except Exception as exc:
+    logger.error("ClassName.method: failed error=%s", exc)
+
+# BAD - warning without exc_info
+except TimedOut:
+    logger.warning("poll_updates: request_timed_out offset=%d", offset)
+
+# GOOD - full traceback at every level
+except Exception:
+    logger.error("ClassName.method: failed", exc_info=True)
+
+except TimedOut:
+    logger.warning("poll_updates: request_timed_out offset=%d", offset, exc_info=True)
+
+except Exception:
+    logger.critical("ClassName.method: fatal", exc_info=True)
+    raise
+
+except Exception as exc:
+    if "expected condition" in str(exc).lower():
+        logger.debug("ClassName.method: expected_condition", exc_info=True)
+        return
+    raise
+```
+
+**When checking files, search for all `except` blocks and verify every logging call within them includes `exc_info=True`. If missing, add it.**
+
+### 7. Missing Logging Detection
 
 Check for these common gaps:
 
@@ -152,7 +185,7 @@ When adding logging, use the pattern already established in that file/class. Do 
 After fixing all logging issues in a file:
 
 1. **Search for bare log messages** without `ClassName.method_name:` or `function_name:` prefix — if found, **fix them**
-2. **Search for `except` blocks** and verify each one logs the exception — if missing, **add logging**
+2. **Search for `except` blocks** and verify each one logs the exception with `exc_info=True` — if missing, **add logging with `exc_info=True`**
 3. **Search for `while` loops** and verify logging inside them is at `DEBUG` level — if wrong level, **fix it**
 4. **Search for `await` calls** to external services and verify before/after logging exists — if missing, **add it**
 5. **Compile check:** Run `python -m py_compile <file>` on each modified file — if it fails, **fix the syntax**
@@ -163,7 +196,7 @@ After fixing all logging issues in a file:
 - [ ] Structured `key=value` pairs used for context
 - [ ] Correct log levels (DEBUG/INFO/WARNING/ERROR/CRITICAL)
 - [ ] No INFO+ logs inside polling loops
-- [ ] All `except` blocks log with full context
+- [ ] All `except` blocks log with full context and `exc_info=True`
 - [ ] Async operations have before (DEBUG) and after (INFO) logging
 - [ ] Public methods have at least one meaningful log
 - [ ] No silent error paths (early returns, continues without logging)

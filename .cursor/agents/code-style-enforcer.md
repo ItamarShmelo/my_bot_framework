@@ -368,7 +368,36 @@ raise ValueError("Invalid")
 raise ValueError(f"Expected threshold between 0-100, got {value}")
 ```
 
-### 9. Code Duplication
+### 9. Exception Logging
+
+All logging calls inside `except` blocks MUST include `exc_info=True` to capture the full traceback. Do NOT manually format the exception into the message string.
+
+```python
+# BAD - no traceback, loses stack information
+except Exception as exc:
+    logger.error("ClassName.method: failed error=%s", exc)
+
+# BAD - no exc_info=True
+except NetworkError:
+    logger.warning("ClassName.method: network_error")
+
+# GOOD - full traceback included automatically
+except Exception as exc:
+    logger.error("ClassName.method: failed", exc_info=True)
+
+# GOOD - warning with traceback
+except NetworkError:
+    logger.warning("ClassName.method: network_error", exc_info=True)
+
+# GOOD - critical with traceback
+except Exception:
+    logger.critical("ClassName.method: fatal", exc_info=True)
+    raise
+```
+
+This applies to ALL log levels (`DEBUG`, `WARNING`, `ERROR`, `CRITICAL`) inside `except` blocks.
+
+### 10. Code Duplication
 
 **Flag and extract duplicate code.** When you see similar code blocks repeated 3+ times, consider extracting to a helper function.
 

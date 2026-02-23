@@ -575,10 +575,10 @@ python test_bots/network_error_bot.py
 **Features tested:**
 - Retry logic with exponential backoff for `TimedOut` errors
 - Retry logic with exponential backoff for `NetworkError` errors
-- `RetryAfter` error handling (respects retry_after + buffer; raises RuntimeError if exceeded)
-- Exhausting retries after `SEND_MAX_RETRIES` attempts
+- `RetryAfter` error handling (respects retry_after + buffer; does not count towards attempt limit; raises RuntimeError if exceeded)
+- Exhausting attempts after `SEND_MAX_ATTEMPTS` (5 attempts, backoff 2s, 4s, 8s, 16s, 32s)
 - Retry behavior across different message types (`TelegramTextMessage`, `TelegramImageMessage`, `TelegramDocumentMessage`, `TelegramOptionsMessage`)
-- Constants: `SEND_MAX_RETRIES`, `SEND_RETRY_BASE_DELAY_SECONDS`, `RATE_LIMIT_BUFFER_SECONDS`, `RATE_LIMIT_MAX_WAIT_SECONDS`
+- Constants: `SEND_MAX_ATTEMPTS`, `SEND_RETRY_BASE_DELAY_SECONDS`, `RATE_LIMIT_BUFFER_SECONDS`, `RATE_LIMIT_MAX_WAIT_SECONDS`
 
 **Commands:**
 | Command | Description |
@@ -587,7 +587,7 @@ python test_bots/network_error_bot.py
 | `/test_network_error` | Test NetworkError retry (succeeds after 1 retry) |
 | `/test_retry_after` | Test RetryAfter handling (waits 2 seconds, then succeeds) |
 | `/test_multiple_retries` | Test multiple retries with exponential backoff (fails 2x, succeeds on 3rd) |
-| `/test_exhaust_retries` | Test exhausting retries (fails SEND_MAX_RETRIES times, error logged) |
+| `/test_exhaust_retries` | Test exhausting attempts (fails SEND_MAX_ATTEMPTS times, error logged) |
 | `/test_image` | Test retry with TelegramImageMessage |
 | `/test_document` | Test retry with TelegramDocumentMessage |
 | `/test_options` | Test retry with TelegramOptionsMessage |
@@ -600,12 +600,12 @@ python test_bots/network_error_bot.py
 The bot monkey-patches Telegram API send methods (`bot.send_message`, `bot.send_photo`, `bot.send_document`) to inject failures:
 - Call 1: `TimedOut` error (succeeds on retry)
 - Call 2: `NetworkError` error (succeeds on retry)
-- Call 3: `RetryAfter` error with 2 second wait (succeeds after wait; includes buffer)
+- Call 3: `RetryAfter` error with 2 second wait (succeeds after wait; includes buffer; does not count towards attempt limit)
 - Calls 4-5: Multiple `TimedOut` errors (succeeds on 3rd attempt, tests exponential backoff)
-- Calls 6-8: Exhaust retries (all `SEND_MAX_RETRIES` attempts fail, error logged)
+- Calls 7-11: Exhaust attempts (all `SEND_MAX_ATTEMPTS` attempts fail, `all_attempts_exhausted` error logged)
 
 **Usage:**
-Run each `/test_*` command to trigger different retry scenarios. Check logs to see retry attempts, exponential backoff delays, and RetryAfter waits. The `/test_exhaust_retries` command demonstrates what happens when all retries are exhausted (error logged, bot continues running).
+Run each `/test_*` command to trigger different retry scenarios. Check logs to see retry attempts, exponential backoff delays (2s, 4s, 8s, 16s, 32s), and RetryAfter waits. The `/test_exhaust_retries` command demonstrates what happens when all attempts are exhausted (error logged, bot continues running).
 
 **Run:**
 ```bash

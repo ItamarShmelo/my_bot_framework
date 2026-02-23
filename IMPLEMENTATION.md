@@ -443,7 +443,7 @@ send_messages() ──► TelegramMessage.send()
                         │
                         ▼
             ┌──────────────────────────────┐
-            │  Retry loop (up to 3x)       │
+            │  Retry loop (up to 5 attempts)│
             │  - Retry transient errors    │
             │  - Exponential backoff       │
             │  - Handle RetryAfter         │
@@ -467,7 +467,7 @@ send_messages() ──► TelegramMessage.send()
 - `_send_impl()` - Abstract method that subclasses override with send logic
 - `_get_error_text()` - Optional override for HTML error context
 
-All error handling is centralized in the base class `send()` method. Transient errors (`TimedOut`, `NetworkError`) are retried up to `SEND_MAX_RETRIES` (default 3) times with exponential backoff (base delay `SEND_RETRY_BASE_DELAY_SECONDS` = 1.0s, so delays of 1s, 2s, 4s). `RetryAfter` errors wait for the duration specified by Telegram plus `RATE_LIMIT_BUFFER_SECONDS` (1.0s) to avoid immediate re-hit; if the total wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), a `RuntimeError` is raised. `InvalidHtmlError` is re-raised as a fatal error (terminates the bot). All other exceptions are logged at ERROR level and swallowed so the bot keeps running.
+All error handling is centralized in the base class `send()` method. Transient errors (`TimedOut`, `NetworkError`) are retried up to `SEND_MAX_ATTEMPTS` (default 5) times with exponential backoff (base delay `SEND_RETRY_BASE_DELAY_SECONDS` = 1.0s, formula `base * 2^attempt` with attempts 1–5, so delays of 2s, 4s, 8s, 16s, 32s). `RetryAfter` errors wait for the duration specified by Telegram plus `RATE_LIMIT_BUFFER_SECONDS` (1.0s) to avoid immediate re-hit and do not count towards the attempt limit; if the total wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), a `RuntimeError` is raised. `InvalidHtmlError` is re-raised as a fatal error (terminates the bot). All other exceptions are logged at ERROR level and swallowed so the bot keeps running.
 
 Note: Event logging (event_name) happens at the call site before sending,
 not during message sending.
@@ -878,7 +878,8 @@ Error handling is centralized in the `TelegramMessage.send()` base class method 
 ```python
 async def send(self, bot, chat_id, logger):
     """Public method with uniform error handling and retry logic."""
-    for attempt in range(SEND_MAX_RETRIES):
+    attempt = 1
+    while attempt <= SEND_MAX_ATTEMPTS:
         try:
             await self._send_impl(bot, chat_id, logger)  # Subclass override
             return  # Success -- exit immediately
@@ -886,26 +887,28 @@ async def send(self, bot, chat_id, logger):
             raise  # Fatal -- propagates up and terminates the bot
         except RetryAfter as exc:
             # Rate limiting -- wait for retry_after + buffer; raise if exceeds max
+            # RetryAfter does NOT count towards attempt limit
             wait_seconds = exc.retry_after + RATE_LIMIT_BUFFER_SECONDS
             if wait_seconds > RATE_LIMIT_MAX_WAIT_SECONDS:
                 raise RuntimeError(...) from exc
             await asyncio.sleep(wait_seconds)
         except (TimedOut, NetworkError) as exc:
-            # Transient error -- exponential backoff (1s, 2s, 4s)
+            # Transient error -- exponential backoff (2s, 4s, 8s, 16s, 32s for attempts 1-5)
             backoff = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
             await asyncio.sleep(backoff)
+            attempt += 1
         except Exception as exc:
             if _is_html_parse_error(exc):
                 raise InvalidHtmlError(exc, self._get_error_text()) from exc
             logger.error("%s.send: permanent_error", type(self).__name__, exc_info=True)
             return  # Non-retryable -- swallow and continue
     
-    logger.error("%s.send: all_retries_exhausted", type(self).__name__)
+    logger.error("%s.send: all_attempts_exhausted", type(self).__name__)
 ```
 
 **Retry Strategy:**
-- **Transient errors** (`TimedOut`, `NetworkError`): Retried up to `SEND_MAX_RETRIES` (default 3) times with exponential backoff. Base delay is `SEND_RETRY_BASE_DELAY_SECONDS` (default 1.0s), resulting in delays of 1s, 2s, 4s for attempts 0, 1, 2.
-- **Rate limiting** (`RetryAfter`): Waits for `retry_after` plus `RATE_LIMIT_BUFFER_SECONDS` (1.0s) to avoid immediate re-hit. If the total wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), raises `RuntimeError`.
+- **Transient errors** (`TimedOut`, `NetworkError`): Retried up to `SEND_MAX_ATTEMPTS` (default 5) times with exponential backoff. Formula is `base * 2^attempt` with attempts 1–5, base `SEND_RETRY_BASE_DELAY_SECONDS` (1.0s), resulting in delays of 2s, 4s, 8s, 16s, 32s.
+- **Rate limiting** (`RetryAfter`): Waits for `retry_after` plus `RATE_LIMIT_BUFFER_SECONDS` (1.0s) to avoid immediate re-hit. Does not count towards the attempt limit. If the total wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), raises `RuntimeError`.
 - **Fatal errors** (`InvalidHtmlError`): Re-raised immediately, terminating the bot.
 - **Permanent errors**: Logged at ERROR level and swallowed after first attempt (no retry).
 

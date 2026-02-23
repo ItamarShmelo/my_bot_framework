@@ -78,7 +78,12 @@ async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
             allowed_updates=["message", "callback_query"],
         )
     except TimedOut:
-        logger.warning("poll_updates: request_timed_out offset=%d timeout=%d, will retry on next cycle", get_next_update_id(), timeout)
+        logger.warning(
+            "poll_updates: request_timed_out offset=%d timeout=%d, will retry on next cycle",
+            get_next_update_id(),
+            timeout,
+            exc_info=True,
+        )
         return []
     except NetworkError:
         logger.error(

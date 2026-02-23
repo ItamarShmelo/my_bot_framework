@@ -180,8 +180,8 @@ logger.debug("TelegramImageMessage.send: sending path='%s'", image_path)
 # After success: INFO (meaningful outcome)
 logger.info("TelegramImageMessage.send: sent path='%s'", image_path)
 
-# After failure: ERROR (with full context)
-logger.error("TelegramImageMessage.send: failed path='%s' error=%s", image_path, exc)
+# After failure: ERROR (with exc_info=True for full traceback)
+logger.error("TelegramImageMessage.send: failed path='%s'", image_path, exc_info=True)
 ```
 
 ### Warnings
@@ -196,14 +196,14 @@ logger.warning("CommandsEvent.handle_text_update: unknown_command text=%s", text
 ### Errors (Recoverable)
 
 ```python
-# Telegram API failure - bot continues
-logger.error("TelegramTextMessage.send: failed error=%s", exc)
+# Telegram API failure - bot continues (exc_info=True for traceback)
+logger.error("TelegramTextMessage.send: failed", exc_info=True)
 
 # Condition check crashed - event survives
-logger.error("ActivateOnConditionEvent.submit: condition_check_failed event=%s error=%s", self.event_name, exc)
+logger.error("ActivateOnConditionEvent.submit: condition_check_failed event=%s", self.event_name, exc_info=True)
 
 # Command execution failed - bot continues
-logger.error("CommandsEvent.handle_text_update: command_run_failed command=%s error=%s", command.command, exc)
+logger.error("CommandsEvent.handle_text_update: command_run_failed command=%s", command.command, exc_info=True)
 
 # Branch routing error
 logger.error("BranchDialog._run_dialog: key_not_found key=%s", branch_key)
@@ -212,35 +212,64 @@ logger.error("BranchDialog._run_dialog: key_not_found key=%s", branch_key)
 ### Critical (Unrecoverable)
 
 ```python
-# Bot cannot start
-logger.critical("BotApplication.run: http_session_init_failed error=%s", exc)
+# Bot cannot start (exc_info=True for traceback)
+logger.critical("BotApplication.run: http_session_init_failed", exc_info=True)
 
 # Accessor called before initialization
 logger.critical("get_app: BotApplication not initialized")
 
 # Cannot notify user about errors
-logger.critical("_try_send_error_message: error_notification_failed error=%s", error_exc)
+logger.critical("_try_send_error_message: error_notification_failed", exc_info=True)
 ```
 
 ## Error Handling and Logging
 
-Always log exceptions with full context BEFORE handling them:
+Always log exceptions with `exc_info=True` to include the full traceback. This applies to ALL log levels inside `except` blocks.
+
+**MANDATORY:** Every logging call inside an `except` block MUST include `exc_info=True`.
 
 ```python
-# GOOD - log with context, then handle gracefully
+# GOOD - exc_info=True for full traceback, then handle gracefully
 try:
     condition_result = await asyncio.to_thread(self.condition.check)
-except Exception as exc:
-    logger.error("ActivateOnConditionEvent.submit: condition_check_failed event=%s error=%s", self.event_name, exc)
+except Exception:
+    logger.error(
+        "ActivateOnConditionEvent.submit: condition_check_failed event=%s",
+        self.event_name,
+        exc_info=True,
+    )
     await _wait_or_stop(stop_event, self.poll_seconds)
     continue
 
-# GOOD - critical for unrecoverable
+# GOOD - critical with exc_info=True for unrecoverable
 try:
     await self.bot.initialize()
-except Exception as exc:
-    self.logger.critical("BotApplication.run: http_session_init_failed error=%s", exc)
+except Exception:
+    self.logger.critical("BotApplication.run: http_session_init_failed", exc_info=True)
     raise
+
+# GOOD - warning with exc_info=True for transient errors
+except TimedOut:
+    logger.warning("poll_updates: request_timed_out offset=%d", offset, exc_info=True)
+    return []
+
+# GOOD - debug with exc_info=True for expected/handled exceptions
+except Exception as exc:
+    if "message is not modified" in str(exc).lower():
+        logger.debug("ClassName.method: message_not_modified (expected)", exc_info=True)
+        return
+    raise
+```
+
+**BAD patterns to avoid:**
+```python
+# BAD - no exc_info=True, loses traceback
+except Exception as exc:
+    logger.error("ClassName.method: failed error=%s", exc)
+
+# BAD - manually formatting exception, no traceback
+except NetworkError as exc:
+    logger.warning("ClassName.method: network_error error=%s", type(exc).__name__)
 ```
 
 ## Patterns
@@ -272,7 +301,7 @@ After modifying code, verify:
 - [ ] All log messages are prefixed with `ClassName.method_name:` or `function_name:`
 - [ ] Structured `key=value` pairs used for context
 - [ ] No INFO/WARNING/ERROR/CRITICAL logs inside polling loops
-- [ ] All `except` blocks log the exception with full context
+- [ ] All `except` blocks log the exception with `exc_info=True`
 - [ ] Async operations have before (DEBUG) and after (INFO) logging
 - [ ] CRITICAL used for unrecoverable failures only
 - [ ] ERROR used for recoverable failures only

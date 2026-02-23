@@ -3,14 +3,14 @@
 Tests retry logic in TelegramMessage.send() by injecting:
 - TimedOut errors (with exponential backoff)
 - NetworkError errors (with exponential backoff)
-- RetryAfter errors (respecting retry_after duration)
-- Exhausting retries after SEND_MAX_RETRIES attempts
+- RetryAfter errors (respecting retry_after duration, not counting towards attempts)
+- Exhausting attempts after SEND_MAX_ATTEMPTS
 
 The bot should demonstrate that:
 - Transient errors (TimedOut, NetworkError) are retried with exponential backoff
-- RetryAfter errors wait the specified duration before retrying
+- RetryAfter errors wait the specified duration before retrying (not counted as attempts)
 - Messages eventually succeed after retries
-- Retries are exhausted after SEND_MAX_RETRIES attempts
+- Attempts are exhausted after SEND_MAX_ATTEMPTS
 """
 
 import asyncio
@@ -23,20 +23,19 @@ from typing import Any, Callable
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from telegram import Bot, Message
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from telegram.error import NetworkError, RetryAfter, TimedOut
 
 from my_bot_framework import (
     BotApplication,
     SimpleCommand,
-    SEND_MAX_RETRIES,
+    SEND_MAX_ATTEMPTS,
     SEND_RETRY_BASE_DELAY_SECONDS,
     TelegramTextMessage,
     TelegramImageMessage,
     TelegramDocumentMessage,
     TelegramOptionsMessage,
 )
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def get_credentials() -> tuple[str, str]:
@@ -90,48 +89,58 @@ def create_patched_send_method(
         """Wrapper that injects failures on a fixed schedule."""
         _call_counts[method_name] = _call_counts.get(method_name, 0) + 1
         count = _call_counts[method_name]
-        logger.debug(f"patched_{method_name}: call_count={count}")
+        logger.debug("patched_%s: call_count=%d", method_name, count)
 
         # Test 1: TimedOut on first attempt, succeed on second
         if count == 1:
             logger.warning(
-                f"patched_{method_name}: injected_timed_out call_count={count}"
+                "patched_%s: injected_timed_out call_count=%d",
+                method_name,
+                count,
             )
             raise TimedOut()
 
         # Test 2: NetworkError on first attempt, succeed on second
         if count == 2:
             logger.warning(
-                f"patched_{method_name}: injected_network_error call_count={count}"
+                "patched_%s: injected_network_error call_count=%d",
+                method_name,
+                count,
             )
             raise NetworkError("Injected network error for testing")
 
         # Test 3: RetryAfter with 2 second wait
         if count == 3:
             logger.warning(
-                f"patched_{method_name}: injected_retry_after call_count={count} retry_after=2s"
+                "patched_%s: injected_retry_after call_count=%d retry_after=2s",
+                method_name,
+                count,
             )
             raise RetryAfter(timedelta(seconds=2))
 
         # Test 4: Multiple TimedOut errors (test exponential backoff)
-        # Fail first 2 attempts (attempts 0 and 1), succeed on 3rd (attempt 2)
+        # Fail first 2 attempts, succeed on 3rd
         if count in [4, 5]:
             logger.warning(
                 f"patched_{method_name}: injected_timed_out call_count={count} (multiple retries)"
             )
             raise TimedOut()
 
-        # Test 5: Exhaust retries (fail all SEND_MAX_RETRIES attempts)
-        # This should log an error and return (swallow the error)
-        # Need to fail on attempts 0, 1, 2 (3 total attempts)
-        if 7 <= count <= 7 + SEND_MAX_RETRIES - 1:
+        # Test 5: Exhaust attempts (fail all SEND_MAX_ATTEMPTS attempts)
+        if 7 <= count <= 7 + SEND_MAX_ATTEMPTS - 1:
             logger.warning(
-                f"patched_{method_name}: injected_timed_out call_count={count} (exhausting retries)"
+                "patched_%s: injected_timed_out call_count=%d (exhausting retries)",
+                method_name,
+                count,
             )
             raise TimedOut()
 
         # All other calls succeed
-        logger.debug(f"patched_{method_name}: calling original method call_count={count}")
+        logger.debug(
+            "patched_%s: calling_original call_count=%d",
+            method_name,
+            count,
+        )
         return await original_method(*args, **kwargs)
 
     return patched_method
@@ -226,11 +235,11 @@ def main() -> None:
 
     app.register_command(SimpleCommand(
         command="/test_exhaust_retries",
-        description=f"Test exhausting retries (fails all {SEND_MAX_RETRIES} attempts, error logged)",
+        description=f"Test exhausting attempts (fails all {SEND_MAX_ATTEMPTS} attempts, error logged)",
         message_builder=lambda: (
-            f"❌ Test 5: This should fail after {SEND_MAX_RETRIES} attempts. "
-            f"Check logs for 'all_retries_exhausted' message. "
-            f"Note: This message may not be sent if retries are exhausted."
+            f"❌ Test 5: This should fail after {SEND_MAX_ATTEMPTS} attempts. "
+            f"Check logs for 'all_attempts_exhausted' message. "
+            f"Note: This message may not be sent if attempts are exhausted."
         ),
     ))
 
@@ -279,9 +288,9 @@ def main() -> None:
             "• Call 2: NetworkError (succeeds on retry)\n"
             "• Call 3: RetryAfter 2s (succeeds after wait)\n"
             "• Calls 4-5: Multiple TimedOut (fails 2x, succeeds on 3rd attempt)\n"
-            f"• Calls 7-{7 + SEND_MAX_RETRIES - 1}: Exhaust retries (all {SEND_MAX_RETRIES} attempts fail)\n\n"
+            f"• Calls 7-{7 + SEND_MAX_ATTEMPTS - 1}: Exhaust attempts (all {SEND_MAX_ATTEMPTS} attempts fail)\n\n"
             f"<b>Retry Configuration:</b>\n"
-            f"• SEND_MAX_RETRIES: {SEND_MAX_RETRIES}\n"
+            f"• SEND_MAX_ATTEMPTS: {SEND_MAX_ATTEMPTS}\n"
             f"• SEND_RETRY_BASE_DELAY_SECONDS: {SEND_RETRY_BASE_DELAY_SECONDS}"
         )
 
@@ -297,7 +306,7 @@ def main() -> None:
         "• <code>TimedOut</code> errors with exponential backoff\n"
         "• <code>NetworkError</code> errors with exponential backoff\n"
         "• <code>RetryAfter</code> errors (respects retry_after duration)\n"
-        "• Exhausting retries after SEND_MAX_RETRIES attempts\n\n"
+        "• Exhausting attempts after SEND_MAX_ATTEMPTS\n\n"
         "Use /test_* commands to trigger different retry scenarios.\n"
         "Use /stats to see call counts and configuration."
     )
