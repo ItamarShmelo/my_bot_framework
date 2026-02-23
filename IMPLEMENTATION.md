@@ -893,8 +893,9 @@ async def send(self, bot, chat_id, logger):
                 raise RuntimeError(...) from exc
             await asyncio.sleep(wait_seconds)
         except (TimedOut, NetworkError) as exc:
-            # Transient error -- exponential backoff (2s, 4s, 8s, 16s, 32s for attempts 1-5)
-            backoff = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+            # Transient error -- exponential backoff with jitter to prevent thundering herd
+            backoff = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+            backoff += random.random()
             await asyncio.sleep(backoff)
             attempt += 1
         except Exception as exc:

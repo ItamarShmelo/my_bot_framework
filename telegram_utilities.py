@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from pathlib import Path
@@ -23,7 +24,7 @@ CHUNK_PREFIX_OVERHEAD = 20
 # Maximum number of send attempts for transient send errors
 SEND_MAX_ATTEMPTS: int = 5
 
-# Base delay in seconds for exponential backoff between attempts (delay = base * 2^attempt)
+# Base delay in seconds for exponential backoff with jitter (delay = base * 2^(attempt-1) + uniform jitter)
 SEND_RETRY_BASE_DELAY_SECONDS: float = 1.0
 
 # Extra buffer added to Telegram's retry_after to avoid immediate re-hit
@@ -152,7 +153,8 @@ class TelegramMessage(ABC):
                 await asyncio.sleep(wait_seconds)
                 # RetryAfter does not count towards attempts
             except (TimedOut, NetworkError) as exc:
-                backoff_seconds: float = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+                backoff_seconds: float = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                backoff_seconds += random.random()
                 logger.warning(
                     "%s.send: transient_error backoff=%.1fs attempt=%d/%d",
                     class_name,
