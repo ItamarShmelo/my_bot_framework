@@ -186,7 +186,8 @@ class BotApplication:
 
         Detects task failures so that fatal exceptions (e.g. BadRequest from
         invalid HTML, unexpected condition/builder crashes) propagate and terminate the bot
-        instead of being silently swallowed.
+        instead of being silently swallowed. On fatal error, attempts to send an error
+        message to the user via Telegram before re-raising.
 
         Returns:
             Exit code (0 for success).
@@ -226,11 +227,14 @@ class BotApplication:
 
             self.logger.info("BotApplication._run_event_loop: stopped")
             return 0
-        except Exception:
+        except Exception as exc:
             self.logger.critical(
-                "BotApplication._run_event_loop: fatal",
+                "BotApplication._run_event_loop: fatal error_type=%s",
+                type(exc).__name__,
                 exc_info=True,
             )
+            error_text = f"Fatal error: {type(exc).__name__}: {exc}"
+            await self.send_messages(TelegramTextMessage(error_text))
             raise
         finally:
             try:
