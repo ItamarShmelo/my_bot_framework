@@ -132,7 +132,7 @@ await app.send_messages([
 ])
 ```
 
-**Automatic Retry:** All message sending automatically retries transient network errors (`TimedOut`, `NetworkError`) up to 3 times with exponential backoff (delays of 1s, 2s, 4s). Rate limiting errors (`RetryAfter`) wait for the duration specified by Telegram before retrying. This ensures reliable message delivery during temporary network issues or rate limits.
+**Automatic Retry:** All message sending automatically retries transient network errors (`TimedOut`, `NetworkError`) up to 3 times with exponential backoff (delays of 1s, 2s, 4s). Rate limiting errors (`RetryAfter`) wait for the duration specified by Telegram plus a 1s buffer to avoid immediate re-hit; if the required wait exceeds 120s, a `RuntimeError` is raised. This ensures reliable message delivery during temporary network issues or rate limits.
 
 ### Events
 

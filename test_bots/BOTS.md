@@ -575,10 +575,10 @@ python test_bots/network_error_bot.py
 **Features tested:**
 - Retry logic with exponential backoff for `TimedOut` errors
 - Retry logic with exponential backoff for `NetworkError` errors
-- `RetryAfter` error handling (respects retry_after duration)
+- `RetryAfter` error handling (respects retry_after + buffer; raises RuntimeError if exceeded)
 - Exhausting retries after `SEND_MAX_RETRIES` attempts
 - Retry behavior across different message types (`TelegramTextMessage`, `TelegramImageMessage`, `TelegramDocumentMessage`, `TelegramOptionsMessage`)
-- Constants: `SEND_MAX_RETRIES` and `SEND_RETRY_BASE_DELAY_SECONDS`
+- Constants: `SEND_MAX_RETRIES`, `SEND_RETRY_BASE_DELAY_SECONDS`, `RATE_LIMIT_BUFFER_SECONDS`, `RATE_LIMIT_MAX_WAIT_SECONDS`
 
 **Commands:**
 | Command | Description |
@@ -600,7 +600,7 @@ python test_bots/network_error_bot.py
 The bot monkey-patches Telegram API send methods (`bot.send_message`, `bot.send_photo`, `bot.send_document`) to inject failures:
 - Call 1: `TimedOut` error (succeeds on retry)
 - Call 2: `NetworkError` error (succeeds on retry)
-- Call 3: `RetryAfter` error with 2 second wait (succeeds after wait)
+- Call 3: `RetryAfter` error with 2 second wait (succeeds after wait; includes buffer)
 - Calls 4-5: Multiple `TimedOut` errors (succeeds on 3rd attempt, tests exponential backoff)
 - Calls 6-8: Exhaust retries (all `SEND_MAX_RETRIES` attempts fail, error logged)
 

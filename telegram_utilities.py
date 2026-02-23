@@ -26,6 +26,12 @@ SEND_MAX_RETRIES: int = 3
 # Base delay in seconds for exponential backoff between retries (delay = base * 2^attempt)
 SEND_RETRY_BASE_DELAY_SECONDS: float = 1.0
 
+# Extra buffer added to Telegram's retry_after to avoid immediate re-hit
+RATE_LIMIT_BUFFER_SECONDS: float = 1.0
+
+# Maximum retry_after wait we're willing to tolerate before raising
+RATE_LIMIT_MAX_WAIT_SECONDS: float = 120.0
+
 
 class InvalidHtmlError(Exception):
     """Raised when message text contains invalid HTML that Telegram cannot parse.
@@ -87,7 +93,9 @@ class TelegramMessage(ABC):
 
         Transient errors (``NetworkError``, ``TimedOut``) are retried up to
         ``SEND_MAX_RETRIES`` times with exponential backoff.  ``RetryAfter``
-        errors wait the duration specified by Telegram before retrying.
+        errors wait the duration specified by Telegram plus
+        ``RATE_LIMIT_BUFFER_SECONDS`` before retrying; if the wait exceeds
+        ``RATE_LIMIT_MAX_WAIT_SECONDS``, a RuntimeError is raised.
         ``InvalidHtmlError`` is re-raised as a fatal error.  All other
         exceptions are logged at ERROR level and swallowed so the bot
         keeps running.
@@ -119,16 +127,23 @@ class TelegramMessage(ABC):
             except InvalidHtmlError:
                 raise  # Fatal -- propagates up and terminates the bot
             except RetryAfter as exc:
+                # Add buffer to avoid immediate re-hit; raise if wait exceeds max
                 retry_after = exc.retry_after
-                wait_seconds: int = (
-                    int(retry_after.total_seconds())
+                wait_seconds: float = (
+                    retry_after.total_seconds()
                     if isinstance(retry_after, timedelta)
-                    else retry_after
-                )
+                    else float(retry_after)
+                ) + RATE_LIMIT_BUFFER_SECONDS
+                if wait_seconds > RATE_LIMIT_MAX_WAIT_SECONDS:
+                    raise RuntimeError(
+                        f"{class_name}.send: rate limit retry_after={wait_seconds:.1f}s "
+                        f"exceeds maximum allowed {RATE_LIMIT_MAX_WAIT_SECONDS}s"
+                    ) from exc
                 logger.warning(
-                    "%s.send: rate_limited retry_after=%ds attempt=%d/%d",
+                    "%s.send: rate_limited retry_after=%.1fs (includes %.1fs buffer) attempt=%d/%d",
                     class_name,
                     wait_seconds,
+                    RATE_LIMIT_BUFFER_SECONDS,
                     attempt + 1,
                     SEND_MAX_RETRIES,
                 )
