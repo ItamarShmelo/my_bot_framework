@@ -16,7 +16,7 @@ from .utilities import divide_message_to_chunks
 
 
 # Delay between sending message chunks to avoid rate limiting
-MESSAGE_SEND_DELAY_SECONDS = 0.05
+MESSAGE_SEND_DELAY_SECONDS = 0.2
 
 # Reserved space for chunk prefix like "(99/99):\n" to avoid exceeding message limits
 CHUNK_PREFIX_OVERHEAD = 20
