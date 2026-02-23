@@ -1,14 +1,26 @@
-"""Bot that monkey-patches get_updates to fail intermittently.
+"""Bot that monkey-patches get_updates to fail intermittently and in bursts.
 
-Tests exception safety of the polling layer by injecting:
+Tests exception safety and retry/recovery behavior by injecting:
+- Initial burst of 3 failures (tests startup flush retry with backoff)
 - TimedOut errors (every 3rd poll cycle)
 - NetworkError errors (every 5th poll cycle)
 - Unexpected RuntimeError (every 11th poll cycle)
+- Configurable outage bursts via /outage5, /outage10, /recovery_test
 
 The bot should keep running despite these errors, demonstrating that:
-- poll_updates() catches TimedOut and NetworkError gracefully
+- Startup flush uses run_with_transient_retry (retries, backoff, then succeeds)
+- poll_updates() retries TimedOut/NetworkError with backoff, returns [] when exhausted
+- Recovery transition logs (_log_poll_recovery) after prolonged outages
 - UpdatePollerMixin.poll() safety net catches unexpected errors
 - Normal polling resumes after transient failures
+
+Expected behavior by failure mode:
+- Initial startup burst (first 3 get_updates calls): flush retries with backoff and bot still starts.
+- TimedOut (intermittent): poll_updates retries transiently, then returns [] if exhausted; loop continues.
+- NetworkError (intermittent): same as TimedOut (transient retry + non-fatal loop continuation).
+- RuntimeError (unexpected): not handled by poll_updates retry; UpdatePollerMixin safety net logs and continues.
+- Outage burst (/outage5, /outage10, /recovery_test): consecutive transient failures increase failure counters,
+  then successful polling resets consecutive_failures and updates last_successful_cycle.
 """
 
 import asyncio
@@ -71,6 +83,38 @@ _poll_call_count: int = 0
 _timed_out_count: int = 0
 _network_error_count: int = 0
 _unexpected_error_count: int = 0
+_burst_remaining: int = 0
+_consecutive_failures: int = 0
+_max_consecutive_failures: int = 0
+_last_successful_cycle: int = 0
+
+
+def _record_failure() -> None:
+    """Track failure streak statistics."""
+    global _consecutive_failures, _max_consecutive_failures
+    _consecutive_failures += 1
+    _max_consecutive_failures = max(_max_consecutive_failures, _consecutive_failures)
+
+
+def _record_success(poll_cycle: int) -> None:
+    """Track successful poll and reset current failure streak.
+
+    Args:
+        poll_cycle: The poll cycle number for this successful call.
+    """
+    global _consecutive_failures, _last_successful_cycle
+    _consecutive_failures = 0
+    _last_successful_cycle = poll_cycle
+
+
+def _set_outage_burst(cycles: int) -> None:
+    """Configure the next N poll cycles to fail with NetworkError.
+
+    Args:
+        cycles: Number of consecutive poll cycles to inject NetworkError.
+    """
+    global _burst_remaining
+    _burst_remaining = max(0, cycles)
 
 
 def patch_get_updates(bot: Bot, logger: logging.Logger) -> None:
@@ -80,6 +124,7 @@ def patch_get_updates(bot: Bot, logger: logging.Logger) -> None:
     - Every 3rd call: raises TimedOut
     - Every 5th call (that isn't already a 3rd): raises NetworkError
     - Every 11th call (that isn't already a 3rd or 5th): raises RuntimeError
+    - Burst mode: raises NetworkError for N consecutive calls when burst is configured
 
     All other calls pass through to the real get_updates.
 
@@ -87,9 +132,13 @@ def patch_get_updates(bot: Bot, logger: logging.Logger) -> None:
         bot: The Telegram Bot instance to patch.
         logger: Logger for reporting injected errors.
     """
-    global _poll_call_count
+    global _poll_call_count, _consecutive_failures, _max_consecutive_failures, _last_successful_cycle, _burst_remaining
     logger.debug("patch_get_updates: resetting poll_call_count")
     _poll_call_count = 0
+    _consecutive_failures = 0
+    _max_consecutive_failures = 0
+    _last_successful_cycle = 0
+    _burst_remaining = 3  # First 3 get_updates fail -> tests startup flush retry
 
     original_get_updates = bot.get_updates
 
@@ -97,41 +146,65 @@ def patch_get_updates(bot: Bot, logger: logging.Logger) -> None:
         *args: Any,
         **kwargs: Any,
     ) -> Tuple[Update, ...]:
-        """Wrapper that injects failures on a fixed schedule."""
-        global _poll_call_count, _timed_out_count, _network_error_count, _unexpected_error_count
+        """Wrapper that injects failures on a fixed schedule.
+
+        Returns:
+            Updates from the real get_updates when no failure is injected.
+        """
+        global _poll_call_count, _timed_out_count, _network_error_count, _unexpected_error_count, _burst_remaining
         _poll_call_count += 1
         count = _poll_call_count
         logger.debug("patched_get_updates: poll_cycle=%d", count)
 
+        if _burst_remaining > 0:
+            _burst_remaining -= 1
+            _network_error_count += 1
+            _record_failure()
+            logger.warning(
+                "patched_get_updates: injected_burst_network_error poll_cycle=%d remaining=%d total_injected=%d consecutive_failures=%d",
+                count,
+                _burst_remaining,
+                _network_error_count,
+                _consecutive_failures,
+            )
+            raise NetworkError("Injected burst network error for outage simulation")
+
         if count % 3 == 0:
             _timed_out_count += 1
+            _record_failure()
             logger.warning(
-                "patched_get_updates: injected_timed_out poll_cycle=%d total_injected=%d",
+                "patched_get_updates: injected_timed_out poll_cycle=%d total_injected=%d consecutive_failures=%d",
                 count,
                 _timed_out_count,
+                _consecutive_failures,
             )
             raise TimedOut()
 
         if count % 5 == 0:
             _network_error_count += 1
+            _record_failure()
             logger.warning(
-                "patched_get_updates: injected_network_error poll_cycle=%d total_injected=%d",
+                "patched_get_updates: injected_network_error poll_cycle=%d total_injected=%d consecutive_failures=%d",
                 count,
                 _network_error_count,
+                _consecutive_failures,
             )
             raise NetworkError("Injected network error for testing")
 
         if count % 11 == 0:
             _unexpected_error_count += 1
+            _record_failure()
             logger.warning(
-                "patched_get_updates: injected_runtime_error poll_cycle=%d total_injected=%d",
+                "patched_get_updates: injected_runtime_error poll_cycle=%d total_injected=%d consecutive_failures=%d",
                 count,
                 _unexpected_error_count,
+                _consecutive_failures,
             )
             raise RuntimeError("Injected unexpected error for testing")
 
         logger.debug("patched_get_updates: calling original_get_updates poll_cycle=%d", count)
         result = await original_get_updates(*args, **kwargs)
+        _record_success(count)
         logger.debug("patched_get_updates: original_get_updates returned updates_count=%d poll_cycle=%d", len(result), count)
         return result
 
@@ -147,7 +220,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logger = logging.getLogger("network_error_bot")
-    logger.info("main: starting network_error_bot")
+    logger.info("main: starting bot=network_error_bot")
 
     token, chat_id = get_credentials()
 
@@ -162,14 +235,51 @@ def main() -> None:
 
     # Register a command to show injection stats
     def stats_message() -> str:
-        """Build a stats message showing injected error counts."""
+        """Build a stats message showing injected error counts.
+
+        Returns:
+            HTML-formatted string with error injection statistics.
+        """
         return (
             "<b>Error Injection Stats</b>\n\n"
             f"Total poll cycles: {_poll_call_count}\n"
             f"TimedOut injected: {_timed_out_count}\n"
             f"NetworkError injected: {_network_error_count}\n"
             f"RuntimeError injected: {_unexpected_error_count}\n\n"
+            f"Outage burst remaining: {_burst_remaining}\n"
+            f"Consecutive failures: {_consecutive_failures}\n"
+            f"Max consecutive failures: {_max_consecutive_failures}\n"
+            f"Last successful cycle: {_last_successful_cycle}\n\n"
             "If you can read this, the bot survived all injected errors."
+        )
+
+    def outage_burst_message(cycles: int) -> str:
+        """Set outage burst cycles and return confirmation text.
+
+        Args:
+            cycles: Number of consecutive poll cycles to inject NetworkError.
+
+        Returns:
+            Confirmation message describing the configured burst.
+        """
+        _set_outage_burst(cycles)
+        return (
+            f"Configured outage burst: next {cycles} poll cycles will inject "
+            f"NetworkError. Use /burst_status to monitor recovery."
+        )
+
+    def burst_status_message() -> str:
+        """Show current outage/recovery transition state.
+
+        Returns:
+            HTML-formatted string with burst and recovery status.
+        """
+        return (
+            "<b>Burst/Recovery Status</b>\n\n"
+            f"Outage burst remaining: {_burst_remaining}\n"
+            f"Consecutive failures: {_consecutive_failures}\n"
+            f"Max consecutive failures: {_max_consecutive_failures}\n"
+            f"Last successful cycle: {_last_successful_cycle}\n"
         )
 
     app.register_command(SimpleCommand(
@@ -183,15 +293,36 @@ def main() -> None:
         description="Say hello (proves bot is responsive)",
         message_builder=lambda: "Hello! The bot is still running despite injected errors.",
     ))
+    app.register_command(SimpleCommand(
+        command="/outage5",
+        description="Inject 5 consecutive NetworkError poll failures.",
+        message_builder=lambda: outage_burst_message(5),
+    ))
+    app.register_command(SimpleCommand(
+        command="/outage10",
+        description="Inject 10 consecutive NetworkError poll failures.",
+        message_builder=lambda: outage_burst_message(10),
+    ))
+    app.register_command(SimpleCommand(
+        command="/recovery_test",
+        description="Inject a prolonged outage then observe recovery transition.",
+        message_builder=lambda: outage_burst_message(7),
+    ))
+    app.register_command(SimpleCommand(
+        command="/burst_status",
+        description="Show outage burst and recovery-transition status.",
+        message_builder=burst_status_message,
+    ))
 
     info_text = (
         "<b>Network Error Bot</b>\n\n"
-        "Tests exception safety by injecting:\n"
+        "Tests exception safety and retry/recovery:\n"
+        "• Startup flush retry (first 3 get_updates fail, then succeed)\n"
         "• <code>TimedOut</code> every 3rd poll cycle\n"
         "• <code>NetworkError</code> every 5th poll cycle\n"
-        "• <code>RuntimeError</code> every 11th poll cycle\n\n"
-        "The bot should keep running despite these errors.\n"
-        "Use /stats to see injection counts."
+        "• <code>RuntimeError</code> every 11th poll cycle\n"
+        "• Outage bursts via /outage5, /outage10, /recovery_test\n\n"
+        "Use /stats and /burst_status to observe recovery transitions."
     )
 
     app.register_command(SimpleCommand(

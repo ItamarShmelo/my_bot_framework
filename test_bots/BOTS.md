@@ -507,21 +507,21 @@ python test_bots/reply_keyboard_dialog_bot.py
 
 ### bad_html_bot.py
 
-**Purpose:** Tests InvalidHtmlError handling and fatal error propagation.
+**Purpose:** Tests fatal `BadRequest` handling for invalid HTML. The framework does not use `InvalidHtmlError`; invalid HTML triggers `BadRequest`, which is logged with an `html.escape()` hint and re-raised (fatal path).
 
 **Features tested:**
-- `InvalidHtmlError` is raised when sending unescaped HTML
+- Invalid HTML triggers `BadRequest` (fatal)
+- Send path logs `html.escape()` hint before re-raising
 - Fatal error propagates up and terminates the bot
-- CRITICAL-level log with full traceback is produced
 
 **Commands:**
 | Command | Description |
 |---------|-------------|
 | `/info` | Shows what this bot tests |
-| `/bad_html` | Send a message with invalid HTML (triggers fatal InvalidHtmlError) |
+| `/bad_html` | Send a message with invalid HTML (triggers fatal BadRequest) |
 
 **Usage:**
-Start the bot and send `/bad_html`. The bot will attempt to send a message containing raw '<' and '>' characters, which Telegram cannot parse as HTML. This triggers `InvalidHtmlError`, which propagates up and terminates the bot with a CRITICAL log and full traceback.
+Start the bot and send `/bad_html`. The bot will attempt to send a message containing raw '<' and '>' characters, which Telegram cannot parse as HTML. This triggers `BadRequest`; the send path logs a hint to use `html.escape()`, then re-raises, terminating the bot with a CRITICAL log and full traceback.
 
 **Run:**
 ```bash
@@ -532,20 +532,24 @@ python test_bots/bad_html_bot.py
 
 ### network_error_bot.py
 
-**Purpose:** Tests exception safety of the polling layer by monkey-patching `bot.get_updates` to inject intermittent failures.
+**Purpose:** Tests exception safety and retry/recovery behavior of the polling layer by monkey-patching `bot.get_updates` to inject intermittent failures. Includes outage/recovery commands to simulate prolonged outages and observe recovery transitions.
 
 **Features tested:**
-- Exception handling in `poll_updates()` for `TimedOut` errors
-- Exception handling in `poll_updates()` for `NetworkError` errors
-- `UpdatePollerMixin.poll()` safety net for unexpected errors (e.g., `RuntimeError`)
-- Normal polling resumption after transient failures
-- Monkey-patching pattern for testing error scenarios
+- **Startup flush retry:** First 3 `get_updates` calls fail (during `flush_pending_updates`), then succeed after retries with backoff; validates shared retry defaults via `run_with_transient_retry`
+- **Polling receive retry/backoff:** `poll_updates()` uses `run_with_transient_retry` for `TimedOut`/`NetworkError`; returns `[]` when attempts exhausted; uses shared default max attempts with exponential backoff + jitter
+- **Recovery transition logging:** `_log_poll_recovery` emits when polling resumes after failure streak; `_log_poll_failure` throttles logs during outages
+- **Exception handling:** `poll_updates()` catches `TimedOut`, `NetworkError`, `RetryAfter`; `UpdatePollerMixin.poll()` safety net catches unexpected errors (e.g., `RuntimeError`)
+- **Outage/recovery commands:** `/outage5`, `/outage10`, `/recovery_test`, `/burst_status` to simulate prolonged outages and observe recovery
 
 **Commands:**
 | Command | Description |
 |---------|-------------|
 | `/stats` | Show error injection statistics (poll cycles, injected error counts) |
 | `/hello` | Say hello (proves bot is responsive despite errors) |
+| `/outage5` | Inject 5 consecutive NetworkError poll failures (outage simulation) |
+| `/outage10` | Inject 10 consecutive NetworkError poll failures (outage simulation) |
+| `/recovery_test` | Inject 7 consecutive failures to observe recovery transition |
+| `/burst_status` | Show outage burst and recovery-transition status |
 | `/info` | Show what this bot tests |
 | `/commands` | Lists all commands (built-in) |
 | `/terminate` | Shuts down the bot (built-in) |
@@ -554,12 +558,14 @@ python test_bots/bad_html_bot.py
 - Heartbeat every 5 minutes (proves bot continues running despite errors)
 
 **Error Injection Schedule:**
+- **Initial burst:** First 3 `get_updates` calls fail (tests startup flush retry)
 - Every 3rd poll cycle: `TimedOut` error
 - Every 5th poll cycle: `NetworkError` error
 - Every 11th poll cycle: `RuntimeError` (unexpected error)
+- On-demand outage bursts: consecutive `NetworkError` via `/outage5`, `/outage10`, or `/recovery_test`
 
 **Usage:**
-The bot automatically injects errors on a fixed schedule. Use `/stats` to see how many errors have been injected and verify the bot continues running normally. The bot should handle all injected errors gracefully and continue polling.
+The bot injects an initial burst of 3 failures (startup flush retry), then intermittent errors on a fixed schedule, and can inject prolonged outages on demand. Use `/stats` and `/burst_status` to verify the bot survives prolonged failures and cleanly transitions back to healthy polling.
 
 **Run:**
 ```bash
@@ -578,7 +584,7 @@ python test_bots/network_error_bot.py
 - `RetryAfter` error handling (respects retry_after + buffer; does not count towards attempt limit; raises RuntimeError if exceeded)
 - Exhausting attempts after `SEND_MAX_ATTEMPTS` (5 attempts, backoff 2s, 4s, 8s, 16s, 32s)
 - Retry behavior across different message types (`TelegramTextMessage`, `TelegramImageMessage`, `TelegramDocumentMessage`, `TelegramOptionsMessage`)
-- Constants: `SEND_MAX_ATTEMPTS`, `SEND_RETRY_BASE_DELAY_SECONDS`, `RATE_LIMIT_BUFFER_SECONDS`, `RATE_LIMIT_MAX_WAIT_SECONDS`
+- Constants: `SEND_MAX_ATTEMPTS`, `SEND_RETRY_BASE_DELAY_SECONDS`, `RATE_LIMIT_MAX_WAIT_SECONDS`; retry defaults (buffer, max attempts) from `retry_utilities`
 
 **Commands:**
 | Command | Description |

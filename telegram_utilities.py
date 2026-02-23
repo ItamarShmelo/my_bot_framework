@@ -2,16 +2,21 @@
 
 import asyncio
 import logging
-import random
 from abc import ABC, abstractmethod
-from datetime import timedelta
 from pathlib import Path
 from typing import Final, Optional
 
 from telegram import Bot, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import MessageLimit, ParseMode
-from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
+from telegram.error import BadRequest, NetworkError, TimedOut
 
+from .retry_utilities import (
+    DEFAULT_RETRY_MAX_ATTEMPTS,
+    DEFAULT_RETRY_AFTER_MAX_WAIT_SECONDS,
+    DEFAULT_RETRY_BASE_DELAY_SECONDS,
+    RetryAfterExceededError,
+    run_with_transient_retry,
+)
 from .utilities import divide_message_to_chunks
 
 
@@ -22,66 +27,22 @@ MESSAGE_SEND_DELAY_SECONDS = 0.2
 CHUNK_PREFIX_OVERHEAD = 20
 
 # Maximum number of send attempts for transient send errors
-SEND_MAX_ATTEMPTS: int = 6
+SEND_MAX_ATTEMPTS: int = DEFAULT_RETRY_MAX_ATTEMPTS
 
 # Base delay in seconds for exponential backoff with jitter (delay = base * 2^(attempt-1) + uniform jitter)
-SEND_RETRY_BASE_DELAY_SECONDS: float = 1.0
-
-# Extra buffer added to Telegram's retry_after to avoid immediate re-hit
-RATE_LIMIT_BUFFER_SECONDS: float = 1.0
+SEND_RETRY_BASE_DELAY_SECONDS: float = DEFAULT_RETRY_BASE_DELAY_SECONDS
 
 # Maximum retry_after wait we're willing to tolerate before raising
-RATE_LIMIT_MAX_WAIT_SECONDS: float = 120.0
-
-
-class InvalidHtmlError(Exception):
-    """Raised when message text contains invalid HTML that Telegram cannot parse.
-
-    This is a fatal error -- it propagates up and terminates the bot so the
-    developer notices and fixes it. Users should escape their text using
-    html.escape() before passing it to TelegramMessage classes if the text
-    may contain HTML special characters.
-    """
-
-    original_error: Exception
-    text: str
-
-    def __init__(self, original_error: Exception, text: str) -> None:
-        """Create an InvalidHtmlError with context about the failure.
-
-        Args:
-            original_error: The original Telegram API error.
-            text: The text that caused the parsing error (truncated for display).
-        """
-        truncated_text = text[:100] + "..." if len(text) > 100 else text
-        super().__init__(
-            f"Message contains invalid HTML that Telegram cannot parse. "
-            f"Use html.escape() on your text before passing it to TelegramMessage. "
-            f"Original error: {original_error}. "
-            f"Text (truncated): {truncated_text!r}"
-        )
-        self.original_error = original_error
-        self.text = text
-
-
-def _is_html_parse_error(exc: Exception) -> bool:
-    """Check if an exception is an HTML parsing error from Telegram."""
-    if not isinstance(exc, BadRequest):
-        return False
-    error_msg = str(exc).lower()
-    return "can't parse entities" in error_msg or "parse entities" in error_msg
+RATE_LIMIT_MAX_WAIT_SECONDS: float = DEFAULT_RETRY_AFTER_MAX_WAIT_SECONDS
 
 
 class TelegramMessage(ABC):
     """Abstract base class for Telegram messages with a send method.
 
     Subclasses must override ``_send_impl()`` with their happy-path send logic.
-    ``InvalidHtmlError`` is re-raised as a fatal error -- it propagates up and
-    terminates the bot. All other exceptions are logged at ERROR level and
-    swallowed so the bot keeps running.
-
-    Subclasses that send HTML-parsed text should override ``_get_error_text()``
-    to return the text that could trigger ``InvalidHtmlError``.
+    ``BadRequest`` is treated as fatal and is re-raised (after logging with an
+    HTML-escape hint). All other non-transient exceptions are logged at ERROR
+    level and swallowed so the bot keeps running.
     """
 
     async def send(
@@ -94,13 +55,15 @@ class TelegramMessage(ABC):
 
         Transient errors (``NetworkError``, ``TimedOut``) are retried up to
         ``SEND_MAX_ATTEMPTS`` times with exponential backoff (attempts start
-        at 1).  ``RetryAfter`` errors wait the duration specified by Telegram
-        plus ``RATE_LIMIT_BUFFER_SECONDS`` before retrying and do **not**
-        count towards the attempt limit; if the wait exceeds
+        at 1). When all retries are exhausted, they are logged at ERROR level
+        and swallowed. ``RetryAfter`` errors wait the duration specified by
+        Telegram plus the configured default buffer
+        (``DEFAULT_RETRY_AFTER_BUFFER_SECONDS``) before retrying and do
+        **not** count towards the attempt limit; if the wait exceeds
         ``RATE_LIMIT_MAX_WAIT_SECONDS``, a RuntimeError is raised.
-        ``InvalidHtmlError`` is re-raised as a fatal error.  All other
-        exceptions are logged at ERROR level and swallowed so the bot
-        keeps running.
+        ``BadRequest`` is re-raised as a fatal error after logging with an
+        HTML-escape hint. All other non-transient exceptions are logged at
+        ERROR level and swallowed so the bot keeps running.
 
         Args:
             bot: The Telegram Bot instance.
@@ -108,81 +71,46 @@ class TelegramMessage(ABC):
             logger: Logger for recording send status.
         """
         class_name: str = type(self).__name__
-        attempt: int = 1
 
-        while attempt <= SEND_MAX_ATTEMPTS:
-            logger.debug(
-                "%s.send: attempting_send attempt=%d/%d",
-                class_name,
-                attempt,
-                SEND_MAX_ATTEMPTS,
+        logger.debug("%s.send: attempting_send attempt=1/%d", class_name, SEND_MAX_ATTEMPTS)
+
+        try:
+            await run_with_transient_retry(
+                lambda: self._send_impl(bot, chat_id, logger),
             )
-            try:
-                await self._send_impl(bot, chat_id, logger)
-                if attempt > 1:
-                    logger.info(
-                        "%s.send: succeeded_after_retry attempt=%d/%d",
-                        class_name,
-                        attempt,
-                        SEND_MAX_ATTEMPTS,
-                    )
-                return  # Success -- exit immediately
-            except InvalidHtmlError:
-                raise  # Fatal -- propagates up and terminates the bot
-            except RetryAfter as exc:
-                retry_after = exc.retry_after
-                wait_seconds: float = (
-                    retry_after.total_seconds()
-                    if isinstance(retry_after, timedelta)
-                    else float(retry_after)
-                ) + RATE_LIMIT_BUFFER_SECONDS
-                if wait_seconds > RATE_LIMIT_MAX_WAIT_SECONDS:
-                    raise RuntimeError(
-                        f"{class_name}.send: rate limit retry_after={wait_seconds:.1f}s "
-                        f"exceeds maximum allowed {RATE_LIMIT_MAX_WAIT_SECONDS}s"
-                    ) from exc
-                logger.warning(
-                    "%s.send: rate_limited retry_after=%.1fs (includes %.1fs buffer) attempt=%d/%d",
-                    class_name,
-                    wait_seconds,
-                    RATE_LIMIT_BUFFER_SECONDS,
-                    attempt,
-                    SEND_MAX_ATTEMPTS,
-                    exc_info=True,
-                )
-                await asyncio.sleep(wait_seconds)
-                # RetryAfter does not count towards attempts
-            except (TimedOut, NetworkError) as exc:
-                backoff_seconds: float = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
-                backoff_seconds += random.random()
-                logger.warning(
-                    "%s.send: transient_error backoff=%.1fs attempt=%d/%d",
-                    class_name,
-                    backoff_seconds,
-                    attempt,
-                    SEND_MAX_ATTEMPTS,
-                    exc_info=True,
-                )
-                await asyncio.sleep(backoff_seconds)
-                attempt += 1
-            except Exception as exc:
-                if _is_html_parse_error(exc):
-                    raise InvalidHtmlError(exc, self._get_error_text()) from exc
-                logger.error(
-                    "%s.send: permanent_error error=%s attempt=%d/%d",
-                    class_name,
-                    type(exc).__name__,
-                    attempt,
-                    SEND_MAX_ATTEMPTS,
-                    exc_info=True,
-                )
-                return  # Non-retryable -- swallow and continue
-
-        logger.error(
-            "%s.send: all_attempts_exhausted max_attempts=%d",
-            class_name,
-            SEND_MAX_ATTEMPTS,
-        )
+        except RetryAfterExceededError:
+            logger.error(
+                "%s.send: rate_limit_exceeded max_wait=%.1fs",
+                class_name,
+                RATE_LIMIT_MAX_WAIT_SECONDS,
+                exc_info=True,
+            )
+            raise RuntimeError(
+                f"{class_name}.send: rate limit exceeded max wait "
+                f"{RATE_LIMIT_MAX_WAIT_SECONDS:.1f}s"
+            )
+        except BadRequest:
+            logger.error(
+                "%s.send: bad_request Did you send an invalid HTML message? "
+                "Try using html.escape().",
+                class_name,
+                exc_info=True,
+            )
+            raise
+        except (TimedOut, NetworkError):
+            logger.error(
+                "%s.send: all_attempts_exhausted max_attempts=%d",
+                class_name,
+                SEND_MAX_ATTEMPTS,
+                exc_info=True,
+            )
+        except Exception:
+            logger.error(
+                "%s.send: permanent_error_swallowed",
+                class_name,
+                exc_info=True,
+            )
+            return
 
     @abstractmethod
     async def _send_impl(
@@ -199,13 +127,6 @@ class TelegramMessage(ABC):
             logger: Logger for recording send status.
         """
         ...
-
-    def _get_error_text(self) -> str:
-        """Return the text to include in InvalidHtmlError context.
-
-        Override in subclasses that send HTML-parsed text.
-        """
-        return ""
 
 
 class TelegramTextMessage(TelegramMessage):
@@ -244,6 +165,10 @@ class TelegramTextMessage(TelegramMessage):
                 for index, chunk in enumerate(chunks, start=1)
             ]
 
+        logger.debug(
+            "TelegramTextMessage._send_impl: sending chunks=%d",
+            len(chunks),
+        )
         for chunk in chunks:
             await bot.send_message(
                 chat_id=chat_id,
@@ -253,14 +178,10 @@ class TelegramTextMessage(TelegramMessage):
             await asyncio.sleep(MESSAGE_SEND_DELAY_SECONDS)
 
         logger.info(
-            'TelegramTextMessage.send: sent chunks=%d message="%.200s"',
+            'TelegramTextMessage._send_impl: sent chunks=%d message="%.200s"',
             len(chunks),
             self.message,
         )
-
-    def _get_error_text(self) -> str:
-        """Return the message text for InvalidHtmlError context."""
-        return self.message
 
 
 class TelegramImageMessage(TelegramMessage):
@@ -288,7 +209,7 @@ class TelegramImageMessage(TelegramMessage):
             logger: Logger for recording send status.
         """
         image_path = Path(self.image_path)
-        logger.debug('TelegramImageMessage.send: sending path="%s"', image_path)
+        logger.debug('TelegramImageMessage._send_impl: sending path="%s"', image_path)
         with image_path.open("rb") as handle:
             caption_text = self.caption or ""
             await bot.send_photo(
@@ -298,11 +219,7 @@ class TelegramImageMessage(TelegramMessage):
                 parse_mode=ParseMode.HTML if caption_text else None,
                 write_timeout=60,
             )
-        logger.info('TelegramImageMessage.send: sent path="%s"', image_path)
-
-    def _get_error_text(self) -> str:
-        """Return the caption text for InvalidHtmlError context."""
-        return self.caption or ""
+        logger.info('TelegramImageMessage._send_impl: sent path="%s"', image_path)
 
 
 class TelegramDocumentMessage(TelegramMessage):
@@ -335,7 +252,7 @@ class TelegramDocumentMessage(TelegramMessage):
             logger: Logger for recording send status.
         """
         document_path = Path(self.file_path)
-        logger.debug('TelegramDocumentMessage.send: sending path="%s"', document_path)
+        logger.debug('TelegramDocumentMessage._send_impl: sending path="%s"', document_path)
         with document_path.open("rb") as handle:
             caption_text = self.caption or ""
             await bot.send_document(
@@ -345,11 +262,7 @@ class TelegramDocumentMessage(TelegramMessage):
                 parse_mode=ParseMode.HTML if caption_text else None,
                 write_timeout=120,
             )
-        logger.info('TelegramDocumentMessage.send: sent path="%s"', document_path)
-
-    def _get_error_text(self) -> str:
-        """Return the caption text for InvalidHtmlError context."""
-        return self.caption or ""
+        logger.info('TelegramDocumentMessage._send_impl: sent path="%s"', document_path)
 
 
 class TelegramOptionsMessage(TelegramMessage):
@@ -383,18 +296,14 @@ class TelegramOptionsMessage(TelegramMessage):
             chat_id: The chat ID to send the message to.
             logger: Logger for recording send status.
         """
-        logger.debug("TelegramOptionsMessage.send: sending")
+        logger.debug("TelegramOptionsMessage._send_impl: sending")
         self.sent_message = await bot.send_message(
             chat_id=chat_id,
             text=self.text,
             reply_markup=self.reply_markup,
             parse_mode=ParseMode.HTML,
         )
-        logger.info('TelegramOptionsMessage.send: sent')
-
-    def _get_error_text(self) -> str:
-        """Return the message text for InvalidHtmlError context."""
-        return self.text
+        logger.info("TelegramOptionsMessage._send_impl: sent")
 
 
 class TelegramEditMessage(TelegramMessage):
@@ -434,7 +343,7 @@ class TelegramEditMessage(TelegramMessage):
             chat_id: The chat ID of the message to edit.
             logger: Logger for recording send status.
         """
-        logger.debug("TelegramEditMessage.send: editing message_id=%d", self.message_id)
+        logger.debug("TelegramEditMessage._send_impl: editing message_id=%d", self.message_id)
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=self.message_id,
@@ -442,11 +351,7 @@ class TelegramEditMessage(TelegramMessage):
             reply_markup=self.reply_markup,
             parse_mode=ParseMode.HTML,
         )
-        logger.info('TelegramEditMessage.send: edited message_id=%d', self.message_id)
-
-    def _get_error_text(self) -> str:
-        """Return the message text for InvalidHtmlError context."""
-        return self.text
+        logger.info("TelegramEditMessage._send_impl: edited message_id=%d", self.message_id)
 
 
 class TelegramCallbackAnswerMessage(TelegramMessage):
@@ -478,11 +383,18 @@ class TelegramCallbackAnswerMessage(TelegramMessage):
             chat_id: The chat ID (unused for callback answers).
             logger: Logger for recording send status.
         """
+        logger.debug(
+            "TelegramCallbackAnswerMessage._send_impl: answering callback_query_id=%s",
+            self.callback_query_id,
+        )
         await bot.answer_callback_query(
             callback_query_id=self.callback_query_id,
             text=self.text,
         )
-        logger.info('TelegramCallbackAnswerMessage.send: answered id=%s', self.callback_query_id)
+        logger.info(
+            "TelegramCallbackAnswerMessage._send_impl: answered id=%s",
+            self.callback_query_id,
+        )
 
 
 class TelegramRemoveKeyboardMessage(TelegramMessage):
@@ -521,11 +433,14 @@ class TelegramRemoveKeyboardMessage(TelegramMessage):
                 message_id=self.message_id,
                 reply_markup=None,
             )
-            logger.debug('TelegramRemoveKeyboardMessage.send: removed message_id=%d', self.message_id)
+            logger.debug(
+                "TelegramRemoveKeyboardMessage._send_impl: removed message_id=%d",
+                self.message_id,
+            )
         except Exception as exc:
             if "message is not modified" in str(exc).lower():
                 logger.debug(
-                    "TelegramRemoveKeyboardMessage.send: message_not_modified message_id=%d (expected)",
+                    "TelegramRemoveKeyboardMessage._send_impl: message_not_modified message_id=%d (expected)",
                     self.message_id,
                     exc_info=True,
                 )
@@ -576,7 +491,7 @@ class TelegramReplyKeyboardMessage(TelegramMessage):
             chat_id: The chat ID to send the message to.
             logger: Logger for recording send status.
         """
-        logger.debug("TelegramReplyKeyboardMessage.send: sending")
+        logger.debug("TelegramReplyKeyboardMessage._send_impl: sending")
         reply_markup = ReplyKeyboardMarkup(
             self.keyboard,
             resize_keyboard=self.resize_keyboard,
@@ -588,11 +503,7 @@ class TelegramReplyKeyboardMessage(TelegramMessage):
             reply_markup=reply_markup,
             parse_mode=ParseMode.HTML,
         )
-        logger.info('TelegramReplyKeyboardMessage.send: sent')
-
-    def _get_error_text(self) -> str:
-        """Return the message text for InvalidHtmlError context."""
-        return self.text
+        logger.info("TelegramReplyKeyboardMessage._send_impl: sent")
 
 
 class TelegramRemoveReplyKeyboardMessage(TelegramMessage):
@@ -623,15 +534,11 @@ class TelegramRemoveReplyKeyboardMessage(TelegramMessage):
             chat_id: The chat ID to send the message to.
             logger: Logger for recording send status.
         """
-        logger.debug("TelegramRemoveReplyKeyboardMessage.send: sending")
+        logger.debug("TelegramRemoveReplyKeyboardMessage._send_impl: sending")
         self.sent_message = await bot.send_message(
             chat_id=chat_id,
             text=self.text,
             reply_markup=ReplyKeyboardRemove(),
             parse_mode=ParseMode.HTML,
         )
-        logger.info('TelegramRemoveReplyKeyboardMessage.send: sent')
-
-    def _get_error_text(self) -> str:
-        """Return the message text for InvalidHtmlError context."""
-        return self.text
+        logger.info("TelegramRemoveReplyKeyboardMessage._send_impl: sent")

@@ -38,6 +38,7 @@ my_bot_framework/
 ├── __init__.py           # Public API exports
 ├── accessors.py          # Singleton accessor functions (breaks circular deps)
 ├── bot_application.py    # BotApplication singleton
+├── retry_utilities.py    # Shared retry logic for transient + RetryAfter
 ├── polling.py            # Update polling utilities and UpdatePollerMixin
 ├── event.py              # Event system and commands
 ├── event_examples/       # Event subclasses and factories
@@ -60,6 +61,7 @@ top of each file (no late/inline imports needed).
 graph TD
     subgraph core [Core Modules]
         ACC[accessors.py]
+        RU[retry_utilities.py]
         TU[telegram_utilities.py]
         UTIL[utilities.py]
     end
@@ -82,9 +84,12 @@ graph TD
     %% Core has no internal dependencies
     ACC --> |no internal deps| ACC
     TU --> UTIL
+    TU --> RU
+    RU --> |no internal deps| RU
 
-    %% Polling depends only on accessors
+    %% Polling depends on accessors and retry
     POLL --> ACC
+    POLL --> RU
 
     %% Business logic depends on core and polling
     EDITABLE --> ACC
@@ -120,8 +125,9 @@ graph TD
 |--------|--------------|
 | `accessors.py` | *(no internal dependencies)* |
 | `utilities.py` | *(no internal dependencies)* |
-| `telegram_utilities.py` | `utilities` |
-| `polling.py` | `accessors` |
+| `retry_utilities.py` | *(no internal dependencies)* |
+| `telegram_utilities.py` | `utilities`, `retry_utilities` |
+| `polling.py` | `accessors`, `retry_utilities` |
 | `editable.py` | `accessors`, `telegram_utilities` |
 | `event.py` | `accessors`, `polling`, `telegram_utilities`, `editable` |
 | `event_examples/factories.py` | `event`, `telegram_utilities` |
@@ -357,7 +363,7 @@ The `run()` method accepts an optional `skip_commands` parameter and is structur
 
 **HTTP Session Management:** The bot's HTTP session is initialized at step 1 and always shut down in a `finally` block (executes after step 9, even on return or exception). This ensures proper cleanup and prevents "Event loop is closed" errors when terminating the bot.
 
-**Fresh Start:** The bot calls `flush_pending_updates()` on startup to clear any old messages. This ensures the bot only processes commands sent after it started.
+**Fresh Start:** The bot calls `flush_pending_updates()` on startup to clear any old messages. Flush uses `run_with_transient_retry` with `GET_UPDATES_TIMEOUT_SECONDS` (5) for timeout and the shared retry default `DEFAULT_RETRY_MAX_ATTEMPTS` for transient failures.
 
 ### 2. Event Loop Flow
 
@@ -406,7 +412,7 @@ while not stop_event.is_set():
     await _wait_or_stop(stop_event, poll_seconds)
 ```
 
-**Note:** `poll_updates()` catches transient network errors (`TimedOut`, `NetworkError`) and returns an empty list, allowing the polling loop to continue. The `UpdatePollerMixin.poll()` method includes a safety-net around the `poll_updates()` call. Send errors are handled by `TelegramMessage.send()`, and conditions/message builders should never raise (if they do, it's a fatal bug).
+**Note:** `poll_updates()` uses `run_with_transient_retry` for transient receive errors (`TimedOut`, `NetworkError`, `RetryAfter`). On failure it logs backoff via `_log_poll_failure` (throttled to every Nth failure) and returns an empty list. On success after a failure streak it logs recovery via `_log_poll_recovery`. `UpdatePollerMixin.poll()` includes a safety-net around truly unexpected polling exceptions.
 
 **SimpleCommand execution:**
 ```
@@ -447,7 +453,7 @@ send_messages() ──► TelegramMessage.send()
             │  - Retry transient errors    │
             │  - Exponential backoff       │
             │  - Handle RetryAfter         │
-            │  - Re-raise InvalidHtmlError │
+            │  - Re-raise BadRequest       │
             │  - Log permanent errors      │
             └───────────┬──────────────────┘
                         │
@@ -465,9 +471,8 @@ send_messages() ──► TelegramMessage.send()
 **Architecture:** `TelegramMessage` is an abstract base class (ABC) with:
 - `send()` - Public concrete method that handles errors uniformly with retry logic
 - `_send_impl()` - Abstract method that subclasses override with send logic
-- `_get_error_text()` - Optional override for HTML error context
 
-All error handling is centralized in the base class `send()` method. Transient errors (`TimedOut`, `NetworkError`) are retried up to `SEND_MAX_ATTEMPTS` (default 5) times with exponential backoff (base delay `SEND_RETRY_BASE_DELAY_SECONDS` = 1.0s, formula `base * 2^attempt` with attempts 1–5, so delays of 2s, 4s, 8s, 16s, 32s). `RetryAfter` errors wait for the duration specified by Telegram plus `RATE_LIMIT_BUFFER_SECONDS` (1.0s) to avoid immediate re-hit and do not count towards the attempt limit; if the total wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), a `RuntimeError` is raised. `InvalidHtmlError` is re-raised as a fatal error (terminates the bot). All other exceptions are logged at ERROR level and swallowed so the bot keeps running.
+All error handling is centralized in the base class `send()` method. Transient errors are handled via `run_with_transient_retry` (shared with polling): `TimedOut` / `NetworkError` retried up to `SEND_MAX_ATTEMPTS` times with exponential backoff + jitter; `RetryAfter` waits for Telegram's duration plus the shared retry default buffer (1.0s) and does not count towards the attempt limit; if wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), `RuntimeError` is raised. `BadRequest` is logged with an `html.escape()` hint and re-raised as a fatal error. All other exceptions are logged at ERROR level and swallowed.
 
 Note: Event logging (event_name) happens at the call site before sending,
 not during message sending.
@@ -536,9 +541,8 @@ These factories encapsulate common condition patterns with internal state manage
 **Base Class:** `TelegramMessage` is an abstract base class (ABC) with:
 - `send()` - Public concrete method that handles errors uniformly
 - `_send_impl()` - Abstract method that subclasses override with send logic
-- `_get_error_text()` - Optional override for HTML error context
 
-All error handling is centralized in the base class `send()` method. `InvalidHtmlError` is re-raised as a fatal error (terminates the bot). All other exceptions are logged at ERROR level and swallowed so the bot keeps running.
+All error handling is centralized in the base class `send()` method. `BadRequest` is treated as fatal (logged with an `html.escape()` hint and re-raised). All other non-transient exceptions are logged at ERROR level and swallowed so the bot keeps running.
 
 | Class | Content | Features |
 |-------|---------|----------|
@@ -557,7 +561,7 @@ All error handling is centralized in the base class `send()` method. `InvalidHtm
 - **Inline keyboards** (`TelegramOptionsMessage`): Buttons attached to messages, send `callback_query` events when pressed. Used by `InlineKeyboard*Dialog` classes.
 - **Reply keyboards** (`TelegramReplyKeyboardMessage`): Persistent buttons at bottom of chat, send text messages (button labels) when pressed. Used by `ReplyKeyboard*Dialog` classes. Auto-hide with `one_time_keyboard=True`.
 
-**Note:** All message types use `parse_mode=HTML`. If text contains unescaped HTML special characters, an `InvalidHtmlError` is raised (fatal - terminates the bot) with instructions to use `html.escape()`.
+**Note:** All message types use `parse_mode=HTML`. Invalid HTML triggers `BadRequest` (fatal). The framework logs a hint to use `html.escape()` and re-raises the error.
 
 ## Editable Attributes System
 
@@ -832,19 +836,7 @@ The polling layer (`polling.py`) includes comprehensive error handling for trans
 
 **`poll_updates()` error handling:**
 
-```python
-async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
-    try:
-        updates_tuple = await bot.get_updates(...)
-    except TimedOut:
-        logger.warning("poll_updates: request timed out, will retry on next cycle")
-        return []  # Continue polling on next cycle
-    except NetworkError as exc:
-        logger.error("poll_updates: network_error error=%s, will retry on next cycle", exc)
-        await asyncio.sleep(1)  # Brief delay before retry
-        return []  # Continue polling on next cycle
-    # ... process updates
-```
+Uses `run_with_transient_retry` for transient receive errors. On success after a failure streak, `_log_poll_recovery` logs the recovery transition. On failure, `_log_poll_failure` logs with throttling (every Nth failure). Returns an empty list so polling continues.
 
 **`UpdatePollerMixin.poll()` error handling:**
 
@@ -863,85 +855,30 @@ while not self.should_stop_polling():
 **Note:** Send-side errors are handled inside `TelegramMessage.send()`. The handler dispatch (`handle_callback_update()`, `handle_text_update()`) is not wrapped in try/except because:
 - Conditions and message builders should never raise (if they do, it's a fatal bug)
 - Send errors are already handled by `TelegramMessage.send()`
-- Fatal errors (like `InvalidHtmlError`) should propagate up and terminate the bot
+- Fatal errors (like `BadRequest` for invalid HTML) should propagate up and terminate the bot
 
 **Design rationale:**
-- Transient network errors (`TimedOut`, `NetworkError`) are caught and logged, allowing the polling loop to continue
-- Send errors are handled uniformly in `TelegramMessage.send()` (fatal `InvalidHtmlError` propagates, others are logged)
+- Shared `retry_utilities.run_with_transient_retry` handles transient errors for both send and receive
+- Transient network errors (`TimedOut`, `NetworkError`, `RetryAfter`) are retried with backoff; recovery transitions are logged
+- Send errors are handled uniformly in `TelegramMessage.send()` (fatal `BadRequest` propagates, others are logged)
 - Conditions and message builders are expected to never raise (if they do, it's a fatal bug that terminates the bot)
-- Brief sleep delays prevent tight retry loops during network issues
+- Backoff delays prevent tight retry loops during network issues
 
 ### Message Sending
 
-Error handling is centralized in the `TelegramMessage.send()` base class method with automatic retry logic:
-
-```python
-async def send(self, bot, chat_id, logger):
-    """Public method with uniform error handling and retry logic."""
-    attempt = 1
-    while attempt <= SEND_MAX_ATTEMPTS:
-        try:
-            await self._send_impl(bot, chat_id, logger)  # Subclass override
-            return  # Success -- exit immediately
-        except InvalidHtmlError:
-            raise  # Fatal -- propagates up and terminates the bot
-        except RetryAfter as exc:
-            # Rate limiting -- wait for retry_after + buffer; raise if exceeds max
-            # RetryAfter does NOT count towards attempt limit
-            wait_seconds = exc.retry_after + RATE_LIMIT_BUFFER_SECONDS
-            if wait_seconds > RATE_LIMIT_MAX_WAIT_SECONDS:
-                raise RuntimeError(...) from exc
-            await asyncio.sleep(wait_seconds)
-        except (TimedOut, NetworkError) as exc:
-            # Transient error -- exponential backoff with jitter to prevent thundering herd
-            backoff = SEND_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
-            backoff += random.random()
-            await asyncio.sleep(backoff)
-            attempt += 1
-        except Exception as exc:
-            if _is_html_parse_error(exc):
-                raise InvalidHtmlError(exc, self._get_error_text()) from exc
-            logger.error("%s.send: permanent_error", type(self).__name__, exc_info=True)
-            return  # Non-retryable -- swallow and continue
-    
-    logger.error("%s.send: all_attempts_exhausted", type(self).__name__)
-```
+Error handling is centralized in the `TelegramMessage.send()` base class method. It uses `run_with_transient_retry` (shared with `poll_updates`) for transient errors. `BadRequest` is logged with an `html.escape()` hint and re-raised (fatal). Other non-transient exceptions are logged and swallowed.
 
 **Retry Strategy:**
-- **Transient errors** (`TimedOut`, `NetworkError`): Retried up to `SEND_MAX_ATTEMPTS` (default 5) times with exponential backoff. Formula is `base * 2^attempt` with attempts 1–5, base `SEND_RETRY_BASE_DELAY_SECONDS` (1.0s), resulting in delays of 2s, 4s, 8s, 16s, 32s.
-- **Rate limiting** (`RetryAfter`): Waits for `retry_after` plus `RATE_LIMIT_BUFFER_SECONDS` (1.0s) to avoid immediate re-hit. Does not count towards the attempt limit. If the total wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), raises `RuntimeError`.
-- **Fatal errors** (`InvalidHtmlError`): Re-raised immediately, terminating the bot.
+- **Transient errors** (`TimedOut`, `NetworkError`): Retried up to `SEND_MAX_ATTEMPTS` times with exponential backoff + jitter.
+- **Rate limiting** (`RetryAfter`): Waits for `retry_after` plus the shared retry default buffer (1.0s) to avoid immediate re-hit. Does not count towards the attempt limit. If the total wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), raises `RuntimeError`.
+- **Fatal errors** (`BadRequest`): Logged with HTML-escape hint and re-raised immediately, terminating the bot.
 - **Permanent errors**: Logged at ERROR level and swallowed after first attempt (no retry).
 
 Subclasses override `_send_impl()` with their happy-path send logic. They must NOT add their own try/except blocks (except for expected non-error exceptions like "message is not modified").
 
 ### HTML Parse Errors
 
-All messages are sent with `parse_mode=HTML`. If the text contains invalid HTML (e.g., unescaped `<`, `>`, `&`), Telegram will reject the message. The framework catches these errors and raises an `InvalidHtmlError`:
-
-```python
-class InvalidHtmlError(Exception):
-    """Raised when message text contains invalid HTML that Telegram cannot parse.
-    
-    This is a fatal error -- it propagates up and terminates the bot so the
-    developer notices and fixes it.
-    """
-    
-    def __init__(self, original_error: Exception, text: str) -> None:
-        # Message tells user to use html.escape()
-        super().__init__(
-            f"Message contains invalid HTML that Telegram cannot parse. "
-            f"Use html.escape() on your text before passing it to TelegramMessage. "
-            f"Original error: {original_error}. "
-            f"Text (truncated): {text[:100]!r}"
-        )
-        self.original_error = original_error
-        self.text = text
-```
-
-**Fatal Error Behavior:** `InvalidHtmlError` is a fatal error that propagates up and terminates the bot. This ensures developers notice and fix HTML escaping issues during development. Detection is done via `_is_html_parse_error()` which checks for Telegram's `BadRequest` with "can't parse entities" in the message.
-
-Subclasses that send HTML-parsed text should override `_get_error_text()` to return the text that could trigger `InvalidHtmlError`.
+All messages are sent with `parse_mode=HTML`. Invalid HTML (e.g., unescaped `<`, `>`, `&`) triggers `BadRequest` (fatal). The framework logs a hint to use `html.escape()` and re-raises so the bot terminates visibly.
 
 ## Shutdown Sequence
 

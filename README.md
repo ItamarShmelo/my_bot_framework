@@ -10,7 +10,7 @@ A modular, event-driven Telegram bot framework built on `python-telegram-bot`.
 - **Direct Message Sending** - Async message sending with automatic chunking
 - **Interactive Dialogs** - Multi-step conversations with inline keyboards
 - **Editable Parameters** - Runtime-configurable event parameters
-- **Resilient Polling** - Automatic handling of transient Telegram network errors
+- **Resilient Polling** - Automatic handling of transient Telegram network errors with backoff and recovery logging
 
 ## Installation
 
@@ -132,7 +132,7 @@ await app.send_messages([
 ])
 ```
 
-**Automatic Retry:** All message sending automatically retries transient network errors (`TimedOut`, `NetworkError`) up to 5 attempts with exponential backoff (delays of 2s, 4s, 8s, 16s, 32s). Rate limiting errors (`RetryAfter`) wait for the duration specified by Telegram plus a 1s buffer to avoid immediate re-hit and do not count towards the attempt limit; if the required wait exceeds 120s, a `RuntimeError` is raised. This ensures reliable message delivery during temporary network issues or rate limits.
+**Automatic Retry:** The framework uses a shared retry utility for both send and receive. Message sending retries transient errors (`TimedOut`, `NetworkError`) up to `SEND_MAX_ATTEMPTS` attempts with exponential backoff + jitter. `RetryAfter` waits for Telegram's duration plus a 1s buffer and does not count towards the attempt limit; if the wait exceeds 120s, a `RuntimeError` is raised. Polling uses the same retry logic for receive errors and logs backoff/recovery transitions during outages.
 
 ### Events
 
@@ -628,26 +628,16 @@ All messages are sent with `parse_mode=HTML`. If your text contains HTML special
 
 ```python
 import html
-from my_bot_framework import TelegramTextMessage, InvalidHtmlError
+from my_bot_framework import TelegramTextMessage
 
 # Text with HTML special characters - MUST escape
 user_input = "Use <script> tags for JavaScript"
 safe_text = html.escape(user_input)  # "Use &lt;script&gt; tags for JavaScript"
 message = TelegramTextMessage(safe_text)
-
-# If you forget to escape, InvalidHtmlError is raised (fatal - terminates the bot)
-try:
-    message = TelegramTextMessage("Invalid <unclosed tag")
-    await app.send_messages(message)
-except InvalidHtmlError as e:
-    print(f"HTML error: {e}")
-    # Fix: html.escape() your text
+await app.send_messages(message)
 ```
 
-**Important:** `InvalidHtmlError` is a **fatal error** that propagates up and terminates the bot. This ensures developers notice and fix HTML escaping issues during development. The exception provides:
-- The original Telegram API error
-- The offending text (truncated for display)
-- Clear instructions to use `html.escape()`
+**Important:** Invalid HTML triggers a fatal `BadRequest` on send. The framework logs a hint to use `html.escape()` and re-raises the exception so the bot terminates visibly.
 
 ## Group Chat Setup
 

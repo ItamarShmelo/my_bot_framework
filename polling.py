@@ -12,40 +12,94 @@ This module provides:
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, cast
 
 from telegram import Bot, Update
-from telegram.error import NetworkError, TimedOut
+from telegram.error import NetworkError, RetryAfter, TimedOut
 
 from .accessors import get_bot, get_chat_id, get_logger
+from .retry_utilities import (
+    DEFAULT_RETRY_MAX_ATTEMPTS,
+    RetryAfterExceededError,
+    run_with_transient_retry,
+)
 
 
 # Module-level state for tracking Telegram update offset
 _next_update_id: int = 0
 
+# Timeout for Telegram get_updates calls (used by both poll and flush).
+GET_UPDATES_TIMEOUT_SECONDS: int = 5
+
+# Log first poll failure, then every Nth failure.
+POLL_FAILURE_LOG_EVERY_N: int = 5
+
+# Tracks consecutive receive-side failures to emit recovery transition logs.
+_poll_consecutive_failures: int = 0
+
+# Delay before retrying after unexpected poll_updates exception.
+POLL_EXCEPTION_RETRY_DELAY_SECONDS: int = 2
+
 
 def get_next_update_id() -> int:
-    """Get the next update ID to poll from."""
+    """Get the next update ID to poll from.
+
+    Returns:
+        The next update ID to use for polling.
+    """
     return _next_update_id
 
 
 def set_next_update_id(value: int) -> None:
-    """Set the next update ID to poll from."""
+    """Set the next update ID to poll from.
+
+    Args:
+        value: The next update ID to use for polling.
+    """
     global _next_update_id
     _next_update_id = value
 
 
-async def flush_pending_updates(bot: Bot) -> None:
+async def flush_pending_updates(
+    bot: Bot,
+    timeout: int = GET_UPDATES_TIMEOUT_SECONDS,
+) -> None:
     """Flush all pending updates and set the next update ID.
 
     Call this when the bot starts to ignore old messages.
 
     Args:
         bot: The Telegram Bot instance.
+        timeout: get_updates timeout for startup flush. Defaults to
+            GET_UPDATES_TIMEOUT_SECONDS.
     """
     logger: logging.Logger = get_logger()
-    logger.debug("flush_pending_updates: fetching_pending_updates offset=-1 timeout=0")
-    updates: Tuple[Update, ...] = await bot.get_updates(offset=-1, timeout=0)
+    logger.debug(
+        "flush_pending_updates: fetching_pending_updates offset=-1 timeout=%d max_attempts=%d",
+        timeout,
+        DEFAULT_RETRY_MAX_ATTEMPTS,
+    )
+
+    try:
+        updates = await run_with_transient_retry(
+            lambda: bot.get_updates(offset=-1, timeout=timeout),
+        )
+    except RetryAfterExceededError:
+        logger.error(
+            "flush_pending_updates: retry_after_exceeded offset=-1 timeout=%d max_attempts=%d",
+            timeout,
+            DEFAULT_RETRY_MAX_ATTEMPTS,
+            exc_info=True,
+        )
+        raise
+    except (TimedOut, NetworkError, RetryAfter):
+        logger.error(
+            "flush_pending_updates: transient_failures_exhausted offset=-1 timeout=%d max_attempts=%d",
+            timeout,
+            DEFAULT_RETRY_MAX_ATTEMPTS,
+            exc_info=True,
+        )
+        raise
 
     if updates:
         next_id: int = updates[-1].update_id + 1
@@ -56,7 +110,43 @@ async def flush_pending_updates(bot: Bot) -> None:
         logger.info("flush_pending_updates: no_pending_updates")
 
 
-async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
+def _log_poll_failure(logger: logging.Logger) -> None:
+    """Log poll failures with throttling to reduce noisy logs during outages.
+
+    Args:
+        logger: Logger instance for emitting messages.
+    """
+    global _poll_consecutive_failures
+    _poll_consecutive_failures += 1
+    should_log: bool = (
+        _poll_consecutive_failures == 1
+        or _poll_consecutive_failures % POLL_FAILURE_LOG_EVERY_N == 0
+    )
+    if should_log:
+        logger.warning(
+            "_log_poll_failure: poll_receive_failure consecutive=%d log_every_n=%d",
+            _poll_consecutive_failures,
+            POLL_FAILURE_LOG_EVERY_N,
+            exc_info=True,
+        )
+
+
+def _log_poll_recovery(logger: logging.Logger) -> None:
+    """Log transition from failure streak back to healthy polling.
+
+    Args:
+        logger: Logger instance for emitting messages.
+    """
+    global _poll_consecutive_failures
+    if _poll_consecutive_failures > 0:
+        logger.warning(
+            "_log_poll_recovery: poll_receive_recovered consecutive_failures=%d",
+            _poll_consecutive_failures,
+        )
+        _poll_consecutive_failures = 0
+
+
+async def poll_updates(bot: Bot, timeout: int = GET_UPDATES_TIMEOUT_SECONDS) -> List[Update]:
     """Poll for updates and update the global next_update_id.
 
     Catches transient Telegram network errors (TimedOut, NetworkError)
@@ -71,28 +161,34 @@ async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
     """
     logger: logging.Logger = get_logger()
     logger.debug("poll_updates: polling offset=%d timeout=%d", get_next_update_id(), timeout)
+
     try:
-        updates_tuple: Tuple[Update, ...] = await bot.get_updates(
-            offset=get_next_update_id(),
-            timeout=timeout,
-            allowed_updates=["message", "callback_query"],
+        updates_tuple: Tuple[Update, ...] = await run_with_transient_retry(
+            lambda: bot.get_updates(
+                offset=get_next_update_id(),
+                timeout=timeout,
+                allowed_updates=["message", "callback_query"],
+            ),
         )
-    except TimedOut:
+        _log_poll_recovery(logger)
+    except RetryAfterExceededError:
+        _log_poll_failure(logger)
         logger.warning(
-            "poll_updates: request_timed_out offset=%d timeout=%d, will retry on next cycle",
+            "poll_updates: retry_after_exceeded offset=%d timeout=%d",
             get_next_update_id(),
             timeout,
             exc_info=True,
         )
         return []
-    except NetworkError:
-        logger.error(
-            "poll_updates: network_error offset=%d timeout=%d, will retry on next cycle",
+    except (TimedOut, NetworkError, RetryAfter):
+        _log_poll_failure(logger)
+        logger.warning(
+            "poll_updates: transient_failures_exhausted offset=%d timeout=%d max_attempts=%d",
             get_next_update_id(),
             timeout,
+            DEFAULT_RETRY_MAX_ATTEMPTS,
             exc_info=True,
         )
-        await asyncio.sleep(1)
         return []
 
     updates: List[Update] = list(updates_tuple)
@@ -106,11 +202,18 @@ async def poll_updates(bot: Bot, timeout: int = 5) -> List[Update]:
 
 
 def get_chat_id_from_update(update: Update) -> Optional[int]:
-    """Extract chat_id from update."""
+    """Extract chat_id from update.
+
+    Args:
+        update: The Telegram update to extract chat_id from.
+
+    Returns:
+        The chat ID if found in the update, None otherwise.
+    """
     if update.callback_query and update.callback_query.message:
         message = update.callback_query.message
         if message and hasattr(message, "chat_id"):
-            return message.chat_id
+            return cast(int, message.chat_id)
     if update.message and hasattr(update.message, "chat_id"):
         return update.message.chat_id
     return None
@@ -156,15 +259,17 @@ class UpdatePollerMixin(ABC):
         chat_id: str = get_chat_id()
         logger: logging.Logger = get_logger()
 
+        logger.info("UpdatePollerMixin.poll: started")
         while not self.should_stop_polling():
             try:
                 updates: List[Update] = await poll_updates(bot)
-            except Exception as exc:
+            except Exception:
                 logger.error(
-                    "UpdatePollerMixin.poll: poll_updates_failed, retrying in 2s",
+                    "UpdatePollerMixin.poll: poll_updates_failed retry_delay_seconds=%d",
+                    POLL_EXCEPTION_RETRY_DELAY_SECONDS,
                     exc_info=True,
                 )
-                await asyncio.sleep(2)
+                await asyncio.sleep(POLL_EXCEPTION_RETRY_DELAY_SECONDS)
                 continue
 
             for update in updates:
@@ -182,6 +287,7 @@ class UpdatePollerMixin(ABC):
                 elif update.message and update.message.text:
                     await self.handle_text_update(update)
 
+        logger.info("UpdatePollerMixin.poll: stopped")
         return self._get_poll_result()
 
     def _get_poll_result(self) -> Any:

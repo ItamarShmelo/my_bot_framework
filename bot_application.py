@@ -6,10 +6,10 @@ from typing import List, Optional, Union
 
 from telegram import Bot
 
-from .telegram_utilities import TelegramMessage, TelegramTextMessage
 from .accessors import _set_instance
 from .event import Command, Event, SimpleCommand, CommandsEvent
 from .polling import flush_pending_updates
+from .telegram_utilities import TelegramMessage, TelegramTextMessage
 
 
 class BotApplication:
@@ -184,8 +184,8 @@ class BotApplication:
     async def _run_event_loop(self) -> int:
         """Flush updates, start event tasks, and wait for stop or fatal error.
 
-        Detects task failures so that fatal exceptions (e.g. InvalidHtmlError,
-        unexpected condition/builder crashes) propagate and terminate the bot
+        Detects task failures so that fatal exceptions (e.g. BadRequest from
+        invalid HTML, unexpected condition/builder crashes) propagate and terminate the bot
         instead of being silently swallowed.
 
         Returns:
