@@ -75,7 +75,7 @@ The singleton entry point for the framework. Manages:
 - Bot instance and credentials
 - Direct message sending for outgoing messages
 - Event and command registration
-- Graceful shutdown via `/terminate`
+- Graceful shutdown via `/terminate` (global command, works anytime including during dialogs)
 
 #### Running the Bot
 
@@ -680,7 +680,7 @@ After disabling privacy mode, your bot will receive all messages in group chats,
 
 The framework automatically registers:
 
-- `/terminate` - Gracefully shut down the bot
+- `/terminate` - Gracefully shut down the bot (global command; can be invoked anytime, including during active dialogs)
 - `/commands` - List all available commands
 
 ## Message Builders

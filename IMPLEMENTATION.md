@@ -348,7 +348,8 @@ await app.run()
 The `run()` method accepts an optional `skip_commands` parameter and is structured as a clean orchestrator that delegates to three private methods:
 
 ```
-1. _register_commands(skip_commands) - Register /terminate, /commands, and optionally CommandsEvent
+1. _register_commands(skip_commands) - Register /commands and optionally CommandsEvent
+   - /terminate is handled globally in UpdatePollerMixin.poll() (intercepted at polling level, works anytime including during dialogs)
    - If skip_commands=True, CommandsEvent is not registered (commands won't be polled)
 2. _initialize_http_session() - Initialize bot's HTTP session (await bot.initialize())
 3. _run_event_loop() - Main event loop:
@@ -392,6 +393,10 @@ while not stop_event.is_set():
 - `False`: Editing triggers immediate re-check but only fires if condition is True
 
 ### 3. Command Processing Flow
+
+**Global /terminate interception:**
+
+`/terminate` is intercepted in `UpdatePollerMixin.poll()` before any handler processes the update. When a text message equals `/terminate`, the poll loop sets the update offset, calls `get_app().terminate()`, and returns. This ensures `/terminate` works anytime — including during active dialogs (which run their own poll loops via the same mixin).
 
 **CommandsEvent polling:**
 ```
@@ -498,7 +503,7 @@ not during message sending.
 | `register_command(command)` | Register a command handler |
 | `send_messages(messages)` | Send message(s) immediately (str, TelegramMessage, or list) |
 | `run(skip_commands=False)` | Start the bot (blocks until shutdown or fatal error). If `skip_commands=True`, CommandsEvent is not registered. |
-| `_register_commands(skip_commands=False)` | Private: Register /terminate, /commands, and optionally CommandsEvent |
+| `_register_commands(skip_commands=False)` | Private: Register /commands and optionally CommandsEvent. /terminate is handled globally in UpdatePollerMixin.poll(). |
 | `_initialize_http_session()` | Private: Initialize bot's HTTP session |
 | `_run_event_loop()` | Private: Main event loop with fatal error detection |
 
@@ -923,6 +928,8 @@ pattern using the Template Method:
 │              try:                                           │
 │                  if callback_query:                         │
 │                      handle_callback_update(update)         │
+│                  elif text_message == "/terminate":         │
+│                      terminate(); return                    │
 │                  elif text_message:                         │
 │                      handle_text_update(update)             │
 │              except Exception:                              │
@@ -933,6 +940,9 @@ pattern using the Template Method:
 │    • should_stop_polling() -> bool                          │
 │    • handle_callback_update(update) -> None                 │
 │    • handle_text_update(update) -> None                     │
+│                                                             │
+│  /terminate is intercepted globally before handlers:         │
+│    • Works anytime (including during active dialogs)         │
 │                                                             │
 │  Update offset is managed globally via:                     │
 │    • get_next_update_id() / set_next_update_id()            │

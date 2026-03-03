@@ -111,6 +111,7 @@ class BotApplication:
     def list_commands(self) -> str:
         """Built-in commands list handler - returns formatted list of all commands."""
         lines = [f"{cmd.command}: {cmd.description}" for cmd in self.commands]
+        lines.append("/terminate: Terminate the bot and shut down. (can be invoked anytime)")
         return "\n".join(lines)
 
     async def run(self, skip_commands: bool = False) -> int:
@@ -138,17 +139,15 @@ class BotApplication:
         return await self._run_event_loop()
 
     def _register_commands(self, skip_commands: bool = False) -> None:
-        """Register /terminate, /commands, and optionally the CommandsEvent.
+        """Register /commands and optionally the CommandsEvent.
 
         Args:
             skip_commands: If True, skip registering the CommandsEvent.
         """
-        self.logger.debug("BotApplication._register_commands: registering built-in commands skip_commands=%s", skip_commands)
-        self.commands.insert(0, SimpleCommand(
-            command="/terminate",
-            description="Terminate the bot and shut down.",
-            message_builder=self.terminate,
-        ))
+        self.logger.debug(
+            "BotApplication._register_commands: registering built-in commands skip_commands=%s",
+            skip_commands,
+        )
         self.commands.append(SimpleCommand(
             command="/commands",
             description="List all available commands.",
@@ -160,9 +159,17 @@ class BotApplication:
                 commands=self.commands,
             )
             self.events.append(commands_event)
-            self.logger.debug("BotApplication._register_commands: registered CommandsEvent event_name=%s commands_count=%d", commands_event.event_name, len(self.commands))
+            self.logger.debug(
+                "BotApplication._register_commands: registered CommandsEvent "
+                "event_name=%s commands_count=%d",
+                commands_event.event_name,
+                len(self.commands),
+            )
         else:
-            self.logger.info("BotApplication._register_commands: skipped CommandsEvent registration skip_commands=True")
+            self.logger.info(
+                "BotApplication._register_commands: skipped CommandsEvent "
+                "registration skip_commands=True",
+            )
 
     async def _initialize_http_session(self) -> None:
         """Initialize the Telegram bot's HTTP session.

@@ -332,6 +332,7 @@ class CommandsEvent(Event, UpdatePollerMixin):
         ]
         for command in self.commands:
             lines.append(f"{command.command}: {command.description}")
+        lines.append("/terminate: Terminate the bot and shut down. (can be invoked anytime)")
         return "\n".join(lines)
 
 

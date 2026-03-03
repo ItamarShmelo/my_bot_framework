@@ -16,6 +16,8 @@ echo "your_chat_id" > test_bots/.chat_id
 
 **Note:** These files are gitignored to prevent accidental commits of credentials.
 
+The built-in `/terminate` command is global: it is intercepted at the polling level and works anytime, including during active dialogs.
+
 ## Available Bots
 
 ### basic_bot.py
@@ -26,7 +28,7 @@ echo "your_chat_id" > test_bots/.chat_id
 - `BotApplication` initialization and lifecycle
 - `TimeEvent` with `fire_on_first_check`
 - `SimpleCommand` registration
-- Built-in `/terminate` and `/commands`
+- Built-in `/terminate` (global, works anytime including during dialogs) and `/commands`
 
 **Commands:**
 | Command | Description |
@@ -35,7 +37,7 @@ echo "your_chat_id" > test_bots/.chat_id
 | `/status` | Shows bot status |
 | `/info` | Shows what this bot tests |
 | `/commands` | Lists all commands (built-in) |
-| `/terminate` | Shuts down the bot (built-in) |
+| `/terminate` | Shuts down the bot (built-in; global, can be invoked anytime) |
 
 **Events:**
 - Heartbeat every 5 minutes

@@ -17,7 +17,7 @@ from typing import Any, List, Optional, Tuple, cast
 from telegram import Bot, Update
 from telegram.error import NetworkError, RetryAfter, TimedOut
 
-from .accessors import get_bot, get_chat_id, get_logger
+from .accessors import get_app, get_bot, get_chat_id, get_logger
 from .retry_utilities import (
     DEFAULT_RETRY_MAX_ATTEMPTS,
     RetryAfterExceededError,
@@ -222,12 +222,13 @@ def get_chat_id_from_update(update: Update) -> Optional[int]:
 class UpdatePollerMixin(ABC):
     """Mixin providing Telegram update polling with Template Method Pattern.
 
+    Text updates matching /terminate are intercepted globally before routing.
     Subclasses implement:
     - should_stop_polling(): when to exit the poll loop
     - handle_callback_update(update): process callback queries
     - handle_text_update(update): process text messages
 
-    Uses singleton accessors (get_bot, get_chat_id, get_logger) for dependencies.
+    Uses singleton accessors (get_bot, get_chat_id, get_logger, get_app) for dependencies.
     """
 
     @abstractmethod
@@ -285,10 +286,30 @@ class UpdatePollerMixin(ABC):
                 if update.callback_query:
                     await self.handle_callback_update(update)
                 elif update.message and update.message.text:
+                    if await self._check_terminate(update, logger):
+                        return self._get_poll_result()
                     await self.handle_text_update(update)
 
         logger.info("UpdatePollerMixin.poll: stopped")
         return self._get_poll_result()
+
+    async def _check_terminate(self, update: Update, logger: logging.Logger) -> bool:
+        """Check if the update is a /terminate command and handle it.
+
+        Returns:
+            True if the bot was terminated, False otherwise.
+        """
+        if update.message is None or update.message.text is None:
+            return False
+        if update.message.text.strip() != "/terminate":
+            return False
+        logger.info(
+            "UpdatePollerMixin._check_terminate: terminate_received update_id=%d",
+            update.update_id,
+        )
+        set_next_update_id(update.update_id + 1)
+        await get_app().terminate()
+        return True
 
     def _get_poll_result(self) -> Any:
         """Override to customize the result returned by poll()."""
