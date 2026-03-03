@@ -90,6 +90,7 @@ from .dialog import (
     create_confirm_dialog,
     create_paginated_choice_dialog,
     create_choice_branch_dialog,
+    create_user_input_dialog,
     # Sentinels and debug
     CANCELLED,
     is_cancelled,
@@ -182,6 +183,7 @@ __all__ = [
     "create_confirm_dialog",
     "create_paginated_choice_dialog",
     "create_choice_branch_dialog",
+    "create_user_input_dialog",
     # Mixins
     "UpdatePollerMixin",
     # Sentinels and Debug

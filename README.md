@@ -290,7 +290,7 @@ The framework provides built-in dialog types for common interactions:
   - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
   - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
 - **Other Leaf Dialogs**:
-  - `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input)
+  - `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input). Supports `keyboard_type` (INLINE or REPLY) to control whether the Cancel button appears as an inline keyboard button or a reply keyboard button. Default is INLINE (backward compatible). Class constant `CANCEL_LABEL` for the Cancel button label.
   - `EditEventDialog` - Edit an event's editable attributes via inline or reply keyboard (configurable via `keyboard_type`)
 
 **Composite Dialogs** (multi-step):
@@ -385,6 +385,7 @@ from my_bot_framework import (
     create_confirm_dialog,
     create_paginated_choice_dialog,
     create_choice_branch_dialog,
+    create_user_input_dialog,
 )
 
 # Create choice dialog with reply keyboard
@@ -423,6 +424,13 @@ branch = create_choice_branch_dialog(
     },
     keyboard_type=KeyboardType.INLINE,
     include_cancel=True,
+)
+
+# Create user input dialog with reply keyboard Cancel button
+name_dialog = create_user_input_dialog(
+    prompt="Enter your name:",
+    keyboard_type=KeyboardType.REPLY,
+    validator=validate_non_empty,
 )
 ```
 

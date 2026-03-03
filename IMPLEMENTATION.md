@@ -272,7 +272,7 @@ Dialogs use the Composite pattern to build complex flows from simple components.
   - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
   - `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard
 - **Other Leaf Dialogs**:
-  - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input)
+  - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input). Supports `keyboard_type` (INLINE or REPLY): INLINE shows Cancel as an inline keyboard button (callback_query); REPLY shows Cancel as a reply keyboard button (text message). Default is INLINE. Class constant `CANCEL_LABEL` for the Cancel button label.
   - `EditEventDialog` - Edit an event's editable attributes via inline or reply keyboard (configurable via `keyboard_type`)
 
 **Composite Dialogs** (orchestrate children):
@@ -959,14 +959,14 @@ pattern using the Template Method:
 Classes that inherit `UpdatePollerMixin`:
 - **Inline Keyboard Leaf Dialogs**: `InlineKeyboardChoiceDialog`, `InlineKeyboardPaginatedChoiceDialog`, `InlineKeyboardConfirmDialog`, `InlineKeyboardChoiceBranchDialog`
 - **Reply Keyboard Leaf Dialogs**: `ReplyKeyboardChoiceDialog`, `ReplyKeyboardPaginatedChoiceDialog`, `ReplyKeyboardConfirmDialog`, `ReplyKeyboardChoiceBranchDialog`
-- **Other Leaf Dialogs**: `UserInputDialog` (uses inline keyboard for cancel button)
+- **Other Leaf Dialogs**: `UserInputDialog` (Cancel button: inline or reply keyboard based on `keyboard_type`)
 - **Hybrid Dialogs**: `InlineKeyboardChoiceBranchDialog`, `ReplyKeyboardChoiceBranchDialog` (poll for selection, then delegate)
 - **Events**: `CommandsEvent`
 
 Composite dialogs (`SequenceDialog`, `BranchDialog`, `LoopDialog`, `DialogHandler`)
 do NOT inherit `UpdatePollerMixin` - they delegate to children.
 
-**Note**: `EditEventDialog` does NOT inherit `UpdatePollerMixin` - it delegates to child dialogs. It uses `create_choice_dialog` and `create_confirm_dialog` internally, passing through its `keyboard_type` parameter so field selection and boolean editing can use either inline or reply keyboard.
+**Note**: `EditEventDialog` does NOT inherit `UpdatePollerMixin` - it delegates to child dialogs. It uses `create_choice_dialog`, `create_confirm_dialog`, and `UserInputDialog` internally, passing through its `keyboard_type` parameter so field selection, boolean editing, and text input fields can use either inline or reply keyboard.
 
 ## Dialog System Architecture
 
@@ -1024,7 +1024,7 @@ The framework supports two keyboard types via the `KeyboardType` enum:
 
 **Factory Functions:**
 
-Factory functions (`create_choice_dialog`, `create_confirm_dialog`, etc.) accept a `keyboard_type` parameter to create the appropriate dialog class:
+Factory functions (`create_choice_dialog`, `create_confirm_dialog`, `create_user_input_dialog`, etc.) accept a `keyboard_type` parameter to create the appropriate dialog class. `create_user_input_dialog` creates a `UserInputDialog` with the specified keyboard type for the Cancel button.
 
 ```python
 def create_choice_dialog(

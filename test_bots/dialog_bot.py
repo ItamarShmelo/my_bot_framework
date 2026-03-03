@@ -2,7 +2,7 @@
 
 Tests ALL dialog types:
 - InlineKeyboardChoiceDialog: User selects from inline keyboard options
-- UserInputDialog: User enters text with optional validation
+- UserInputDialog: User enters text with optional validation (inline and reply keyboard)
 - InlineKeyboardConfirmDialog: Yes/No prompt with inline keyboard
 - SequenceDialog: Run dialogs in order with named values
 - BranchDialog: Condition-based branching
@@ -22,6 +22,7 @@ from my_bot_framework import (
     BotApplication,
     SimpleCommand,
     DialogCommand,
+    KeyboardType,
     # Dialog types
     InlineKeyboardChoiceDialog,
     UserInputDialog,
@@ -98,6 +99,14 @@ def validate_number(value: str) -> tuple[bool, str]:
 validated_dialog = UserInputDialog(
     prompt="Enter a number between 1-100:",
     validator=validate_number,
+)
+
+
+# /validated_reply - Tests UserInputDialog with reply keyboard Cancel
+validated_reply_dialog = UserInputDialog(
+    prompt="Enter a number between 1-100:",
+    validator=validate_number,
+    keyboard_type=KeyboardType.REPLY,
 )
 
 
@@ -251,6 +260,12 @@ def main() -> None:
     ))
 
     app.register_command(DialogCommand(
+        command="/validated_reply",
+        description="Input with validation (reply keyboard Cancel)",
+        dialog=validated_reply_dialog,
+    ))
+
+    app.register_command(DialogCommand(
         command="/dynamic",
         description="Dynamic choices based on previous selection",
         dialog=dynamic_dialog,
@@ -293,6 +308,7 @@ def main() -> None:
         "• <b>/simple</b> - SequenceDialog, InlineKeyboardChoiceDialog, UserInputDialog\n"
         "• <b>/confirm</b> - InlineKeyboardConfirmDialog with custom labels\n"
         "• <b>/validated</b> - UserInputDialog with validation\n"
+        "• <b>/validated_reply</b> - UserInputDialog with validation (reply keyboard)\n"
         "• <b>/dynamic</b> - Dynamic choices based on context\n"
         "• <b>/branch</b> - InlineKeyboardChoiceBranchDialog (keyboard branching)\n"
         "• <b>/condition</b> - BranchDialog with condition function\n"

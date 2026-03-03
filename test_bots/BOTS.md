@@ -81,7 +81,7 @@ python test_bots/condition_bot.py
 
 **Features tested:**
 - `InlineKeyboardChoiceDialog` - Inline keyboard selection with static and dynamic choices
-- `UserInputDialog` - Text input with optional validation
+- `UserInputDialog` - Text input with optional validation (inline and reply keyboard Cancel via `keyboard_type`)
 - `InlineKeyboardConfirmDialog` - Yes/No prompts with inline keyboard
 - `SequenceDialog` - Sequential dialogs with named values
 - `BranchDialog` - Condition-based branching
@@ -96,6 +96,7 @@ python test_bots/condition_bot.py
 | `/simple` | SequenceDialog: name + mood selection |
 | `/confirm` | InlineKeyboardConfirmDialog with custom labels |
 | `/validated` | UserInputDialog with validation (1-100) |
+| `/validated_reply` | UserInputDialog with validation (1-100), reply keyboard Cancel |
 | `/dynamic` | Dynamic choices based on previous selection |
 | `/branch` | InlineKeyboardChoiceBranchDialog (quick vs full setup) |
 | `/condition` | BranchDialog with age-based condition |

@@ -531,6 +531,11 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
         try:
             choice_num: int = int(text)
         except ValueError:
+            get_logger().debug(
+                "InlineKeyboardPaginatedChoiceDialog.handle_text_update: invalid_number_input text=%s",
+                text,
+                exc_info=True,
+            )
             response: DialogResponse = self._build_error_response(remaining)
         else:
             # Validate range
@@ -633,15 +638,20 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
 
     Optionally validates input before accepting.
     Inherits UpdatePollerMixin for self-polling.
+
+    The keyboard_type parameter controls whether the Cancel button is shown
+    as an inline keyboard button (INLINE) or a reply keyboard button (REPLY).
     """
 
     CANCEL_CALLBACK = "__cancel__"
+    CANCEL_LABEL = "Cancel"
 
     def __init__(
         self,
         prompt: Union[str, Callable[[], str]],
         validator: Optional[Callable[[str], Tuple[bool, str]]] = None,
         include_cancel: bool = True,
+        keyboard_type: KeyboardType = KeyboardType.INLINE,
     ) -> None:
         """Create a text input dialog.
 
@@ -649,13 +659,16 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             prompt: The question text to display or a callable that returns it.
             validator: Optional callable(text) -> (is_valid, error_message).
             include_cancel: If True, add a Cancel button.
+            keyboard_type: Type of keyboard to use for Cancel button
+                (INLINE or REPLY). Defaults to INLINE.
         """
         super().__init__()
         self._prompt: Callable[[], str]
         self.prompt = prompt
         self.validator = validator
         self.include_cancel = include_cancel
-        self._prompt_message_id: Optional[int] = None  # Track prompt message for keyboard removal
+        self.keyboard_type = keyboard_type
+        self._prompt_message_id: Optional[int] = None
 
     @property
     def prompt(self) -> str:
@@ -700,6 +713,13 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             return
 
         text: str = update.message.text.strip()
+
+        # Reply keyboard cancel
+        if self.keyboard_type == KeyboardType.REPLY and text == self.CANCEL_LABEL and self.include_cancel:
+            await get_app().send_messages(TelegramRemoveReplyKeyboardMessage("Cancelled."))
+            self.cancel()
+            return
+
         response: Optional[DialogResponse] = None
 
         # Validate if validator provided
@@ -708,17 +728,33 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             error_msg: str
             is_valid, error_msg = self.validator(text)
             if not is_valid:
-                # Re-show prompt with error
-                keyboard: Optional[InlineKeyboardMarkup] = None
-                if self.include_cancel:
-                    keyboard = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)]
-                    ])
-                response = DialogResponse(
-                    text=f"{error_msg}\n\n{self.prompt}",
-                    keyboard=keyboard,
-                    edit_message=False,
+                get_logger().info(
+                    "UserInputDialog.handle_text_update: validation_failed error=%s keyboard_type=%s",
+                    error_msg,
+                    self.keyboard_type.value,
                 )
+                if self.keyboard_type == KeyboardType.REPLY:
+                    # Re-show prompt with reply keyboard Cancel button
+                    keyboard: List[List[str]] = [[self.CANCEL_LABEL]] if self.include_cancel else []
+                    await get_app().send_messages(
+                        TelegramReplyKeyboardMessage(
+                            text=f"{error_msg}\n\n{self.prompt}",
+                            keyboard=keyboard,
+                            one_time_keyboard=False,
+                        )
+                    )
+                elif self.keyboard_type == KeyboardType.INLINE:
+                    # Re-show prompt with inline keyboard Cancel button
+                    inline_keyboard: Optional[InlineKeyboardMarkup] = None
+                    if self.include_cancel:
+                        inline_keyboard = InlineKeyboardMarkup([
+                            [InlineKeyboardButton(self.CANCEL_LABEL, callback_data=self.CANCEL_CALLBACK)]
+                        ])
+                    response = DialogResponse(
+                        text=f"{error_msg}\n\n{self.prompt}",
+                        keyboard=inline_keyboard,
+                        edit_message=False,
+                    )
 
         if response is None:
             # Validation passed (or no validator)
@@ -739,8 +775,8 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             else:
                 response = DialogResponse.NO_CHANGE
 
-        # Remove keyboard from previous prompt (whether valid or validation error)
-        if self._prompt_message_id is not None:
+        # Remove inline keyboard from previous prompt (not needed for reply keyboards)
+        if self.keyboard_type == KeyboardType.INLINE and self._prompt_message_id is not None:
             await get_app().send_messages(TelegramRemoveKeyboardMessage(self._prompt_message_id))
             self._prompt_message_id = None
 
@@ -772,18 +808,35 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
     async def _run_dialog(self) -> DialogResult:
         """Show prompt and poll until text input received."""
         self.state = DialogState.AWAITING_TEXT
-
-        keyboard = None
-        if self.include_cancel:
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)]
-            ])
-        response = DialogResponse(
-            text=self.prompt,
-            keyboard=keyboard,
-            edit_message=False,
+        get_logger().debug(
+            "UserInputDialog._run_dialog: started keyboard_type=%s include_cancel=%s",
+            self.keyboard_type.value,
+            self.include_cancel,
         )
-        await self._send_response(response)
+
+        if self.keyboard_type == KeyboardType.REPLY:
+            if self.include_cancel:
+                await get_app().send_messages(
+                    TelegramReplyKeyboardMessage(
+                        text=self.prompt,
+                        keyboard=[[self.CANCEL_LABEL]],
+                        one_time_keyboard=False,
+                    )
+                )
+            else:
+                await get_app().send_messages(self.prompt)
+        elif self.keyboard_type == KeyboardType.INLINE:
+            keyboard = None
+            if self.include_cancel:
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(self.CANCEL_LABEL, callback_data=self.CANCEL_CALLBACK)]
+                ])
+            response = DialogResponse(
+                text=self.prompt,
+                keyboard=keyboard,
+                edit_message=False,
+            )
+            await self._send_response(response)
 
         # Poll until complete
         return await self.poll()
@@ -1551,6 +1604,12 @@ class EditEventDialog(Dialog):
                     parsed_value = attr.parse(text)
                 except (ValueError, TypeError) as e:
                     error = str(e) if str(e) else "Invalid input"
+                    get_logger().debug(
+                        "EditEventDialog._edit_text_field: parse_failed field=%s error=%s",
+                        field_name,
+                        error,
+                        exc_info=True,
+                    )
                     return False, error
 
                 # Single-field validation
@@ -1579,6 +1638,7 @@ class EditEventDialog(Dialog):
             prompt=f"Enter new value for {field_name} (current: {current}):",
             validator=make_validator(),
             include_cancel=True,
+            keyboard_type=self.keyboard_type,
         )
         result = await text_dialog.start(self.context)
 
@@ -2022,7 +2082,11 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
             try:
                 choice_num: int = int(text)
             except ValueError:
-                # Re-prompt with error
+                get_logger().debug(
+                    "ReplyKeyboardPaginatedChoiceDialog.handle_text_update: invalid_number_input text=%s",
+                    text,
+                    exc_info=True,
+                )
                 await self._send_more_error(remaining)
                 return
 
@@ -2455,4 +2519,33 @@ def create_choice_branch_dialog(
         prompt,
         branches,
         include_cancel,
+    )
+
+
+def create_user_input_dialog(
+    prompt: Union[str, Callable[[], str]],
+    keyboard_type: KeyboardType = KeyboardType.INLINE,
+    validator: Optional[Callable[[str], Tuple[bool, str]]] = None,
+    include_cancel: bool = True,
+) -> UserInputDialog:
+    """Create a user input dialog with specified keyboard type.
+
+    Factory function that creates a UserInputDialog with the given
+    keyboard_type controlling how the Cancel button is displayed.
+
+    Args:
+        prompt: The question text to display or a callable that returns it.
+        keyboard_type: Type of keyboard to use for Cancel button
+            (INLINE or REPLY). Defaults to INLINE.
+        validator: Optional callable(text) -> (is_valid, error_message).
+        include_cancel: If True, add a Cancel button.
+
+    Returns:
+        A UserInputDialog instance configured with the given keyboard type.
+    """
+    return UserInputDialog(
+        prompt=prompt,
+        validator=validator,
+        include_cancel=include_cancel,
+        keyboard_type=keyboard_type,
     )
