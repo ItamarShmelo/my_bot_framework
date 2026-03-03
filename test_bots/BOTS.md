@@ -49,6 +49,33 @@ python test_bots/basic_bot.py
 
 ---
 
+### dynamic_event_bot.py
+
+**Purpose:** Tests dynamic mid-run event registration.
+
+**Features tested:**
+- `BotApplication.register_event()` when bot is already running
+- `ActivateOnConditionEvent` created and started at runtime
+- Multiple dynamic events coexisting (e.g., multiple heartbeats from repeated `/add_heartbeat`)
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/add_heartbeat` | Register a new heartbeat event mid-run (fires every 10 s) |
+| `/info` | Shows what this bot tests |
+| `/commands` | Lists all commands (built-in) |
+| `/terminate` | Shuts down the bot (built-in) |
+
+**Events:**
+- None at startup; events are added dynamically via `/add_heartbeat`
+
+**Run:**
+```bash
+python test_bots/dynamic_event_bot.py
+```
+
+---
+
 ### condition_bot.py
 
 **Purpose:** Tests condition-based events and editable parameters.

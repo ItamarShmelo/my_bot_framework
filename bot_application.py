@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Set, Union
 
 from telegram import Bot
 
@@ -17,6 +17,7 @@ class BotApplication:
 
     Encapsulates the bot instance, events, and commands.
     Provides built-in /terminate and /commands functionality.
+    Supports dynamic event registration while the bot is running.
 
     Usage:
         app = BotApplication.initialize(
@@ -37,6 +38,9 @@ class BotApplication:
     stop_event: asyncio.Event
     events: List["Event"]
     commands: List["Command"]
+    _running: bool
+    _active_tasks: Set["asyncio.Task[None]"]
+    _new_event_signal: asyncio.Event
 
     def __init__(
         self,
@@ -51,6 +55,9 @@ class BotApplication:
         self.stop_event = asyncio.Event()
         self.events = []
         self.commands = []
+        self._running = False
+        self._active_tasks = set()
+        self._new_event_signal = asyncio.Event()
 
     @classmethod
     def get_instance(cls) -> "BotApplication":
@@ -60,6 +67,9 @@ class BotApplication:
             RuntimeError: If initialize() hasn't been called.
         """
         if cls._instance is None:
+            logging.getLogger(__name__).critical(
+                "BotApplication.get_instance: not_initialized",
+            )
             raise RuntimeError(
                 "BotApplication not initialized. Call BotApplication.initialize() first."
             )
@@ -93,9 +103,25 @@ class BotApplication:
         return cls._instance
 
     def register_event(self, event: "Event") -> None:
-        """Register an event to be run when the bot starts."""
+        """Register an event to be run by the bot.
+
+        If the bot is already running, the event is started immediately.
+        Otherwise it will be started when run() is called.
+        """
         self.events.append(event)
-        self.logger.debug("BotApplication.register_event: registered event_name=%s", event.event_name)
+        if self._running:
+            task = asyncio.create_task(event.submit(self.stop_event))
+            self._active_tasks.add(task)
+            self._new_event_signal.set()
+            self.logger.info(
+                "BotApplication.register_event: started_mid_run event_name=%s",
+                event.event_name,
+            )
+        else:
+            self.logger.debug(
+                "BotApplication.register_event: registered event_name=%s",
+                event.event_name,
+            )
 
     def register_command(self, command: "Command") -> None:
         """Register a command to be available to users."""
@@ -189,12 +215,13 @@ class BotApplication:
             raise
 
     async def _run_event_loop(self) -> int:
-        """Flush updates, start event tasks, and wait for stop or fatal error.
+        """Supervisor loop: start event tasks and watch for new ones mid-run.
 
         Detects task failures so that fatal exceptions (e.g. BadRequest from
-        invalid HTML, unexpected condition/builder crashes) propagate and terminate the bot
-        instead of being silently swallowed. On fatal error, attempts to send an error
-        message to the user via Telegram before re-raising.
+        invalid HTML, unexpected condition/builder crashes) propagate and
+        terminate the bot instead of being silently swallowed.  Events
+        registered via register_event() while the loop is running are picked
+        up automatically on the next iteration.
 
         Returns:
             Exit code (0 for success).
@@ -202,10 +229,11 @@ class BotApplication:
         try:
             await flush_pending_updates(self.bot)
 
-            event_tasks = [
+            self._running = True
+            self._active_tasks = {
                 asyncio.create_task(event.submit(self.stop_event))
                 for event in self.events
-            ]
+            }
 
             self.logger.info(
                 "BotApplication._run_event_loop: started events=%d commands=%d",
@@ -213,24 +241,46 @@ class BotApplication:
                 len(self.commands),
             )
 
-            # Wait for either stop_event or a task failure (fatal error)
-            stop_task = asyncio.create_task(self.stop_event.wait())
-            done, pending = await asyncio.wait(
-                event_tasks + [stop_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+            stop_task: asyncio.Task[bool] = asyncio.create_task(self.stop_event.wait())
 
-            # If an event task failed, re-raise its exception (fatal)
-            for task in done:
-                if task is not stop_task:
+            while not self.stop_event.is_set():
+                # Wait for either stop signal, new event registration, or task completion
+                signal_task: asyncio.Task[bool] = asyncio.create_task(
+                    self._new_event_signal.wait(),
+                )
+
+                wait_tasks: Set[asyncio.Task[Any]] = (
+                    self._active_tasks | {stop_task, signal_task}
+                )
+                done, _ = await asyncio.wait(
+                    wait_tasks,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if signal_task in done:
+                    self._new_event_signal.clear()
+                else:
+                    signal_task.cancel()
+
+                for task in done:
+                    if task is stop_task or task is signal_task:
+                        continue
+                    self._active_tasks.discard(task)
                     exc = task.exception()
                     if exc is not None:
                         raise exc
 
-            # Normal shutdown -- cancel remaining tasks
-            for task in pending:
+                if stop_task in done:
+                    break
+
+            # Normal shutdown: cancel remaining event tasks
+            for task in self._active_tasks:
                 task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
+            if not stop_task.done():
+                stop_task.cancel()
+            await asyncio.gather(
+                *self._active_tasks, stop_task, return_exceptions=True,
+            )
 
             self.logger.info("BotApplication._run_event_loop: stopped")
             return 0
@@ -244,6 +294,7 @@ class BotApplication:
             await self.send_messages(TelegramTextMessage(error_text))
             raise
         finally:
+            self._running = False
             try:
                 self.logger.debug("BotApplication._run_event_loop: shutting down HTTP session")
                 await self.bot.shutdown()
@@ -282,4 +333,4 @@ class BotApplication:
             if isinstance(message, str):
                 message = TelegramTextMessage(message)
             await message.send(bot=self.bot, chat_id=self.chat_id, logger=self.logger)
-        self.logger.debug("BotApplication.send_messages: sent count=%d", len(messages))
+        self.logger.info("BotApplication.send_messages: sent count=%d", len(messages))

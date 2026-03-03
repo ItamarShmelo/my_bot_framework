@@ -11,6 +11,7 @@ A modular, event-driven Telegram bot framework built on `python-telegram-bot`.
 - **Interactive Dialogs** - Multi-step conversations with inline keyboards
 - **Editable Parameters** - Runtime-configurable event parameters
 - **Resilient Polling** - Automatic handling of transient Telegram network errors with backoff and recovery logging
+- **Dynamic Event Registration** - Register new events while the bot is already running; they start immediately
 
 ## Installation
 
@@ -76,6 +77,7 @@ The singleton entry point for the framework. Manages:
 - Direct message sending for outgoing messages
 - Event and command registration
 - Graceful shutdown via `/terminate` (global command, works anytime including during dialogs)
+- Dynamic event registration (mid-run): `register_event()` can be called while the bot is running; new events are started immediately
 
 #### Running the Bot
 
@@ -137,6 +139,7 @@ await app.send_messages([
 ### Events
 
 Events run continuously and send messages based on triggers.
+You can register events at startup or dynamically while the bot is running—call `register_event()` from a command handler or callback; the new event starts immediately.
 
 #### ActivateOnConditionEvent
 
