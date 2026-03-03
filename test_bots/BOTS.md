@@ -173,6 +173,8 @@ python test_bots/dialog_handler_bot.py
 - `DialogCommand` with `DialogHandler` for editing
 - Condition/MessageBuilder edit routing
 - `ActivateOnConditionEvent` with editable parameters
+- `EditEventDialog` with inline and reply keyboards
+- `KeyboardType` for choosing keyboard style in EditEventDialog
 
 **Commands:**
 | Command | Description |
@@ -182,6 +184,8 @@ python test_bots/dialog_handler_bot.py
 | `/edit_threshold` | Edit threshold via UserInputDialog |
 | `/edit_level` | Edit alert level via InlineKeyboardChoiceDialog |
 | `/edit_all` | Edit all settings via SequenceDialog |
+| `/edit_inline` | Edit all settings via EditEventDialog (inline keyboard) |
+| `/edit_reply` | Edit all settings via EditEventDialog (reply keyboard) |
 | `/info` | Shows what this bot tests |
 
 **Events:**

@@ -291,7 +291,7 @@ The framework provides built-in dialog types for common interactions:
   - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
 - **Other Leaf Dialogs**:
   - `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input)
-  - `EditEventDialog` - Edit an event's editable attributes via inline keyboard
+  - `EditEventDialog` - Edit an event's editable attributes via inline or reply keyboard (configurable via `keyboard_type`)
 
 **Composite Dialogs** (multi-step):
 - `SequenceDialog` - Run dialogs in order
@@ -428,10 +428,10 @@ branch = create_choice_branch_dialog(
 
 #### EditEventDialog
 
-Edit any event's editable attributes via an inline keyboard interface:
+Edit any event's editable attributes via inline or reply keyboard. Use the `keyboard_type` parameter to choose the keyboard style (default is inline):
 
 ```python
-from my_bot_framework import EditEventDialog, DialogCommand
+from my_bot_framework import EditEventDialog, DialogCommand, KeyboardType
 
 # Create an event with editable attributes
 event = ActivateOnConditionEvent(
@@ -440,8 +440,11 @@ event = ActivateOnConditionEvent(
     message_builder=my_builder,  # Has editable attributes
 )
 
-# Simple usage - edit all fields
+# Simple usage - edit all fields (inline keyboard, default)
 edit_dialog = EditEventDialog(event)
+
+# Reply keyboard (buttons at bottom of chat)
+edit_dialog_reply = EditEventDialog(event, keyboard_type=KeyboardType.REPLY)
 
 # With cross-field validation
 def validate_limits(context):
@@ -458,7 +461,7 @@ validated_dialog = EditEventDialog(event, validator=validate_limits)
 app.register_command(DialogCommand("/edit", "Edit event settings", validated_dialog))
 ```
 
-The dialog shows a field list with current values. Boolean fields use toggle buttons, other fields use text input. Edits are staged and only applied when clicking Done.
+The dialog shows a field list with current values. Boolean fields use toggle buttons (Yes/No), other fields use text input. Field selection and boolean editing use either inline or reply keyboard based on `keyboard_type`. Edits are staged and only applied when clicking Done.
 
 #### Cancellation Handling
 

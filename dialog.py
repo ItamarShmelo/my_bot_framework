@@ -1359,13 +1359,14 @@ class DialogHandler(Dialog):
 
 
 class EditEventDialog(Dialog):
-    """Dialog for editing an event's editable attributes via inline keyboard.
+    """Dialog for editing an event's editable attributes.
 
-    Delegates to ChoiceDialog for field selection and boolean fields,
-    and UserInputDialog for text fields. Does not poll directly.
+    Supports both inline and reply keyboard modes via the keyboard_type
+    parameter. Delegates to ChoiceDialog for field selection and boolean
+    fields, and UserInputDialog for text fields. Does not poll directly.
 
     Shows a list of editable fields as buttons. Supports:
-    - Boolean fields: Toggle buttons [True] [False] via ChoiceDialog
+    - Boolean fields: Toggle buttons [True] [False] via ConfirmDialog
     - Other fields: Text input via UserInputDialog
 
     Edits are staged in the context and only applied when clicking Done.
@@ -1380,6 +1381,7 @@ class EditEventDialog(Dialog):
             return True, ""
 
         dialog = EditEventDialog(my_event, validator=validate_range)
+        dialog_reply = EditEventDialog(my_event, keyboard_type=KeyboardType.REPLY)
     """
 
     DONE_VALUE = "__done__"
@@ -1388,6 +1390,7 @@ class EditEventDialog(Dialog):
         self,
         event: "ActivateOnConditionEvent",
         validator: Optional[Callable[[Dict[str, Any]], Tuple[bool, str]]] = None,
+        keyboard_type: KeyboardType = KeyboardType.INLINE,
     ) -> None:
         """Create an edit event dialog.
 
@@ -1396,10 +1399,13 @@ class EditEventDialog(Dialog):
             validator: Optional cross-field validation function.
                 Receives context dict with staged edits, returns (is_valid, error_msg).
                 Called after each successful field edit.
+            keyboard_type: Type of keyboard to use for field selection and
+                boolean editing (INLINE or REPLY). Defaults to INLINE.
         """
         super().__init__()
         self.event = event
         self.validator = validator
+        self.keyboard_type = keyboard_type
 
     def _is_bool_field(self, attr: "EditableAttribute") -> bool:
         """Check if an attribute is a boolean type."""
@@ -1492,8 +1498,9 @@ class EditEventDialog(Dialog):
         current = self._get_field_display_value(field_name)
 
         while True:
-            bool_dialog = InlineKeyboardConfirmDialog(
+            bool_dialog = create_confirm_dialog(
                 prompt=f"Set {field_name} to True? (current: {current})",
+                keyboard_type=self.keyboard_type,
                 yes_label="True",
                 no_label="False",
                 include_cancel=True,
@@ -1599,9 +1606,10 @@ class EditEventDialog(Dialog):
 
         while True:
             # Show field selection dialog
-            field_dialog = InlineKeyboardChoiceDialog(
+            field_dialog = create_choice_dialog(
                 prompt=self._get_field_list_prompt(),
-                choices=self._build_field_choices,  # Dynamic choices
+                choices=self._build_field_choices,
+                keyboard_type=self.keyboard_type,
                 include_cancel=True,
             )
             result = await field_dialog.start(self.context)

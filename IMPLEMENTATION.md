@@ -273,7 +273,7 @@ Dialogs use the Composite pattern to build complex flows from simple components.
   - `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard
 - **Other Leaf Dialogs**:
   - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input)
-  - `EditEventDialog` - Edit an event's editable attributes via inline keyboard
+  - `EditEventDialog` - Edit an event's editable attributes via inline or reply keyboard (configurable via `keyboard_type`)
 
 **Composite Dialogs** (orchestrate children):
 - `SequenceDialog` - Run dialogs in order with named values
@@ -966,7 +966,7 @@ Classes that inherit `UpdatePollerMixin`:
 Composite dialogs (`SequenceDialog`, `BranchDialog`, `LoopDialog`, `DialogHandler`)
 do NOT inherit `UpdatePollerMixin` - they delegate to children.
 
-**Note**: `EditEventDialog` does NOT inherit `UpdatePollerMixin` - it delegates to child dialogs (`InlineKeyboardChoiceDialog`, `InlineKeyboardConfirmDialog`, `UserInputDialog`).
+**Note**: `EditEventDialog` does NOT inherit `UpdatePollerMixin` - it delegates to child dialogs. It uses `create_choice_dialog` and `create_confirm_dialog` internally, passing through its `keyboard_type` parameter so field selection and boolean editing can use either inline or reply keyboard.
 
 ## Dialog System Architecture
 
@@ -1068,7 +1068,7 @@ Each dialog implements `build_result()` to create standardized nested dictionari
 
 ## EditEventDialog Architecture
 
-`EditEventDialog` provides a generic UI for editing any `ActivateOnConditionEvent`'s editable attributes via Telegram inline keyboard.
+`EditEventDialog` provides a generic UI for editing any `ActivateOnConditionEvent`'s editable attributes via Telegram keyboard. It accepts a `keyboard_type: KeyboardType = KeyboardType.INLINE` parameter and delegates to `create_choice_dialog` and `create_confirm_dialog` for field selection and boolean editing, so it supports both inline and reply keyboards.
 
 ### State Machine
 

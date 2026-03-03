@@ -5,6 +5,8 @@ Tests:
 - Editing fields via DialogCommand
 - EditableMixin.edited flag for immediate re-check
 - Dynamic kwargs from editable fields
+- EditEventDialog with inline keyboard (/edit_inline)
+- EditEventDialog with reply keyboard (/edit_reply)
 """
 
 import asyncio
@@ -23,14 +25,17 @@ from my_bot_framework import (
     DialogCommand,
     ActivateOnConditionEvent,
     EditableAttribute,
+    EditEventDialog,
     Condition,
     MessageBuilder,
+    KeyboardType,
     InlineKeyboardChoiceDialog,
     UserInputDialog,
     SequenceDialog,
     DialogHandler,
     is_cancelled,
     get_app,
+    get_logger,
 )
 
 
@@ -193,7 +198,7 @@ def main() -> None:
 
     async def on_threshold_edited(result: Any) -> None:
         """Handle threshold edit completion.
-        
+
         Args:
             result: The dialog result containing the new threshold value or CANCELLED.
         """
@@ -233,7 +238,7 @@ def main() -> None:
 
     async def on_level_edited(result: Any) -> None:
         """Handle alert level edit completion.
-        
+
         Args:
             result: The dialog result containing the new alert level or CANCELLED.
         """
@@ -268,7 +273,7 @@ def main() -> None:
 
     async def on_all_edited(result: Any) -> None:
         """Handle combined settings edit.
-        
+
         Args:
             result: The dialog result containing edited fields as a dict or CANCELLED.
         """
@@ -331,6 +336,42 @@ def main() -> None:
         dialog=combined_dialog,
     ))
 
+    # --- EditEventDialog commands (inline vs reply keyboard) ---
+
+    async def on_event_edited(result: Any) -> None:
+        """Handle EditEventDialog completion.
+
+        Args:
+            result: The dialog result (dict of edits or CANCELLED).
+        """
+        logger = get_logger()
+        if is_cancelled(result):
+            logger.info("on_event_edited: cancelled")
+            await get_app().send_messages("❌ Event edit cancelled.")
+            return
+        logger.info("on_event_edited: completed edits=%s", result)
+        await get_app().send_messages(f"✅ Settings updated:\n{get_settings_text()}")
+
+    inline_edit_dialog = DialogHandler(
+        EditEventDialog(sensor_event),
+        on_complete=on_event_edited,
+    )
+    app.register_command(DialogCommand(
+        command="/edit_inline",
+        description="Edit settings (inline keyboard)",
+        dialog=inline_edit_dialog,
+    ))
+
+    reply_edit_dialog = DialogHandler(
+        EditEventDialog(sensor_event, keyboard_type=KeyboardType.REPLY),
+        on_complete=on_event_edited,
+    )
+    app.register_command(DialogCommand(
+        command="/edit_reply",
+        description="Edit settings (reply keyboard)",
+        dialog=reply_edit_dialog,
+    ))
+
     # --- Info command ---
 
     info_text = (
@@ -338,13 +379,16 @@ def main() -> None:
         "Tests runtime-editable parameters:\n"
         "• <code>EditableAttribute</code> factory methods (int, str, optional=True)\n"
         "• <code>EditableMixin</code> - Edited flag for immediate re-check\n"
-        "• Dialog-based editing of event parameters\n\n"
+        "• Dialog-based editing of event parameters\n"
+        "• <code>EditEventDialog</code> with inline and reply keyboards\n\n"
         "<b>Commands:</b>\n"
         "/sensor - Show current sensor value\n"
         "/settings - Show current settings\n"
         "/edit_threshold - Edit threshold via dialog\n"
         "/edit_level - Edit alert level via dialog\n"
-        "/edit_all - Edit all settings at once"
+        "/edit_all - Edit all settings at once\n"
+        "/edit_inline - Edit all settings (inline keyboard)\n"
+        "/edit_reply - Edit all settings (reply keyboard)"
     )
     app.register_command(SimpleCommand(
         command="/info",
