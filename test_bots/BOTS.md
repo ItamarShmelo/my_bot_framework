@@ -112,10 +112,10 @@ python test_bots/condition_bot.py
 - `InlineKeyboardConfirmDialog` - Yes/No prompts with inline keyboard
 - `SequenceDialog` - Sequential dialogs with named values
 - `BranchDialog` - Condition-based branching
-- `InlineKeyboardChoiceBranchDialog` - Inline keyboard-driven branching
+- `InlineKeyboardChoiceBranchDialog` - Inline keyboard-driven branching (static or dynamic branches)
 - `LoopDialog` - Repeat until exit condition (with exit_value and exit_condition)
 - Shared context across all dialogs
-- Dynamic choices via callable functions
+- Dynamic choices and dynamic branches via callable functions
 
 **Commands:**
 | Command | Description |
@@ -126,6 +126,7 @@ python test_bots/condition_bot.py
 | `/validated_reply` | UserInputDialog with validation (1-100), reply keyboard Cancel |
 | `/dynamic` | Dynamic choices based on previous selection |
 | `/branch` | InlineKeyboardChoiceBranchDialog (quick vs full setup) |
+| `/dynamic_branch` | InlineKeyboardChoiceBranchDialog with dynamic callable branches |
 | `/condition` | BranchDialog with age-based condition |
 | `/loop` | LoopDialog until 'done' entered |
 | `/loopvalid` | LoopDialog until valid email (max 5) |
@@ -141,7 +142,7 @@ python test_bots/condition_bot.py
 | `InlineKeyboardConfirmDialog` | Yes/No with custom labels |
 | `SequenceDialog` | Named dialogs in sequence |
 | `BranchDialog` | Condition function branching |
-| `InlineKeyboardChoiceBranchDialog` | User-driven branching |
+| `InlineKeyboardChoiceBranchDialog` | User-driven branching (static/dynamic branches) |
 | `LoopDialog` | Exit by value/condition/max |
 
 **Run:**
@@ -494,7 +495,7 @@ python test_bots/reply_keyboard_bot.py
 - `ReplyKeyboardChoiceDialog` - Choice dialog using reply keyboard
 - `ReplyKeyboardConfirmDialog` - Confirm dialog using reply keyboard (with and without cancel)
 - `ReplyKeyboardPaginatedChoiceDialog` - Paginated choice dialog using reply keyboard
-- `ReplyKeyboardChoiceBranchDialog` - Choice branch dialog using reply keyboard
+- `ReplyKeyboardChoiceBranchDialog` - Choice branch dialog using reply keyboard (static or dynamic branches)
 - Factory functions with `keyboard_type=KeyboardType.REPLY`:
   - `create_choice_dialog()` with `KeyboardType.REPLY`
   - `create_confirm_dialog()` with `KeyboardType.REPLY`
@@ -502,7 +503,7 @@ python test_bots/reply_keyboard_bot.py
   - `create_choice_branch_dialog()` with `KeyboardType.REPLY`
 - Text matching for button labels (reply keyboards send text messages)
 - Cancel functionality (with `include_cancel` parameter)
-- Dynamic choices via callable functions
+- Dynamic choices and dynamic branches via callable functions
 - Integration with `DialogHandler` and `SequenceDialog`
 - Custom yes/no labels for confirm dialogs
 
@@ -520,6 +521,7 @@ python test_bots/reply_keyboard_bot.py
 | `/dynamic_choice` | Test dynamic choices via callable |
 | `/branch` | Test ReplyKeyboardChoiceBranchDialog (direct class) |
 | `/branch_factory` | Test create_choice_branch_dialog with KeyboardType.REPLY |
+| `/dynamic_branch` | Test dynamic branches via callable |
 | `/choice_handler` | Test ReplyKeyboardChoiceDialog with DialogHandler |
 | `/confirm_handler` | Test ReplyKeyboardConfirmDialog with DialogHandler |
 
@@ -530,7 +532,7 @@ python test_bots/reply_keyboard_bot.py
 | `ReplyKeyboardChoiceDialog` | Static/dynamic keyboard options using reply keyboard |
 | `ReplyKeyboardConfirmDialog` | Yes/No with custom labels using reply keyboard |
 | `ReplyKeyboardPaginatedChoiceDialog` | Paginated options with "More..." button using reply keyboard |
-| `ReplyKeyboardChoiceBranchDialog` | User-driven branching using reply keyboard |
+| `ReplyKeyboardChoiceBranchDialog` | User-driven branching using reply keyboard (static/dynamic branches) |
 
 **Run:**
 ```bash

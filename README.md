@@ -299,8 +299,8 @@ The framework provides built-in dialog types for common interactions:
 **Composite Dialogs** (multi-step):
 - `SequenceDialog` - Run dialogs in order
 - `BranchDialog` - Condition-based branching
-- `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard
-- `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard
+- `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard (static or dynamic branches via callable)
+- `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard (static or dynamic branches via callable)
 - `LoopDialog` - Repeat until exit condition
 - `DialogHandler` - Wrap dialog with completion callback
 
@@ -418,7 +418,7 @@ paginated = create_paginated_choice_dialog(
     include_cancel=True,
 )
 
-# Create choice branch dialog
+# Create choice branch dialog (static or dynamic branches)
 branch = create_choice_branch_dialog(
     prompt="Select action:",
     branches={
@@ -428,6 +428,7 @@ branch = create_choice_branch_dialog(
     keyboard_type=KeyboardType.INLINE,
     include_cancel=True,
 )
+# For dynamic branches based on context: branches=lambda ctx: {...}
 
 # Create user input dialog with reply keyboard Cancel button
 name_dialog = create_user_input_dialog(

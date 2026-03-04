@@ -69,6 +69,7 @@ from .dialog import (
     DialogResult,
     DialogHandler,
     KeyboardType,
+    BranchesType,
     # Inline keyboard dialogs (new names)
     InlineKeyboardChoiceDialog,
     InlineKeyboardConfirmDialog,
@@ -162,6 +163,7 @@ __all__ = [
     "DialogResult",
     "DialogHandler",
     "KeyboardType",
+    "BranchesType",
     # Inline keyboard dialogs (new names)
     "InlineKeyboardChoiceDialog",
     "InlineKeyboardConfirmDialog",

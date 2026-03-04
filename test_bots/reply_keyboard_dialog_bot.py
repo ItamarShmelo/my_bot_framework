@@ -4,7 +4,7 @@ Tests:
 - ReplyKeyboardChoiceDialog - Choice dialog using reply keyboard
 - ReplyKeyboardConfirmDialog - Confirm dialog using reply keyboard
 - ReplyKeyboardPaginatedChoiceDialog - Paginated choice dialog using reply keyboard
-- ReplyKeyboardChoiceBranchDialog - Choice branch dialog using reply keyboard
+- ReplyKeyboardChoiceBranchDialog - Choice branch dialog using reply keyboard (static + dynamic branches)
 - Factory functions with keyboard_type=KeyboardType.REPLY
 - Text matching for button labels
 - Cancel functionality
@@ -235,6 +235,47 @@ branch_factory_dialog = create_choice_branch_dialog(
 )
 
 
+# /dynamic_branch - Tests ReplyKeyboardChoiceBranchDialog with dynamic callable branches
+def get_dynamic_branches(context: Dict[str, Any]) -> Dict[str, Tuple[str, Any]]:
+    """Get branches based on context - branches vary by user_type selection."""
+    user_type = context.get("user_type", "basic")
+    if user_type == "developer":
+        return {
+            "quick": ("Quick (name only)", UserInputDialog("Enter your name:")),
+            "full": ("Full (name + email)", SequenceDialog([
+                ("name", UserInputDialog("Enter your name:")),
+                ("email", UserInputDialog("Enter your email:")),
+            ])),
+        }
+    elif user_type == "designer":
+        return {
+            "portfolio": ("Portfolio setup", UserInputDialog("Enter portfolio URL:")),
+            "skills": ("Skills setup", UserInputDialog("List your design tools:")),
+        }
+    else:
+        return {
+            "simple": ("Simple", UserInputDialog("Enter your name:")),
+        }
+
+
+dynamic_branch_dialog = SequenceDialog([
+    ("user_type", ReplyKeyboardChoiceDialog(
+        prompt="Select your role:",
+        choices=[
+            ("Developer", "developer"),
+            ("Designer", "designer"),
+            ("Other", "other"),
+        ],
+        include_cancel=True,
+    )),
+    ("branch_result", ReplyKeyboardChoiceBranchDialog(
+        prompt="Select setup path:",
+        branches=get_dynamic_branches,
+        include_cancel=True,
+    )),
+])
+
+
 # =============================================================================
 # COMMAND HANDLERS
 # =============================================================================
@@ -318,6 +359,12 @@ def main() -> None:
         dialog=branch_factory_dialog,
     ))
 
+    app.register_command(DialogCommand(
+        command="/dynamic_branch",
+        description="Test dynamic branches via callable",
+        dialog=dynamic_branch_dialog,
+    ))
+
     # Handler commands to show results
     async def handle_choice_result(result: Any) -> None:
         """Handle choice dialog result."""
@@ -362,7 +409,8 @@ def main() -> None:
         "• Factory functions with keyboard_type=KeyboardType.REPLY\n"
         "• Text matching for button labels\n"
         "• Cancel functionality\n"
-        "• Dynamic choices via callable\n\n"
+        "• Dynamic choices via callable\n"
+        "• Dynamic branches via callable\n\n"
         "<b>Commands:</b>\n"
         "• /choice - Test ReplyKeyboardChoiceDialog (direct class)\n"
         "• /choice_factory - Test create_choice_dialog with KeyboardType.REPLY\n"
@@ -374,6 +422,7 @@ def main() -> None:
         "• /dynamic_choice - Test dynamic choices via callable\n"
         "• /branch - Test ReplyKeyboardChoiceBranchDialog (direct class)\n"
         "• /branch_factory - Test create_choice_branch_dialog with KeyboardType.REPLY\n"
+        "• /dynamic_branch - Test dynamic branches via callable\n"
         "• /choice_handler - Test ReplyKeyboardChoiceDialog with handler\n"
         "• /confirm_handler - Test ReplyKeyboardConfirmDialog with handler"
     )

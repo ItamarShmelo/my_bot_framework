@@ -6,7 +6,7 @@ Tests ALL dialog types:
 - InlineKeyboardConfirmDialog: Yes/No prompt with inline keyboard
 - SequenceDialog: Run dialogs in order with named values
 - BranchDialog: Condition-based branching
-- InlineKeyboardChoiceBranchDialog: User selects branch via inline keyboard
+- InlineKeyboardChoiceBranchDialog: User selects branch via inline keyboard (static + dynamic branches)
 - LoopDialog: Repeat until exit condition
 """
 
@@ -14,6 +14,7 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
+from typing import Any, Dict, Tuple
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -143,6 +144,42 @@ branch_dialog = InlineKeyboardChoiceBranchDialog(
         ])),
     }
 )
+
+
+# /dynamic_branch - Tests InlineKeyboardChoiceBranchDialog with dynamic callable branches
+def get_dynamic_branches(context: Dict[str, Any]) -> Dict[str, Tuple[str, Any]]:
+    """Get branches based on context - branches vary by user_type selection."""
+    user_type = context.get("user_type", "basic")
+    if user_type == "developer":
+        return {
+            "quick": ("Quick (name only)", UserInputDialog("Enter your name:")),
+            "full": ("Full (name + email)", SequenceDialog([
+                ("name", UserInputDialog("Enter your name:")),
+                ("email", UserInputDialog("Enter your email:")),
+            ])),
+        }
+    elif user_type == "designer":
+        return {
+            "portfolio": ("Portfolio setup", UserInputDialog("Enter portfolio URL:")),
+            "skills": ("Skills setup", UserInputDialog("List your design tools:")),
+        }
+    else:
+        return {
+            "simple": ("Simple", UserInputDialog("Enter your name:")),
+        }
+
+
+dynamic_branch_dialog = SequenceDialog([
+    ("user_type", InlineKeyboardChoiceDialog("Select your role:", [
+        ("Developer", "developer"),
+        ("Designer", "designer"),
+        ("Other", "other"),
+    ])),
+    ("branch_result", InlineKeyboardChoiceBranchDialog(
+        prompt="Select setup path:",
+        branches=get_dynamic_branches,
+    )),
+])
 
 
 # /condition - Tests BranchDialog with condition function
@@ -278,6 +315,12 @@ def main() -> None:
     ))
 
     app.register_command(DialogCommand(
+        command="/dynamic_branch",
+        description="Dynamic branches based on previous selection",
+        dialog=dynamic_branch_dialog,
+    ))
+
+    app.register_command(DialogCommand(
         command="/condition",
         description="Condition-based branching (age check)",
         dialog=condition_dialog,
@@ -311,6 +354,7 @@ def main() -> None:
         "• <b>/validated_reply</b> - UserInputDialog with validation (reply keyboard)\n"
         "• <b>/dynamic</b> - Dynamic choices based on context\n"
         "• <b>/branch</b> - InlineKeyboardChoiceBranchDialog (keyboard branching)\n"
+        "• <b>/dynamic_branch</b> - Dynamic branches via callable\n"
         "• <b>/condition</b> - BranchDialog with condition function\n"
         "• <b>/loop</b> - LoopDialog with exit_value\n"
         "• <b>/loopvalid</b> - LoopDialog with exit_condition\n"

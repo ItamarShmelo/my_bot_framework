@@ -265,12 +265,12 @@ Dialogs use the Composite pattern to build complex flows from simple components.
   - `InlineKeyboardChoiceDialog` - User selects from inline keyboard options
   - `InlineKeyboardPaginatedChoiceDialog` - User selects from paginated inline keyboard options
   - `InlineKeyboardConfirmDialog` - Yes/No prompt with inline keyboard
-  - `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard
+  - `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard (static or dynamic branches via callable)
 - **Reply Keyboard Dialogs**:
   - `ReplyKeyboardChoiceDialog` - User selects from reply keyboard options (buttons at bottom of chat)
   - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
   - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
-  - `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard
+  - `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard (static or dynamic branches via callable)
 - **Other Leaf Dialogs**:
   - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input). Supports `keyboard_type` (INLINE or REPLY): INLINE shows Cancel as an inline keyboard button (callback_query); REPLY shows Cancel as a reply keyboard button (text message). Default is INLINE. Class constant `CANCEL_LABEL` for the Cancel button label.
   - `EditEventDialog` - Edit an event's editable attributes via inline or reply keyboard (configurable via `keyboard_type`)
@@ -315,6 +315,12 @@ dialog = SequenceDialog([
         choices=lambda ctx: [("Python", "py")] if ctx.get("name") else [],
     )),
 ])
+
+# Dynamic branches work the same way (InlineKeyboardChoiceBranchDialog, ReplyKeyboardChoiceBranchDialog)
+branch_dialog = InlineKeyboardChoiceBranchDialog(
+    prompt="Select action:",
+    branches=lambda ctx: {"edit": ("Edit", edit_dialog)} if ctx.get("name") else {},
+)
 ```
 
 **State Machine**:
@@ -1042,6 +1048,8 @@ def create_choice_dialog(
         return ReplyKeyboardChoiceDialog(prompt, choices, include_cancel)
     return InlineKeyboardChoiceDialog(prompt, choices, include_cancel)
 ```
+
+**BranchesType and `create_choice_branch_dialog`**: The `BranchesType` type alias is `Union[Dict[str, Tuple[str, Dialog]], Callable[[Dict[str, Any]], Dict[str, Tuple[str, Dialog]]]]`. Both `InlineKeyboardChoiceBranchDialog` and `ReplyKeyboardChoiceBranchDialog` accept either a static dict or a callable `context -> dict` for `branches`. The `get_branches()` method evaluates the callable when dynamic. The factory `create_choice_branch_dialog(prompt, branches, keyboard_type, include_cancel)` accepts `BranchesType` for `branches`.
 
 ### Cancellation with CANCELLED Sentinel
 

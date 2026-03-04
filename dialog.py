@@ -67,6 +67,14 @@ def set_dialog_debug(enabled: bool) -> None:
 # Type alias for dialog results - nested dictionary mirroring dialog structure
 DialogResult = Union[Any, Dict[str, "DialogResult"]]
 
+# Type alias for branch dialog branches - static dict or dynamic callable.
+# Either a dict mapping keys to (label, dialog) tuples, or a callable(context)
+# that returns such a dict.
+BranchesType = Union[
+    Dict[str, Tuple[str, "Dialog"]],
+    Callable[[Dict[str, Any]], Dict[str, Tuple[str, "Dialog"]]],
+]
+
 
 class DialogState(Enum):
     """State of a dialog conversation."""
@@ -1133,6 +1141,8 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
     Shows a prompt with inline keyboard buttons, each button leads to a
     different dialog branch. Uses callback_query events for selection.
     Inherits UpdatePollerMixin to poll for the branch selection.
+
+    Supports static branches dict or dynamic branches via callable.
     """
 
     CANCEL_CALLBACK = "__cancel__"
@@ -1140,32 +1150,65 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
     def __init__(
         self,
         prompt: str,
-        branches: Dict[str, Tuple[str, Dialog]],
+        branches: BranchesType,
         include_cancel: bool = True,
     ) -> None:
-        """Create a choice-branch dialog.
+        """Create an inline keyboard choice-branch dialog.
 
         Args:
             prompt: The question text to display.
-            branches: Dict mapping keys to (label, dialog) tuples.
+            branches: Dict mapping keys to (label, dialog) tuples,
+                or callable(context) returning same.
             include_cancel: If True, add a Cancel button.
         """
         super().__init__()
-        self.prompt = prompt
-        self.branches = branches
-        self.include_cancel = include_cancel
+        self.prompt: str = prompt
+        if callable(branches):
+            sig = inspect.signature(branches)
+            params = [p for p in sig.parameters.values()
+                      if p.default is inspect.Parameter.empty]
+            assert len(params) == 1, (
+                f"branches callable must accept exactly 1 argument (context), "
+                f"got {len(params)} required parameters"
+            )
+        self._branches: BranchesType = branches
+        self.include_cancel: bool = include_cancel
         self._active_branch: Optional[Dialog] = None
         self._active_key: Optional[str] = None
-        self._choosing = True  # True while showing choice, False when running branch
+        self._choosing: bool = True
+
+    def get_branches(self) -> Dict[str, Tuple[str, Dialog]]:
+        """Get the current branch mapping.
+
+        Evaluates the branches callable with context if dynamic; otherwise
+        returns the static dict.
+
+        Returns:
+            Dict mapping keys to (label, dialog) tuples.
+        """
+        if callable(self._branches):
+            return self._branches(self.context)
+        return self._branches
 
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:
-        return not self._choosing  # Stop when branch selected
+        """Stop polling when branch selected."""
+        return not self._choosing
 
     async def handle_callback_update(self, update: Update) -> None:
-        """Answer callback, remove keyboard, handle branch selection."""
+        """Answer callback, remove keyboard, and handle branch selection.
+
+        Args:
+            update: Telegram Update containing the callback_query.
+        """
         callback_query = update.callback_query
         if callback_query is None or callback_query.data is None:
+            get_logger().debug(
+                "InlineKeyboardChoiceBranchDialog.handle_callback_update: skipped invalid_callback "
+                "callback_query=%s data=%s",
+                callback_query is not None,
+                callback_query.data if callback_query else None,
+            )
             return
         # Answer callback and remove keyboard
         await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
@@ -1176,23 +1219,34 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
             )
 
         callback_data: str = callback_query.data
+        branches = self.get_branches()
 
         if callback_data == self.CANCEL_CALLBACK:
             response: DialogResponse = self.cancel()
-        elif callback_data not in self.branches:
-            get_logger().debug("InlineKeyboardChoiceBranchDialog.handle_callback_update: unknown_callback callback_data=%s", callback_data)
+            self._choosing = False
+        elif callback_data not in branches:
+            get_logger().debug(
+                "InlineKeyboardChoiceBranchDialog.handle_callback_update: "
+                "unknown_callback callback_data=%s",
+                callback_data,
+            )
             return  # Unknown callback
         else:
             # Select the branch (don't start it - _run_dialog will do that)
             self._active_key = callback_data
             label: str
             dialog: Dialog
-            label, dialog = self.branches[callback_data]
+            label, dialog = branches[callback_data]
             self._active_branch = dialog
             self._choosing = False
 
             # Log selection
-            get_logger().info("InlineKeyboardChoiceBranchDialog.handle_callback_update: selected key=%s label=%s", callback_data, label)
+            get_logger().info(
+                "InlineKeyboardChoiceBranchDialog.handle_callback_update: "
+                "selected key=%s label=%s",
+                callback_data,
+                label,
+            )
 
             if DIALOG_DEBUG:
                 response = DialogResponse(
@@ -1207,8 +1261,10 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
             await self._send_response(response)
 
     async def handle_text_update(self, update: Update) -> None:
-        """ChoiceBranchDialog ignores text while choosing."""
-        pass  # Ignore text during branch selection
+        """Ignore text input while choosing branch (uses inline keyboard)."""
+        get_logger().debug(
+            "InlineKeyboardChoiceBranchDialog.handle_text_update: ignoring text during branch selection"
+        )
 
     async def _send_response(self, response: DialogResponse) -> None:
         """Send a dialog response via Telegram."""
@@ -1262,10 +1318,10 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
         return self.build_result()
 
     def _build_keyboard(self) -> InlineKeyboardMarkup:
-        """Build keyboard from branches."""
+        """Build inline keyboard from branch labels and keys."""
         buttons = [
             [InlineKeyboardButton(label, callback_data=key)]
-            for key, (label, _) in self.branches.items()
+            for key, (label, _dialog) in self.get_branches().items()
         ]
         if self.include_cancel:
             buttons.append([InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)])
@@ -1277,8 +1333,9 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
         self._active_branch = None
         self._active_key = None
         self._choosing = True
-        for label, dialog in self.branches.values():
-            dialog.reset()
+        if not callable(self._branches):
+            for _label, dialog in self._branches.values():
+                dialog.reset()
 
 
 class LoopDialog(Dialog):
@@ -2240,6 +2297,8 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
     Shows a prompt with reply keyboard buttons, each button leads to a
     different dialog branch.
     Inherits UpdatePollerMixin to poll for the branch selection.
+
+    Supports static branches dict or dynamic branches via callable.
     """
 
     CANCEL_LABEL = "Cancel"
@@ -2247,28 +2306,46 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
     def __init__(
         self,
         prompt: str,
-        branches: Dict[str, Tuple[str, Dialog]],
+        branches: BranchesType,
         include_cancel: bool = True,
     ) -> None:
-        """Create a reply keyboard choice-branch dialog.
+        """Create a reply-keyboard choice-branch dialog.
 
         Args:
             prompt: The question text to display.
-            branches: Dict mapping keys to (label, dialog) tuples.
+            branches: Dict mapping keys to (label, dialog) tuples,
+                or callable(context) returning same.
             include_cancel: If True, add a Cancel button.
         """
         super().__init__()
         self.prompt: str = prompt
-        self.branches: Dict[str, Tuple[str, Dialog]] = branches
+        if callable(branches):
+            sig = inspect.signature(branches)
+            params = [p for p in sig.parameters.values()
+                      if p.default is inspect.Parameter.empty]
+            assert len(params) == 1, (
+                f"branches callable must accept exactly 1 argument (context), "
+                f"got {len(params)} required parameters"
+            )
+        self._branches: BranchesType = branches
         self.include_cancel: bool = include_cancel
         self._active_branch: Optional[Dialog] = None
         self._active_key: Optional[str] = None
-        self._choosing: bool = True  # True while showing choice, False when running branch
+        self._choosing: bool = True
         self._label_to_key: Dict[str, str] = {}
 
+    def get_branches(self) -> Dict[str, Tuple[str, Dialog]]:
+        """Get branches - evaluates callable if dynamic."""
+        if callable(self._branches):
+            return self._branches(self.context)
+        return self._branches
+
     def _build_label_mapping(self) -> None:
-        """Build mapping from button labels to branch keys."""
-        self._label_to_key = {label: key for key, (label, _) in self.branches.items()}
+        """Build mapping from button labels to branch keys for text matching."""
+        self._label_to_key = {
+            label: key
+            for key, (label, _dialog) in self.get_branches().items()
+        }
 
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:
@@ -2277,20 +2354,37 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
 
     async def handle_callback_update(self, update: Update) -> None:
         """Reply keyboard dialogs don't receive callbacks - ignore."""
-        pass
+        get_logger().debug(
+            "ReplyKeyboardChoiceBranchDialog.handle_callback_update: ignoring callback (reply keyboard)"
+        )
 
     async def handle_text_update(self, update: Update) -> None:
-        """Handle text input by matching against button labels."""
+        """Handle text input by matching against button labels.
+
+        Args:
+            update: Telegram Update containing the message text.
+        """
         if not self._choosing:
-            return  # Delegate to branch
+            get_logger().debug(
+                "ReplyKeyboardChoiceBranchDialog.handle_text_update: not_choosing delegating to branch"
+            )
+            return
 
         if update.message is None or update.message.text is None:
+            get_logger().debug(
+                "ReplyKeyboardChoiceBranchDialog.handle_text_update: skipped empty_message "
+                "message=%s",
+                update.message is not None,
+            )
             return
 
         text: str = update.message.text.strip()
 
         # Check for cancel
         if text == self.CANCEL_LABEL and self.include_cancel:
+            get_logger().info(
+                "ReplyKeyboardChoiceBranchDialog.handle_text_update: user_cancelled"
+            )
             await get_app().send_messages(
                 TelegramRemoveReplyKeyboardMessage("Cancelled.")
             )
@@ -2308,9 +2402,7 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
 
             # Select the branch (don't start it - _run_dialog will do that)
             self._active_key = branch_key
-            _: str
-            dialog: Dialog
-            _, dialog = self.branches[branch_key]
+            _, dialog = self.get_branches()[branch_key]
             self._active_branch = dialog
             self._choosing = False
 
@@ -2322,6 +2414,11 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
 
             if DIALOG_DEBUG:
                 await get_app().send_messages(f"Selected: {text}")
+        else:
+            get_logger().warning(
+                "ReplyKeyboardChoiceBranchDialog.handle_text_update: unknown_choice text=%s",
+                text,
+            )
 
     def _get_poll_result(self) -> Any:
         """Return the value after polling (for cancel detection)."""
@@ -2339,6 +2436,11 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
         self._choosing = True
         self._active_branch = None
         self._active_key = None
+
+        get_logger().info(
+            "ReplyKeyboardChoiceBranchDialog._run_dialog: started prompt='%.80s'",
+            self.prompt,
+        )
 
         # Build label mapping
         self._build_label_mapping()
@@ -2359,6 +2461,9 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
         poll_result = await self.poll()
 
         if poll_result is CANCELLED:
+            get_logger().info(
+                "ReplyKeyboardChoiceBranchDialog._run_dialog: cancelled"
+            )
             self.state = DialogState.COMPLETE
             return CANCELLED
 
@@ -2373,8 +2478,11 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
         return self.build_result()
 
     def _build_keyboard(self) -> List[List[str]]:
-        """Build reply keyboard layout from branches."""
-        keyboard = [[label] for _, (label, _) in self.branches.items()]
+        """Build reply keyboard layout from branch labels."""
+        keyboard = [
+            [label]
+            for _key, (label, _dialog) in self.get_branches().items()
+        ]
         if self.include_cancel:
             keyboard.append([self.CANCEL_LABEL])
         return keyboard
@@ -2386,8 +2494,9 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
         self._active_key = None
         self._choosing = True
         self._label_to_key = {}
-        for _, (_, dialog) in self.branches.items():
-            dialog.reset()
+        if not callable(self._branches):
+            for _label, dialog in self._branches.values():
+                dialog.reset()
 
 
 # =============================================================================
@@ -2491,7 +2600,7 @@ def create_paginated_choice_dialog(
 
 def create_choice_branch_dialog(
     prompt: str,
-    branches: Dict[str, Tuple[str, Dialog]],
+    branches: BranchesType,
     keyboard_type: KeyboardType = KeyboardType.INLINE,
     include_cancel: bool = True,
 ) -> Dialog:
@@ -2502,7 +2611,8 @@ def create_choice_branch_dialog(
 
     Args:
         prompt: The question text to display.
-        branches: Dict mapping keys to (label, dialog) tuples.
+        branches: Dict mapping keys to (label, dialog) tuples,
+            or callable(context) returning same.
         keyboard_type: Type of keyboard to use (INLINE or REPLY).
         include_cancel: If True, add a Cancel button.
 
