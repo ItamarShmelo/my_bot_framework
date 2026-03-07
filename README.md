@@ -11,7 +11,7 @@ A modular, event-driven Telegram bot framework built on `python-telegram-bot`.
 - **Interactive Dialogs** - Multi-step conversations with inline keyboards
 - **Editable Parameters** - Runtime-configurable event parameters
 - **Resilient Polling** - Automatic handling of transient Telegram network errors with backoff and recovery logging
-- **Dynamic Event Registration** - Register new events while the bot is already running; they start immediately
+- **Dynamic Event Lifecycle** - Register events before or during runtime, remove them by name, and enforce unique event names
 
 ## Installation
 
@@ -77,7 +77,7 @@ The singleton entry point for the framework. Manages:
 - Direct message sending for outgoing messages
 - Event and command registration
 - Graceful shutdown via `/terminate` (global command, works anytime including during dialogs)
-- Dynamic event registration (mid-run): `register_event()` can be called while the bot is running; new events are started immediately
+- Dynamic event lifecycle control: `register_event()` starts newly added events immediately while running, and `remove_event(event_name: str) -> None` removes events by unique name and safely cancels them mid-run
 
 #### Running the Bot
 
@@ -139,7 +139,26 @@ await app.send_messages([
 ### Events
 
 Events run continuously and send messages based on triggers.
-You can register events at startup or dynamically while the bot is running—call `register_event()` from a command handler or callback; the new event starts immediately.
+You can register events at startup or dynamically while the bot is running.
+- `register_event()` requires a unique event name and raises `ValueError` for duplicates.
+- `remove_event(event_name: str) -> None` removes by name and raises `KeyError` if the name does not exist.
+- Calling `remove_event()` during `run()` intentionally cancels only that event task; the supervisor treats that cancellation as normal and the bot keeps running.
+
+```python
+condition = DiskFullCondition()
+builder = DiskAlertBuilder(condition)
+
+event = ActivateOnConditionEvent(
+    event_name="disk_alert",
+    condition=condition,
+    message_builder=builder,
+)
+
+app.register_event(event)
+app.remove_event("disk_alert")
+```
+
+Removing an event before `run()` simply updates the registration tables. Removing an event during `run()` intentionally cancels only that event task and treats the cancellation as normal rather than fatal.
 
 #### ActivateOnConditionEvent
 

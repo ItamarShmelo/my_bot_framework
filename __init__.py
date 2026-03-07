@@ -12,8 +12,16 @@ Usage:
         logger=your_logger,
     )
     app.register_event(my_event)
+    app.remove_event("my_event_name")  # Raises KeyError if missing
     app.register_command(my_command)
     await app.run()
+
+Event names must be unique within a BotApplication instance.
+`register_event()` raises ValueError for duplicates, and `remove_event()`
+raises KeyError when the event name does not exist. Calling
+`remove_event()` during `run()` intentionally cancels only that event's
+task and is treated as normal lifecycle management rather than a fatal
+error.
 """
 
 from .bot_application import BotApplication

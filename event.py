@@ -103,11 +103,19 @@ class FunctionMessageBuilder(MessageBuilder):
 
 
 class Event:
-    """Base class for monitoring events."""
+    """Base class for monitoring events.
+
+    Each event must have a unique `event_name` within a `BotApplication`.
+    """
 
     event_name: str
 
     def __init__(self, event_name: str) -> None:
+        """Initialize the event with its unique application-level name.
+
+        Args:
+            event_name: Unique event name within the owning application.
+        """
         self.event_name = event_name
 
     async def submit(self, stop_event: asyncio.Event) -> None:
@@ -139,7 +147,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         """Initialize the condition event.
 
         Args:
-            event_name: Unique identifier for the event.
+            event_name: Unique identifier for the event within the application.
             condition: Condition instance to check.
             message_builder: MessageBuilder instance for creating messages.
             editable_attributes: Optional list of editable attributes for the event itself.
@@ -228,11 +236,19 @@ class ActivateOnConditionEvent(Event, EditableMixin):
 
             # Fire if condition is true, or if edited and fire_when_edited is enabled
             should_fire = condition_result or (was_edited and self.fire_when_edited)
+            logger.debug(
+                "ActivateOnConditionEvent.submit: condition_checked event=%s condition_result=%s was_edited=%s should_fire=%s",
+                self.event_name,
+                condition_result,
+                was_edited,
+                should_fire,
+            )
             if should_fire:
                 message = await _maybe_await(self.message_builder.build)
                 if message:
-                    logger.info("ActivateOnConditionEvent.submit: message_queued event=%s", self.event_name)
+                    logger.debug("ActivateOnConditionEvent.submit: sending event=%s", self.event_name)
                     await get_app().send_messages(message)
+                    logger.info("ActivateOnConditionEvent.submit: sent event=%s", self.event_name)
                 else:
                     logger.warning("ActivateOnConditionEvent.submit: message_builder_returned_none event=%s", self.event_name)
             await _wait_or_stop(stop_event, self.poll_seconds)

@@ -51,23 +51,37 @@ python test_bots/basic_bot.py
 
 ### dynamic_event_bot.py
 
-**Purpose:** Tests dynamic mid-run event registration.
+**Purpose:** Demonstrates strict heartbeat event lifecycle management before startup and while the bot is running.
 
 **Features tested:**
-- `BotApplication.register_event()` when bot is already running
-- `ActivateOnConditionEvent` created and started at runtime
-- Multiple dynamic events coexisting (e.g., multiple heartbeats from repeated `/add_heartbeat`)
+- Startup registration via `BotApplication.register_event()` before `run()`
+- Pre-run removal via `BotApplication.remove_event(event_name)` before any event tasks exist
+- Mid-run registration via `BotApplication.register_event()` while the bot is already running
+- Targeted runtime removal via `BotApplication.remove_event(event_name)` for a specific named heartbeat
+- Bulk runtime removal via `BotApplication.remove_event(event_name)` across all tracked heartbeats
+- `ActivateOnConditionEvent` created at startup and at runtime, with strict unique event names
+- Intentional runtime removal cancels only the selected heartbeat task and keeps the bot running
+- Multiple heartbeat events coexisting and being removed one-by-one or in bulk
 
 **Commands:**
 | Command | Description |
 |---------|-------------|
-| `/add_heartbeat` | Register a new heartbeat event mid-run (fires every 10 s) |
+| `/add_heartbeat` | Register a new heartbeat event while the bot is running (fires every 10 s) |
+| `/remove_startup_heartbeat` | Remove the startup heartbeat by its exact event name while the bot is running |
+| `/remove_last_heartbeat` | Remove the most recently registered heartbeat event while the bot is running |
+| `/remove_all_heartbeats` | Remove all currently registered heartbeat events while the bot is running |
+| `/list_heartbeats` | List all currently registered heartbeat events |
 | `/info` | Shows what this bot tests |
 | `/commands` | Lists all commands (built-in) |
 | `/terminate` | Shuts down the bot (built-in) |
 
 **Events:**
-- None at startup; events are added dynamically via `/add_heartbeat`
+- `startup_heartbeat_1` is registered before `run()` and remains active at startup
+- `startup_heartbeat_removed_before_run` is registered then removed before `run()` to test pre-start removal
+- Additional events are added dynamically via `/add_heartbeat`
+- Targeted runtime removal is demonstrated via `/remove_startup_heartbeat`
+- Runtime removal of the newest dynamic heartbeat is demonstrated via `/remove_last_heartbeat`
+- Bulk runtime removal is demonstrated via `/remove_all_heartbeats`
 
 **Run:**
 ```bash

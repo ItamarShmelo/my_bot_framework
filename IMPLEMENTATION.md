@@ -360,15 +360,15 @@ The `run()` method accepts an optional `skip_commands` parameter and is structur
 2. _initialize_http_session() - Initialize bot's HTTP session (await bot.initialize())
 3. _run_event_loop() - Supervisor loop (see below):
    a. Flush pending updates (ignore messages sent before startup)
-   b. Set _running=True, create tasks for all events, store in _active_tasks
-   c. Supervisor loop: wait on _active_tasks | {stop_task, signal_task}
-   d. When _new_event_signal is set: register_event() was called mid-run; new task already in _active_tasks
-   e. When a task completes: check for exception (fatal), else discard from _active_tasks
+   b. Set _running=True, create tasks for all events, store them in `_event_tasks` keyed by event name
+   c. Supervisor loop: wait on event tasks | {stop_task, signal_task}
+   d. When _new_event_signal is set: register_event() or remove_event() changed the event set mid-run
+   e. When a task completes: treat intentional remove_event() cancellation as normal; unexpected exceptions stay fatal
    f. When stop_event is set: cancel remaining tasks, gather, return 0
    g. Finally block: _running=False, shut down HTTP session
 ```
 
-**Supervisor Loop Pattern:** The event loop uses a supervisor pattern to support dynamic mid-run event registration. It waits on `asyncio.wait(return_when=FIRST_COMPLETED)` over `_active_tasks` plus a `stop_task` (stop_event.wait) and a `signal_task` (_new_event_signal.wait). When `register_event()` is called while running, it creates a new task, adds it to `_active_tasks`, and sets `_new_event_signal`. The supervisor wakes, clears the signal (or cancels the signal_task if another task completed first), and continues waiting. New events are thus picked up on the next iteration without polling.
+**Supervisor Loop Pattern:** The event loop uses a supervisor pattern to support dynamic mid-run event registration and removal. It waits on `asyncio.wait(return_when=FIRST_COMPLETED)` over the running event tasks plus a `stop_task` (stop_event.wait) and a `signal_task` (_new_event_signal.wait). Before `run()` starts, `register_event()` and `remove_event()` only mutate the registration tables, so pre-run removal has no task to cancel. When `register_event()` is called while running, the new task is added to `_event_tasks` immediately and `_new_event_signal` wakes the supervisor. When `remove_event()` is called while running, the event is removed from the registration tables, only that event task is cancelled, and the supervisor treats that completion as intentional rather than fatal. Unexpected task exceptions still propagate and terminate the bot.
 
 **HTTP Session Management:** The bot's HTTP session is initialized at step 1 and always shut down in a `finally` block (executes after step 9, even on return or exception). This ensures proper cleanup and prevents "Event loop is closed" errors when terminating the bot.
 
@@ -503,20 +503,24 @@ not during message sending.
 | `events` | `List[Event]` | Registered events |
 | `commands` | `List[Command]` | Registered commands |
 | `_running` | `bool` | True while the event loop is active; enables mid-run `register_event()` |
-| `_active_tasks` | `Set[asyncio.Task]` | Tasks for all running events; updated when events are registered mid-run |
-| `_new_event_signal` | `asyncio.Event` | Set when a new event is registered mid-run; wakes the supervisor loop |
+| `_events_by_name` | `Dict[str, Event]` | Registered events keyed by unique event name |
+| `_event_tasks` | `Dict[str, asyncio.Task]` | Running event tasks keyed by event name, including tasks that are still shutting down after removal |
+| `_task_event_names` | `Dict[asyncio.Task, str]` | Reverse lookup used to map completed tasks back to their event names during supervisor cleanup |
+| `_removed_event_names` | `Set[str]` | Event names intentionally removed while their tasks are unwinding |
+| `_new_event_signal` | `asyncio.Event` | Set when an event is registered or removed mid-run; wakes the supervisor loop |
 
 | Method | Description |
 |--------|-------------|
 | `initialize(token, chat_id, logger)` | Create and initialize the singleton |
 | `get_instance()` | Get the existing singleton |
-| `register_event(event)` | Register an event to run. If bot is running (`_running`), starts the event immediately via a new task and sets `_new_event_signal`. |
+| `register_event(event: Event)` | Register an event to run. Event names must be unique; duplicates raise `ValueError`. If bot is running (`_running`), the event starts immediately and `_new_event_signal` wakes the supervisor. |
+| `remove_event(event_name: str) -> None` | Remove an event by unique name. Missing names raise `KeyError`. Before `run()`, this only updates the registries. During `run()`, only that event task is cancelled and the supervisor treats the cancellation as intentional. |
 | `register_command(command)` | Register a command handler |
 | `send_messages(messages)` | Send message(s) immediately (str, TelegramMessage, or list) |
 | `run(skip_commands=False)` | Start the bot (blocks until shutdown or fatal error). If `skip_commands=True`, CommandsEvent is not registered. |
 | `_register_commands(skip_commands=False)` | Private: Register /commands and optionally CommandsEvent. /terminate is handled globally in UpdatePollerMixin.poll(). |
 | `_initialize_http_session()` | Private: Initialize bot's HTTP session |
-| `_run_event_loop()` | Private: Supervisor loop—starts event tasks, watches for new ones via `_new_event_signal`, detects task failures |
+| `_run_event_loop()` | Private: Supervisor loop—starts event tasks, watches for mid-run registration/removal via `_new_event_signal`, and detects fatal task failures |
 
 ### Event Types
 
