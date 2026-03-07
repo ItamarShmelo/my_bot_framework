@@ -715,6 +715,10 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
     async def handle_text_update(self, update: Update) -> None:
         """Validate and accept text input, remove keyboard from previous prompt."""
         if update.message is None or update.message.text is None:
+            get_logger().debug(
+                "UserInputDialog.handle_text_update: skipped_no_text message=%s",
+                update.message,
+            )
             return
         if self.state != DialogState.AWAITING_TEXT:
             get_logger().debug("UserInputDialog.handle_text_update: wrong_state state=%s", self.state.value)
@@ -737,9 +741,10 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             is_valid, error_msg = self.validator(text)
             if not is_valid:
                 get_logger().info(
-                    "UserInputDialog.handle_text_update: validation_failed error=%s keyboard_type=%s",
+                    "UserInputDialog.handle_text_update: validation_failed error=%s keyboard_type=%s text_preview=%.50s",
                     error_msg,
                     self.keyboard_type.value,
+                    text,
                 )
                 if self.keyboard_type == KeyboardType.REPLY:
                     # Re-show prompt with reply keyboard Cancel button
@@ -751,6 +756,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
                             one_time_keyboard=False,
                         )
                     )
+                    return
                 elif self.keyboard_type == KeyboardType.INLINE:
                     # Re-show prompt with inline keyboard Cancel button
                     inline_keyboard: Optional[InlineKeyboardMarkup] = None
