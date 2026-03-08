@@ -20,7 +20,6 @@ Composite dialogs:
 from __future__ import annotations
 
 import asyncio
-import inspect
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar
@@ -29,6 +28,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 
 from .accessors import get_app, get_logger
 from .polling import UpdatePollerMixin
+from .utilities import validate_single_arg_callable
 from .telegram_utilities import (
     TelegramMessage,
     TelegramTextMessage,
@@ -214,13 +214,7 @@ class InlineKeyboardChoiceDialog(Dialog[str], UpdatePollerMixin):
         super().__init__()
         self.prompt = prompt
         if callable(choices):
-            sig = inspect.signature(choices)
-            params = [p for p in sig.parameters.values()
-                      if p.default is inspect.Parameter.empty]
-            assert len(params) == 1, (
-                f"choices callable must accept exactly 1 argument (context), "
-                f"got {len(params)} required parameters"
-            )
+            validate_single_arg_callable(choices, "choices")
         self._choices = choices
         self.include_cancel = include_cancel
         self._text_reminder_sent = False  # Spam control
@@ -349,13 +343,7 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog[str], UpdatePollerMixin):
         super().__init__()
         self.prompt = prompt
         if callable(items):
-            sig = inspect.signature(items)
-            params = [p for p in sig.parameters.values()
-                      if p.default is inspect.Parameter.empty]
-            assert len(params) == 1, (
-                f"items callable must accept exactly 1 argument (context), "
-                f"got {len(params)} required parameters"
-            )
+            validate_single_arg_callable(items, "items")
         self._items = items
         self.page_size = page_size
         self.more_label = more_label
@@ -1060,13 +1048,7 @@ class InlineKeyboardChoiceBranchDialog(Dialog[dict[str, Any] | None], UpdatePoll
         super().__init__()
         self.prompt: str = prompt
         if callable(branches):
-            sig = inspect.signature(branches)
-            params = [p for p in sig.parameters.values()
-                      if p.default is inspect.Parameter.empty]
-            assert len(params) == 1, (
-                f"branches callable must accept exactly 1 argument (context), "
-                f"got {len(params)} required parameters"
-            )
+            validate_single_arg_callable(branches, "branches")
         self._branches: BranchesType = branches
         self.include_cancel: bool = include_cancel
         self._active_branch: Dialog | None = None
@@ -1704,13 +1686,7 @@ class ReplyKeyboardChoiceDialog(Dialog[str], UpdatePollerMixin):
         super().__init__()
         self.prompt: str = prompt
         if callable(choices):
-            sig = inspect.signature(choices)
-            params = [p for p in sig.parameters.values()
-                      if p.default is inspect.Parameter.empty]
-            assert len(params) == 1, (
-                f"choices callable must accept exactly 1 argument (context), "
-                f"got {len(params)} required parameters"
-            )
+            validate_single_arg_callable(choices, "choices")
         self._choices: list[tuple[str, str]] | Callable[[dict[str, Any]], list[tuple[str, str]]] = choices
         self.include_cancel: bool = include_cancel
         self._label_to_callback: dict[str, str] = {}
@@ -1971,13 +1947,7 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog[str], UpdatePollerMixin):
         super().__init__()
         self.prompt = prompt
         if callable(items):
-            sig = inspect.signature(items)
-            params = [p for p in sig.parameters.values()
-                      if p.default is inspect.Parameter.empty]
-            assert len(params) == 1, (
-                f"items callable must accept exactly 1 argument (context), "
-                f"got {len(params)} required parameters"
-            )
+            validate_single_arg_callable(items, "items")
         self._items = items
         self.page_size = page_size
         self.more_label = more_label
@@ -2224,13 +2194,7 @@ class ReplyKeyboardChoiceBranchDialog(Dialog[dict[str, Any] | None], UpdatePolle
         super().__init__()
         self.prompt: str = prompt
         if callable(branches):
-            sig = inspect.signature(branches)
-            params = [p for p in sig.parameters.values()
-                      if p.default is inspect.Parameter.empty]
-            assert len(params) == 1, (
-                f"branches callable must accept exactly 1 argument (context), "
-                f"got {len(params)} required parameters"
-            )
+            validate_single_arg_callable(branches, "branches")
         self._branches: BranchesType = branches
         self.include_cancel: bool = include_cancel
         self._active_branch: Dialog | None = None

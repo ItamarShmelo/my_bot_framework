@@ -807,6 +807,25 @@ from my_bot_framework import divide_message_to_chunks
 chunks = divide_message_to_chunks(long_text, chunk_size=4000)
 ```
 
+### Callable Validation
+
+When passing dynamic choices or branches callables to dialogs (e.g., `choices=lambda ctx: [...]` or `branches=lambda ctx: {...}`), the callable must accept exactly one argument (the context). Use `validate_single_arg_callable()` to verify this at setup time:
+
+```python
+from my_bot_framework import validate_single_arg_callable
+
+def my_choices(context):
+    return [("A", "a"), ("B", "b")]
+
+validate_single_arg_callable(my_choices, "choices")  # Raises AssertionError if signature is wrong
+```
+
+**Parameters:**
+- `fn` — The callable to inspect.
+- `name` — Human-readable label for error messages (e.g., `"choices"`, `"branches"`).
+
+**Raises:** `AssertionError` if the callable does not have exactly one required parameter.
+
 ### List Formatting
 
 Format lists for Telegram messages with automatic HTML escaping:

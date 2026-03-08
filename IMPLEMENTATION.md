@@ -103,6 +103,7 @@ graph TD
     DIALOG --> ACC
     DIALOG --> POLL
     DIALOG --> TU
+    DIALOG --> UTIL
 
     %% Application depends on everything
     BOT --> ACC
@@ -133,7 +134,7 @@ graph TD
 | `event_examples/factories.py` | `event`, `telegram_utilities` |
 | `event_examples/time_event.py` | `event`, `telegram_utilities` |
 | `event_examples/threshold_event.py` | `event`, `telegram_utilities` |
-| `dialog.py` | `accessors`, `polling`, `telegram_utilities` |
+| `dialog.py` | `accessors`, `polling`, `telegram_utilities`, `utilities` |
 | `validators.py` | *(no internal dependencies - uses stdlib only)* |
 | `bot_application.py` | `accessors`, `polling`, `event`, `telegram_utilities` |
 | `__init__.py` | all modules (re-exports public API) |
@@ -741,7 +742,17 @@ All validators are synchronous functions (no async/await) and are designed to be
 
 ## Utilities Module
 
-The `utilities.py` module provides helper functions for common formatting and message processing tasks. All formatting functions automatically escape HTML special characters to ensure safe display in Telegram messages when using HTML parse mode.
+The `utilities.py` module provides helper functions for common formatting, message processing, and validation tasks. All formatting functions automatically escape HTML special characters to ensure safe display in Telegram messages when using HTML parse mode.
+
+### Callable Validation
+
+**`validate_single_arg_callable(fn: Callable, name: str) -> None`**
+
+Verifies that a callable accepts exactly one required positional argument. Used by dialog classes to validate that dynamic-choices and dynamic-branches callables have the expected `(context) -> ...` signature.
+
+- **Parameters:** `fn` — the callable to inspect; `name` — human-readable label for assertion messages (e.g., `"choices"`, `"branches"`).
+- **Raises:** `AssertionError` if the callable does not have exactly one required parameter.
+- **Usage:** Dialog classes (`InlineKeyboardChoiceDialog`, `ReplyKeyboardChoiceDialog`, `InlineKeyboardChoiceBranchDialog`, etc.) call this when `choices` or `branches` is a callable, ensuring the callable has the correct signature before use.
 
 ### List Formatting Functions
 

@@ -16,6 +16,7 @@ You MUST delegate to the appropriate subagent when performing tasks that fall un
 | `logging-enforcer` | Comprehensive traceable logging | After modifying Python code |
 | `docs-updater` | README.md, IMPLEMENTATION.md, BOTS.md | After changes affecting API, architecture, or test bots |
 | `test-bots-maintainer` | Test bot creation and maintenance | After adding features or changing APIs |
+| `code-smell-detector` | Code duplication, refactoring, dead code | Occasionally, when it seems appropriate (readonly — reports only) |
 
 ## When to Invoke Each Subagent
 
@@ -57,11 +58,18 @@ You MUST invoke when:
 - Modifying APIs used by existing test bots
 - Creating new test bots for new features
 
+### code-smell-detector
+
+Use occasionally when it seems appropriate — e.g., after significant code changes, large refactors, or adding new classes. Use your judgment; it does not need to run on every edit.
+
+**Note:** This subagent is readonly. It reports findings and suggests fixes but does NOT make changes. Present its findings to the user for decision.
+
 ## Checklist
 
 After Python code changes, you MUST:
 - [ ] Use `code-style-enforcer` for style enforcement
 - [ ] Use `type-hints-enforcer` for type hints
 - [ ] Use `logging-enforcer` for logging standards
+- [ ] Consider using `code-smell-detector` if the changes are significant (readonly, occasional)
 - [ ] Use `docs-updater` if documentation is affected
 - [ ] Use `test-bots-maintainer` if test bots need updates

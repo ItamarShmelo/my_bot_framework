@@ -105,6 +105,7 @@ from .dialog import (
     set_dialog_debug,
 )
 from .utilities import (
+    validate_single_arg_callable,
     divide_message_to_chunks,
     format_numbered_list,
     format_bullet_list,
@@ -198,6 +199,7 @@ __all__ = [
     "DIALOG_DEBUG",
     "set_dialog_debug",
     # Utilities
+    "validate_single_arg_callable",
     "divide_message_to_chunks",
     "format_numbered_list",
     "format_bullet_list",

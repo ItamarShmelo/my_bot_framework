@@ -1,0 +1,40 @@
+---
+description: Detect code duplication, refactoring opportunities, and dead code in Python files. Run occasionally — not on every change.
+alwaysApply: false
+---
+
+# Detect Code Smells
+
+Use the `code-smell-detector` subagent to scan for code duplication, refactoring opportunities, and dead code. The subagent is **readonly** — it reports findings and suggests fixes but does NOT make changes. The user decides what to act on.
+
+This rule is **not automatic on every change**. Use the `code-smell-detector` occasionally when it seems appropriate — e.g., after significant code changes, large refactors, or adding new classes. Use your judgment; it does not need to run on every edit.
+
+## What It Detects
+
+### Code Duplication
+
+- Repeated logic blocks (3+ similar occurrences)
+- Copy-pasted code with minor variations
+- Similar conditional structures across methods or classes
+- Repeated patterns that could be parameterized into a shared helper
+
+### Refactoring Opportunities
+
+- Long methods that do too many things (consider splitting)
+- Deep nesting (3+ levels of if/for/try) that could be flattened
+- God classes with too many responsibilities
+- Feature envy (method uses another class's data more than its own)
+- Shotgun surgery patterns (one change requires editing many places)
+
+### Dead Code
+
+- Unreachable code after return/raise/break/continue
+- Unused private methods or functions
+- Unused variables or assignments
+- Commented-out code blocks
+- Unused class attributes
+- Unused imports (also covered by `code-style-enforcer`)
+
+## Subagent
+
+For comprehensive detection, use the `code-smell-detector` subagent. It is readonly and will report findings with suggested fixes — the user decides what to act on.
