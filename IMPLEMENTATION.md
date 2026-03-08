@@ -1108,24 +1108,24 @@ stateDiagram-v2
 
 ### Key Design: Staged Edits
 
-Edits are staged in the dialog's context dict and only applied to the event when clicking Done:
+Edits are staged in a private `_staged_edits` dict (not the shared context) and only applied to the event when clicking Done. Using a separate dict prevents staged values from bleeding between consecutive edit sessions when editing multiple events in a row.
 
 1. **Field selection**: User clicks a field button, dialog shows editor
 2. **Value entry**: User enters value (text or bool toggle)
 3. **Validation**: Single-field validation, then optional cross-field validation
-4. **Staging**: Valid value stored in context, return to field list
+4. **Staging**: Valid value stored in `_staged_edits`, return to field list
 5. **Done**: All staged edits applied via `event.edit()`, `event.edited = True`
 6. **Cancel from field list**: No edits applied, returns `CANCELLED`
 
 ### Cross-Field Validation
 
-Optional `validator` parameter enables complex validation rules:
+Optional `validator` parameter enables complex validation rules. The validator receives the staged edits dict (the same dict passed to `event.edit()` on Done), not the shared dialog context.
 
 ```python
-def validate_range(context: Dict[str, Any]) -> Tuple[bool, str]:
+def validate_range(staged_edits: Dict[str, Any]) -> Tuple[bool, str]:
     """Ensure min < max. Called after each field edit."""
-    min_val = context.get("condition.limit_min", event.get("condition.limit_min"))
-    max_val = context.get("condition.limit_max", event.get("condition.limit_max"))
+    min_val = staged_edits.get("condition.limit_min", event.get("condition.limit_min"))
+    max_val = staged_edits.get("condition.limit_max", event.get("condition.limit_max"))
     
     if min_val is not None and max_val is not None:
         if min_val >= max_val:
