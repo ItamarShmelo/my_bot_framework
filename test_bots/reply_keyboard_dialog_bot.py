@@ -1,10 +1,10 @@
-"""Reply keyboard dialog bot testing reply keyboard dialog classes.
+"""Reply keyboard dialog bot testing merged dialog classes with keyboard_type=REPLY.
 
 Tests:
-- ReplyKeyboardChoiceDialog - Choice dialog using reply keyboard
-- ReplyKeyboardConfirmDialog - Confirm dialog using reply keyboard
-- ReplyKeyboardPaginatedChoiceDialog - Paginated choice dialog using reply keyboard
-- ReplyKeyboardChoiceBranchDialog - Choice branch dialog using reply keyboard (static + dynamic branches)
+- ChoiceDialog (keyboard_type=KeyboardType.REPLY) - Choice dialog using reply keyboard
+- ConfirmDialog (keyboard_type=KeyboardType.REPLY) - Confirm dialog using reply keyboard
+- PaginatedChoiceDialog (keyboard_type=KeyboardType.REPLY) - Paginated choice dialog using reply keyboard
+- ChoiceBranchDialog (keyboard_type=KeyboardType.REPLY) - Choice branch dialog using reply keyboard (static + dynamic branches)
 - Factory functions with keyboard_type=KeyboardType.REPLY
 - Text matching for button labels
 - Cancel functionality
@@ -27,10 +27,10 @@ from my_bot_framework import (
     SimpleCommand,
     DialogCommand,
     DialogHandler,
-    ReplyKeyboardChoiceDialog,
-    ReplyKeyboardConfirmDialog,
-    ReplyKeyboardPaginatedChoiceDialog,
-    ReplyKeyboardChoiceBranchDialog,
+    ChoiceDialog,
+    ConfirmDialog,
+    PaginatedChoiceDialog,
+    ChoiceBranchDialog,
     KeyboardType,
     create_choice_dialog,
     create_confirm_dialog,
@@ -38,7 +38,6 @@ from my_bot_framework import (
     create_choice_branch_dialog,
     UserInputDialog,
     SequenceDialog,
-    CANCELLED,
     is_cancelled,
 )
 
@@ -68,8 +67,8 @@ def get_credentials() -> tuple[str, str]:
 # DIALOG DEFINITIONS
 # =============================================================================
 
-# /choice - Tests ReplyKeyboardChoiceDialog (direct class)
-choice_dialog = ReplyKeyboardChoiceDialog(
+# /choice - Tests ChoiceDialog with keyboard_type=REPLY (direct class)
+choice_dialog = ChoiceDialog(
     prompt="Choose your favorite color:",
     choices=[
         ("Red", "red"),
@@ -78,6 +77,7 @@ choice_dialog = ReplyKeyboardChoiceDialog(
         ("Yellow", "yellow"),
     ],
     include_cancel=True,
+    keyboard_type=KeyboardType.REPLY,
 )
 
 
@@ -95,21 +95,23 @@ choice_factory_dialog = create_choice_dialog(
 )
 
 
-# /confirm - Tests ReplyKeyboardConfirmDialog (direct class)
-confirm_dialog = ReplyKeyboardConfirmDialog(
+# /confirm - Tests ConfirmDialog with keyboard_type=REPLY (direct class)
+confirm_dialog = ConfirmDialog(
     prompt="Do you want to proceed?",
     yes_label="Yes",
     no_label="No",
     include_cancel=False,
+    keyboard_type=KeyboardType.REPLY,
 )
 
 
-# /confirm_cancel - Tests ReplyKeyboardConfirmDialog with cancel button
-confirm_cancel_dialog = ReplyKeyboardConfirmDialog(
+# /confirm_cancel - Tests ConfirmDialog with cancel button
+confirm_cancel_dialog = ConfirmDialog(
     prompt="Are you sure you want to delete this?",
     yes_label="Yes, delete",
     no_label="No, keep it",
     include_cancel=True,
+    keyboard_type=KeyboardType.REPLY,
 )
 
 
@@ -123,8 +125,8 @@ confirm_factory_dialog = create_confirm_dialog(
 )
 
 
-# /paginated - Tests ReplyKeyboardPaginatedChoiceDialog (direct class)
-paginated_dialog = ReplyKeyboardPaginatedChoiceDialog(
+# /paginated - Tests PaginatedChoiceDialog with keyboard_type=REPLY (direct class)
+paginated_dialog = PaginatedChoiceDialog(
     prompt="Select an expense category:",
     items=[
         ("Rent", "rent"),
@@ -137,8 +139,8 @@ paginated_dialog = ReplyKeyboardPaginatedChoiceDialog(
         ("Other", "other"),
     ],
     page_size=3,
-    more_label="More...",
     include_cancel=True,
+    keyboard_type=KeyboardType.REPLY,
 )
 
 
@@ -159,7 +161,6 @@ paginated_factory_dialog = create_paginated_choice_dialog(
     ],
     keyboard_type=KeyboardType.REPLY,
     page_size=4,
-    more_label="Show More",
     include_cancel=True,
 )
 
@@ -191,7 +192,7 @@ def get_dynamic_choices(context: dict[str, str]) -> list[tuple[str, str]]:
 
 
 dynamic_choice_dialog = SequenceDialog([
-    ("category", ReplyKeyboardChoiceDialog(
+    ("category", ChoiceDialog(
         prompt="Select a category:",
         choices=[
             ("Food", "food"),
@@ -199,17 +200,19 @@ dynamic_choice_dialog = SequenceDialog([
             ("Other", "other"),
         ],
         include_cancel=True,
+        keyboard_type=KeyboardType.REPLY,
     )),
-    ("item", ReplyKeyboardChoiceDialog(
+    ("item", ChoiceDialog(
         prompt="Now select an item:",
         choices=get_dynamic_choices,
         include_cancel=True,
+        keyboard_type=KeyboardType.REPLY,
     )),
 ])
 
 
-# /branch - Tests ReplyKeyboardChoiceBranchDialog (direct class)
-branch_dialog = ReplyKeyboardChoiceBranchDialog(
+# /branch - Tests ChoiceBranchDialog with keyboard_type=REPLY (direct class)
+branch_dialog = ChoiceBranchDialog(
     prompt="Choose a setup option:",
     branches={
         "quick": ("Quick Setup", UserInputDialog("Enter your name:")),
@@ -219,6 +222,7 @@ branch_dialog = ReplyKeyboardChoiceBranchDialog(
         ])),
     },
     include_cancel=True,
+    keyboard_type=KeyboardType.REPLY,
 )
 
 
@@ -237,7 +241,7 @@ branch_factory_dialog = create_choice_branch_dialog(
 )
 
 
-# /dynamic_branch - Tests ReplyKeyboardChoiceBranchDialog with dynamic callable branches
+# /dynamic_branch - Tests ChoiceBranchDialog with dynamic callable branches (reply keyboard)
 def get_dynamic_branches(context: dict[str, Any]) -> dict[str, tuple[str, Any]]:
     """Get branches based on context - branches vary by user_type selection."""
     user_type = context.get("user_type", "basic")
@@ -261,7 +265,7 @@ def get_dynamic_branches(context: dict[str, Any]) -> dict[str, tuple[str, Any]]:
 
 
 dynamic_branch_dialog = SequenceDialog([
-    ("user_type", ReplyKeyboardChoiceDialog(
+    ("user_type", ChoiceDialog(
         prompt="Select your role:",
         choices=[
             ("Developer", "developer"),
@@ -269,11 +273,13 @@ dynamic_branch_dialog = SequenceDialog([
             ("Other", "other"),
         ],
         include_cancel=True,
+        keyboard_type=KeyboardType.REPLY,
     )),
-    ("branch_result", ReplyKeyboardChoiceBranchDialog(
+    ("branch_result", ChoiceBranchDialog(
         prompt="Select setup path:",
         branches=get_dynamic_branches,
         include_cancel=True,
+        keyboard_type=KeyboardType.REPLY,
     )),
 ])
 
@@ -303,7 +309,7 @@ def main() -> None:
     # Register commands for direct class usage
     app.register_command(DialogCommand(
         command="/choice",
-        description="Test ReplyKeyboardChoiceDialog (direct class)",
+        description="Test ChoiceDialog with keyboard_type=REPLY (direct class)",
         dialog=choice_dialog,
     ))
 
@@ -315,13 +321,13 @@ def main() -> None:
 
     app.register_command(DialogCommand(
         command="/confirm",
-        description="Test ReplyKeyboardConfirmDialog (direct class)",
+        description="Test ConfirmDialog with keyboard_type=REPLY (direct class)",
         dialog=confirm_dialog,
     ))
 
     app.register_command(DialogCommand(
         command="/confirm_cancel",
-        description="Test ReplyKeyboardConfirmDialog with cancel button",
+        description="Test ConfirmDialog with cancel button",
         dialog=confirm_cancel_dialog,
     ))
 
@@ -333,7 +339,7 @@ def main() -> None:
 
     app.register_command(DialogCommand(
         command="/paginated",
-        description="Test ReplyKeyboardPaginatedChoiceDialog (direct class)",
+        description="Test PaginatedChoiceDialog with keyboard_type=REPLY (direct class)",
         dialog=paginated_dialog,
     ))
 
@@ -351,7 +357,7 @@ def main() -> None:
 
     app.register_command(DialogCommand(
         command="/branch",
-        description="Test ReplyKeyboardChoiceBranchDialog (direct class)",
+        description="Test ChoiceBranchDialog with keyboard_type=REPLY (direct class)",
         dialog=branch_dialog,
     ))
 
@@ -377,7 +383,7 @@ def main() -> None:
 
     app.register_command(DialogCommand(
         command="/choice_handler",
-        description="Test ReplyKeyboardChoiceDialog with handler",
+        description="Test ChoiceDialog with handler",
         dialog=DialogHandler(
             dialog=choice_dialog,
             on_complete=handle_choice_result,
@@ -393,7 +399,7 @@ def main() -> None:
 
     app.register_command(DialogCommand(
         command="/confirm_handler",
-        description="Test ReplyKeyboardConfirmDialog with handler",
+        description="Test ConfirmDialog with handler",
         dialog=DialogHandler(
             dialog=confirm_dialog,
             on_complete=handle_confirm_result,
@@ -403,30 +409,30 @@ def main() -> None:
     # Info command
     info_text = (
         "<b>Reply Keyboard Dialog Bot</b>\n\n"
-        "Tests reply keyboard dialog classes:\n"
-        "• ReplyKeyboardChoiceDialog - Choice dialog using reply keyboard\n"
-        "• ReplyKeyboardConfirmDialog - Confirm dialog using reply keyboard\n"
-        "• ReplyKeyboardPaginatedChoiceDialog - Paginated choice dialog using reply keyboard\n"
-        "• ReplyKeyboardChoiceBranchDialog - Choice branch dialog using reply keyboard\n"
+        "Tests merged dialog classes with keyboard_type=KeyboardType.REPLY:\n"
+        "• ChoiceDialog - Choice dialog using reply keyboard\n"
+        "• ConfirmDialog - Confirm dialog using reply keyboard\n"
+        "• PaginatedChoiceDialog - Paginated choice dialog using reply keyboard\n"
+        "• ChoiceBranchDialog - Choice branch dialog using reply keyboard\n"
         "• Factory functions with keyboard_type=KeyboardType.REPLY\n"
         "• Text matching for button labels\n"
         "• Cancel functionality\n"
         "• Dynamic choices via callable\n"
         "• Dynamic branches via callable\n\n"
         "<b>Commands:</b>\n"
-        "• /choice - Test ReplyKeyboardChoiceDialog (direct class)\n"
+        "• /choice - Test ChoiceDialog with keyboard_type=REPLY (direct class)\n"
         "• /choice_factory - Test create_choice_dialog with KeyboardType.REPLY\n"
-        "• /confirm - Test ReplyKeyboardConfirmDialog (direct class)\n"
-        "• /confirm_cancel - Test ReplyKeyboardConfirmDialog with cancel\n"
+        "• /confirm - Test ConfirmDialog with keyboard_type=REPLY (direct class)\n"
+        "• /confirm_cancel - Test ConfirmDialog with cancel\n"
         "• /confirm_factory - Test create_confirm_dialog with KeyboardType.REPLY\n"
-        "• /paginated - Test ReplyKeyboardPaginatedChoiceDialog (direct class)\n"
+        "• /paginated - Test PaginatedChoiceDialog with keyboard_type=REPLY (direct class)\n"
         "• /paginated_factory - Test create_paginated_choice_dialog with KeyboardType.REPLY\n"
         "• /dynamic_choice - Test dynamic choices via callable\n"
-        "• /branch - Test ReplyKeyboardChoiceBranchDialog (direct class)\n"
+        "• /branch - Test ChoiceBranchDialog with keyboard_type=REPLY (direct class)\n"
         "• /branch_factory - Test create_choice_branch_dialog with KeyboardType.REPLY\n"
         "• /dynamic_branch - Test dynamic branches via callable\n"
-        "• /choice_handler - Test ReplyKeyboardChoiceDialog with handler\n"
-        "• /confirm_handler - Test ReplyKeyboardConfirmDialog with handler"
+        "• /choice_handler - Test ChoiceDialog with handler\n"
+        "• /confirm_handler - Test ConfirmDialog with handler"
     )
     app.register_command(SimpleCommand(
         command="/info",

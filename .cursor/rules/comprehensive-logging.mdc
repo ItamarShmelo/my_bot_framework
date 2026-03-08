@@ -153,7 +153,7 @@ logger.info("CommandsEvent.handle_text_update: matched command=%s", command.comm
 logger.info("SimpleCommand.run: executed command=%s", self.command)
 
 # Dialog interactions
-logger.info("InlineKeyboardChoiceDialog._run_dialog: selected label=%s value=%s", label, value)
+logger.info("ChoiceDialog.handle_callback_update: selected label=%s value=%s", label, value)
 logger.info("Dialog.cancel: cancelled")
 ```
 

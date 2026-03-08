@@ -1,12 +1,12 @@
 """Dialog bot testing the new Dialog composite system.
 
 Tests ALL dialog types:
-- InlineKeyboardChoiceDialog: User selects from inline keyboard options
+- ChoiceDialog: User selects from inline keyboard options
 - UserInputDialog: User enters text with optional validation (inline and reply keyboard)
-- InlineKeyboardConfirmDialog: Yes/No prompt with inline keyboard
+- ConfirmDialog: Yes/No prompt with inline keyboard
 - SequenceDialog: Run dialogs in order with named values
 - BranchDialog: Condition-based branching
-- InlineKeyboardChoiceBranchDialog: User selects branch via inline keyboard (static + dynamic branches)
+- ChoiceBranchDialog: User selects branch via inline keyboard (static + dynamic branches)
 - LoopDialog: Repeat until exit condition
 """
 
@@ -27,12 +27,12 @@ from my_bot_framework import (
     DialogCommand,
     KeyboardType,
     # Dialog types
-    InlineKeyboardChoiceDialog,
+    ChoiceDialog,
     UserInputDialog,
-    InlineKeyboardConfirmDialog,
+    ConfirmDialog,
     SequenceDialog,
     BranchDialog,
-    InlineKeyboardChoiceBranchDialog,
+    ChoiceBranchDialog,
     LoopDialog,
 )
 
@@ -69,10 +69,10 @@ def get_credentials() -> tuple[str, str]:
 # DIALOG DEFINITIONS
 # =============================================================================
 
-# /simple - Tests SequenceDialog with InlineKeyboardChoiceDialog and UserInputDialog
+# /simple - Tests SequenceDialog with ChoiceDialog and UserInputDialog
 simple_dialog = SequenceDialog([
     ("name", UserInputDialog("Enter your name:")),
-    ("mood", InlineKeyboardChoiceDialog("How are you?", [
+    ("mood", ChoiceDialog("How are you?", [
         ("Great", "great"),
         ("Good", "good"),
         ("Okay", "okay"),
@@ -80,8 +80,8 @@ simple_dialog = SequenceDialog([
 ])
 
 
-# /confirm - Tests InlineKeyboardConfirmDialog with custom labels
-confirm_dialog = InlineKeyboardConfirmDialog(
+# /confirm - Tests ConfirmDialog with custom labels
+confirm_dialog = ConfirmDialog(
     prompt="Do you want to continue?",
     yes_label="Yes, continue",
     no_label="No, cancel",
@@ -115,11 +115,11 @@ validated_reply_dialog = UserInputDialog(
 
 # /dynamic - Tests dynamic choices based on context
 dynamic_dialog = SequenceDialog([
-    ("category", InlineKeyboardChoiceDialog("Select category:", [
+    ("category", ChoiceDialog("Select category:", [
         ("Programming", "prog"),
         ("Design", "design"),
     ])),
-    ("tool", InlineKeyboardChoiceDialog(
+    ("tool", ChoiceDialog(
         prompt="Select tool:",
         choices=lambda ctx: [
             ("Python", "python"),
@@ -134,21 +134,21 @@ dynamic_dialog = SequenceDialog([
 ])
 
 
-# /branch - Tests InlineKeyboardChoiceBranchDialog (keyboard-driven branching)
-branch_dialog = InlineKeyboardChoiceBranchDialog(
+# /branch - Tests ChoiceBranchDialog (keyboard-driven branching)
+branch_dialog = ChoiceBranchDialog(
     prompt="Select your path:",
     branches={
         "quick": ("Quick Setup", UserInputDialog("Enter your name:")),
         "full": ("Full Setup", SequenceDialog([
             ("name", UserInputDialog("Enter your name:")),
             ("email", UserInputDialog("Enter your email:")),
-            ("notify", InlineKeyboardConfirmDialog("Enable notifications?")),
+            ("notify", ConfirmDialog("Enable notifications?")),
         ])),
     }
 )
 
 
-# /dynamic_branch - Tests InlineKeyboardChoiceBranchDialog with dynamic callable branches
+# /dynamic_branch - Tests ChoiceBranchDialog with dynamic callable branches
 def get_dynamic_branches(context: dict[str, Any]) -> dict[str, tuple[str, Any]]:
     """Get branches based on context - branches vary by user_type selection."""
     user_type = context.get("user_type", "basic")
@@ -172,12 +172,12 @@ def get_dynamic_branches(context: dict[str, Any]) -> dict[str, tuple[str, Any]]:
 
 
 dynamic_branch_dialog = SequenceDialog([
-    ("user_type", InlineKeyboardChoiceDialog("Select your role:", [
+    ("user_type", ChoiceDialog("Select your role:", [
         ("Developer", "developer"),
         ("Designer", "designer"),
         ("Other", "other"),
     ])),
-    ("branch_result", InlineKeyboardChoiceBranchDialog(
+    ("branch_result", ChoiceBranchDialog(
         prompt="Select setup path:",
         branches=get_dynamic_branches,
     )),
@@ -193,11 +193,11 @@ condition_dialog = SequenceDialog([
     ("content", BranchDialog(
         condition=lambda ctx: "adult" if int(ctx.get("age", "0")) >= 18 else "minor",
         branches={
-            "adult": InlineKeyboardChoiceDialog("Select plan:", [
+            "adult": ChoiceDialog("Select plan:", [
                 ("Pro", "pro"),
                 ("Enterprise", "ent"),
             ]),
-            "minor": InlineKeyboardChoiceDialog("Select plan:", [
+            "minor": ChoiceDialog("Select plan:", [
                 ("Student", "student"),
                 ("Free", "free"),
             ]),
@@ -229,11 +229,11 @@ loop_valid_dialog = LoopDialog(
 # /full - Tests full composite: Sequence + Branch + Loop + Confirm
 full_onboarding = SequenceDialog([
     ("name", UserInputDialog("Enter your name:")),
-    ("role", InlineKeyboardChoiceBranchDialog(
+    ("role", ChoiceBranchDialog(
         prompt="Select your role:",
         branches={
             "dev": ("Developer", SequenceDialog([
-                ("lang", InlineKeyboardChoiceDialog("Primary language:", [
+                ("lang", ChoiceDialog("Primary language:", [
                     ("Python", "py"),
                     ("TypeScript", "ts"),
                     ("Go", "go"),
@@ -241,7 +241,7 @@ full_onboarding = SequenceDialog([
                 ("experience", UserInputDialog("Years of experience:")),
             ])),
             "design": ("Designer", SequenceDialog([
-                ("tool", InlineKeyboardChoiceDialog("Primary tool:", [
+                ("tool", ChoiceDialog("Primary tool:", [
                     ("Figma", "figma"),
                     ("Sketch", "sketch"),
                 ])),
@@ -253,7 +253,7 @@ full_onboarding = SequenceDialog([
         dialog=UserInputDialog("Add a skill (or 'done'):"),
         exit_value="done",
     )),
-    ("confirm", InlineKeyboardConfirmDialog("Save your profile?")),
+    ("confirm", ConfirmDialog("Save your profile?")),
 ])
 
 
@@ -350,12 +350,12 @@ def main() -> None:
     info_text = (
         "<b>Dialog Bot</b>\n\n"
         "Tests the new Dialog composite system:\n"
-        "• <b>/simple</b> - SequenceDialog, InlineKeyboardChoiceDialog, UserInputDialog\n"
-        "• <b>/confirm</b> - InlineKeyboardConfirmDialog with custom labels\n"
+        "• <b>/simple</b> - SequenceDialog, ChoiceDialog, UserInputDialog\n"
+        "• <b>/confirm</b> - ConfirmDialog with custom labels\n"
         "• <b>/validated</b> - UserInputDialog with validation\n"
         "• <b>/validated_reply</b> - UserInputDialog with validation (reply keyboard)\n"
         "• <b>/dynamic</b> - Dynamic choices based on context\n"
-        "• <b>/branch</b> - InlineKeyboardChoiceBranchDialog (keyboard branching)\n"
+        "• <b>/branch</b> - ChoiceBranchDialog (keyboard branching)\n"
         "• <b>/dynamic_branch</b> - Dynamic branches via callable\n"
         "• <b>/condition</b> - BranchDialog with condition function\n"
         "• <b>/loop</b> - LoopDialog with exit_value\n"

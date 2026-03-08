@@ -121,12 +121,12 @@ python test_bots/condition_bot.py
 **Purpose:** Tests the Dialog Composite system.
 
 **Features tested:**
-- `InlineKeyboardChoiceDialog` - Inline keyboard selection with static and dynamic choices
+- `ChoiceDialog` - Inline keyboard selection with static and dynamic choices (default `keyboard_type=INLINE`)
 - `UserInputDialog` - Text input with optional validation (inline and reply keyboard Cancel via `keyboard_type`)
-- `InlineKeyboardConfirmDialog` - Yes/No prompts with inline keyboard
+- `ConfirmDialog` - Yes/No prompts with inline keyboard
 - `SequenceDialog` - Sequential dialogs with named values
 - `BranchDialog` - Condition-based branching
-- `InlineKeyboardChoiceBranchDialog` - Inline keyboard-driven branching (static or dynamic branches)
+- `ChoiceBranchDialog` - Inline keyboard-driven branching (static or dynamic branches)
 - `LoopDialog` - Repeat until exit condition (with exit_value and exit_condition)
 - Shared context across all dialogs
 - Dynamic choices and dynamic branches via callable functions
@@ -135,12 +135,12 @@ python test_bots/condition_bot.py
 | Command | Description |
 |---------|-------------|
 | `/simple` | SequenceDialog: name + mood selection |
-| `/confirm` | InlineKeyboardConfirmDialog with custom labels |
+| `/confirm` | ConfirmDialog with custom labels |
 | `/validated` | UserInputDialog with validation (1-100) |
 | `/validated_reply` | UserInputDialog with validation (1-100), reply keyboard Cancel |
 | `/dynamic` | Dynamic choices based on previous selection |
-| `/branch` | InlineKeyboardChoiceBranchDialog (quick vs full setup) |
-| `/dynamic_branch` | InlineKeyboardChoiceBranchDialog with dynamic callable branches |
+| `/branch` | ChoiceBranchDialog (quick vs full setup) |
+| `/dynamic_branch` | ChoiceBranchDialog with dynamic callable branches |
 | `/condition` | BranchDialog with age-based condition |
 | `/loop` | LoopDialog until 'done' entered |
 | `/loopvalid` | LoopDialog until valid email (max 5) |
@@ -151,12 +151,12 @@ python test_bots/condition_bot.py
 
 | Dialog Type | Description |
 |-------------|-------------|
-| `InlineKeyboardChoiceDialog` | Static/dynamic inline keyboard options |
+| `ChoiceDialog` | Static/dynamic inline keyboard options |
 | `UserInputDialog` | Text input with validator |
-| `InlineKeyboardConfirmDialog` | Yes/No with custom labels |
+| `ConfirmDialog` | Yes/No with custom labels |
 | `SequenceDialog` | Named dialogs in sequence |
 | `BranchDialog` | Condition function branching |
-| `InlineKeyboardChoiceBranchDialog` | User-driven branching (static/dynamic branches) |
+| `ChoiceBranchDialog` | User-driven branching (static/dynamic branches) |
 | `LoopDialog` | Exit by value/condition/max |
 
 **Run:**
@@ -179,7 +179,7 @@ python test_bots/dialog_bot.py
 - Nested `DialogHandler` - Multiple handlers in a chain
 - `dialog_result` property - Result after completion (T or DialogResult sentinel)
 - Async `on_complete` callbacks
-- Integration with `InlineKeyboardChoiceDialog` and `InlineKeyboardConfirmDialog`
+- Integration with `ChoiceDialog` and `ConfirmDialog`
 - Integration with `SequenceDialog`
 
 **Commands:**
@@ -229,7 +229,7 @@ python test_bots/dialog_handler_bot.py
 | `/sensor` | Show current simulated sensor value |
 | `/settings` | Show current threshold and alert level |
 | `/edit_threshold` | Edit threshold via UserInputDialog |
-| `/edit_level` | Edit alert level via InlineKeyboardChoiceDialog |
+| `/edit_level` | Edit alert level via ChoiceDialog |
 | `/edit_all` | Edit all settings via SequenceDialog |
 | `/edit_inline` | Edit all settings via EditEventDialog (inline keyboard) |
 | `/edit_reply` | Edit all settings via EditEventDialog (reply keyboard) |
@@ -387,15 +387,14 @@ python test_bots/document_bot.py
 
 ### paginated_dialog_bot.py
 
-**Purpose:** Tests the InlineKeyboardPaginatedChoiceDialog class for displaying long lists with pagination.
+**Purpose:** Tests the PaginatedChoiceDialog class for displaying long lists with pagination.
 
 **Features tested:**
-- `InlineKeyboardPaginatedChoiceDialog` - Paginated inline keyboard selection
+- `PaginatedChoiceDialog` - Paginated inline keyboard selection
 - Static items list
 - Dynamic items via callable
 - Different page sizes (3, 4, 5 items per page)
-- "More..." button behavior (only shown when items exceed page_size)
-- Text input selection for remaining items (numbered list)
+- Next/prev page navigation (shown when items exceed page_size)
 - Cancel functionality (with and without cancel button)
 - Integration with `DialogHandler` for result processing
 
@@ -404,7 +403,7 @@ python test_bots/document_bot.py
 |---------|-------------|
 | `/info` | Shows what this bot tests |
 | `/start` | Show available commands |
-| `/short` | Test short list (no More button) |
+| `/short` | Test short list (no pagination) |
 | `/expenses` | Test expense list with pagination (5 items/page) |
 | `/countries` | Test country list with small page size (3 items/page) |
 | `/tasks` | Test dynamic items via callable |
@@ -414,8 +413,8 @@ python test_bots/document_bot.py
 
 **Test Scenarios:**
 
-| Scenario | Page Size | Items | Has "More..." |
-|----------|-----------|-------|---------------|
+| Scenario | Page Size | Items | Has Pagination |
+|----------|-----------|-------|----------------|
 | `/short` | 5 | 3 fruits | No |
 | `/expenses` | 5 | 12 expenses | Yes |
 | `/countries` | 3 | 20 countries | Yes |
@@ -507,13 +506,13 @@ python test_bots/reply_keyboard_bot.py
 
 ### reply_keyboard_dialog_bot.py
 
-**Purpose:** Tests the reply keyboard dialog classes that use Telegram's reply keyboard instead of inline keyboard.
+**Purpose:** Tests dialog classes with `keyboard_type=REPLY`, using Telegram's reply keyboard instead of inline keyboard.
 
 **Features tested:**
-- `ReplyKeyboardChoiceDialog` - Choice dialog using reply keyboard
-- `ReplyKeyboardConfirmDialog` - Confirm dialog using reply keyboard (with and without cancel)
-- `ReplyKeyboardPaginatedChoiceDialog` - Paginated choice dialog using reply keyboard
-- `ReplyKeyboardChoiceBranchDialog` - Choice branch dialog using reply keyboard (static or dynamic branches)
+- `ChoiceDialog` with `keyboard_type=REPLY` - Choice dialog using reply keyboard
+- `ConfirmDialog` with `keyboard_type=REPLY` - Confirm dialog using reply keyboard (with and without cancel)
+- `PaginatedChoiceDialog` with `keyboard_type=REPLY` - Paginated choice dialog using reply keyboard
+- `ChoiceBranchDialog` with `keyboard_type=REPLY` - Choice branch dialog using reply keyboard (static or dynamic branches)
 - Factory functions with `keyboard_type=KeyboardType.REPLY`:
   - `create_choice_dialog()` with `KeyboardType.REPLY`
   - `create_confirm_dialog()` with `KeyboardType.REPLY`
@@ -529,28 +528,28 @@ python test_bots/reply_keyboard_bot.py
 | Command | Description |
 |---------|-------------|
 | `/info` | Shows what this bot tests |
-| `/choice` | Test ReplyKeyboardChoiceDialog (direct class) |
+| `/choice` | Test ChoiceDialog with keyboard_type=REPLY (direct class) |
 | `/choice_factory` | Test create_choice_dialog with KeyboardType.REPLY |
-| `/confirm` | Test ReplyKeyboardConfirmDialog (direct class) |
-| `/confirm_cancel` | Test ReplyKeyboardConfirmDialog with cancel button |
+| `/confirm` | Test ConfirmDialog with keyboard_type=REPLY (direct class) |
+| `/confirm_cancel` | Test ConfirmDialog with keyboard_type=REPLY and cancel button |
 | `/confirm_factory` | Test create_confirm_dialog with KeyboardType.REPLY |
-| `/paginated` | Test ReplyKeyboardPaginatedChoiceDialog (direct class) |
+| `/paginated` | Test PaginatedChoiceDialog with keyboard_type=REPLY (direct class) |
 | `/paginated_factory` | Test create_paginated_choice_dialog with KeyboardType.REPLY |
 | `/dynamic_choice` | Test dynamic choices via callable |
-| `/branch` | Test ReplyKeyboardChoiceBranchDialog (direct class) |
+| `/branch` | Test ChoiceBranchDialog with keyboard_type=REPLY (direct class) |
 | `/branch_factory` | Test create_choice_branch_dialog with KeyboardType.REPLY |
 | `/dynamic_branch` | Test dynamic branches via callable |
-| `/choice_handler` | Test ReplyKeyboardChoiceDialog with DialogHandler |
-| `/confirm_handler` | Test ReplyKeyboardConfirmDialog with DialogHandler |
+| `/choice_handler` | Test ChoiceDialog with keyboard_type=REPLY and DialogHandler |
+| `/confirm_handler` | Test ConfirmDialog with keyboard_type=REPLY and DialogHandler |
 
 **Dialog Types Tested:**
 
 | Dialog Type | Description |
 |-------------|-------------|
-| `ReplyKeyboardChoiceDialog` | Static/dynamic keyboard options using reply keyboard |
-| `ReplyKeyboardConfirmDialog` | Yes/No with custom labels using reply keyboard |
-| `ReplyKeyboardPaginatedChoiceDialog` | Paginated options with "More..." button using reply keyboard |
-| `ReplyKeyboardChoiceBranchDialog` | User-driven branching using reply keyboard (static/dynamic branches) |
+| `ChoiceDialog` (keyboard_type=REPLY) | Static/dynamic keyboard options using reply keyboard |
+| `ConfirmDialog` (keyboard_type=REPLY) | Yes/No with custom labels using reply keyboard |
+| `PaginatedChoiceDialog` (keyboard_type=REPLY) | Paginated options with next/prev navigation using reply keyboard |
+| `ChoiceBranchDialog` (keyboard_type=REPLY) | User-driven branching using reply keyboard (static/dynamic branches) |
 
 **Run:**
 ```bash

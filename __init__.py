@@ -77,16 +77,11 @@ from .dialog import (
     DialogHandler,
     KeyboardType,
     BranchesType,
-    # Inline keyboard dialogs
-    InlineKeyboardChoiceDialog,
-    InlineKeyboardConfirmDialog,
-    InlineKeyboardPaginatedChoiceDialog,
-    InlineKeyboardChoiceBranchDialog,
-    # Reply keyboard dialogs
-    ReplyKeyboardChoiceDialog,
-    ReplyKeyboardConfirmDialog,
-    ReplyKeyboardPaginatedChoiceDialog,
-    ReplyKeyboardChoiceBranchDialog,
+    # Dialog classes
+    ChoiceDialog,
+    ConfirmDialog,
+    PaginatedChoiceDialog,
+    ChoiceBranchDialog,
     # Other dialogs
     UserInputDialog,
     SequenceDialog,
@@ -170,16 +165,11 @@ __all__ = [
     "DialogHandler",
     "KeyboardType",
     "BranchesType",
-    # Inline keyboard dialogs (new names)
-    "InlineKeyboardChoiceDialog",
-    "InlineKeyboardConfirmDialog",
-    "InlineKeyboardPaginatedChoiceDialog",
-    "InlineKeyboardChoiceBranchDialog",
-    # Reply keyboard dialogs
-    "ReplyKeyboardChoiceDialog",
-    "ReplyKeyboardConfirmDialog",
-    "ReplyKeyboardPaginatedChoiceDialog",
-    "ReplyKeyboardChoiceBranchDialog",
+    # Dialog classes
+    "ChoiceDialog",
+    "ConfirmDialog",
+    "PaginatedChoiceDialog",
+    "ChoiceBranchDialog",
     # Other dialogs
     "UserInputDialog",
     "SequenceDialog",

@@ -88,6 +88,31 @@ Conditions and message builders should never raise. Do NOT wrap calls to
 `condition.check()`, `message_builder.build()`, or `send_messages()` in try/except.
 If they do raise, it is a fatal bug that should propagate up and terminate the bot.
 
+### Minimal try/except scope
+
+Only wrap the code that can actually raise inside `try`. Keep logic that cannot
+raise (validation, comparisons, returns) outside the `try/except` block.
+
+```python
+# BAD - too much inside try
+try:
+    num = int(value)
+    if num <= 0:
+        return False, "Must be positive"
+    return True, ""
+except ValueError:
+    return False, "Invalid integer"
+
+# GOOD - only the parsing call is wrapped
+try:
+    num = int(value)
+except ValueError:
+    return False, "Invalid integer"
+if num <= 0:
+    return False, "Must be positive"
+return True, ""
+```
+
 ### Logging exceptions
 
 Use `exc_info=True` (or `logger.exception()` at ERROR level) for all exception logging

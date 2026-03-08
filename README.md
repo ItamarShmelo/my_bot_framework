@@ -8,7 +8,7 @@ A modular, event-driven Telegram bot framework built on `python-telegram-bot`.
 - **Event System** - Time-based and condition-based event triggers
 - **Command Handling** - Simple commands and interactive dialog commands
 - **Direct Message Sending** - Async message sending with automatic chunking
-- **Interactive Dialogs** - Multi-step conversations with inline keyboards
+- **Interactive Dialogs** - Multi-step conversations with inline or reply keyboards (unified `keyboard_type` parameter)
 - **Editable Parameters** - Runtime-configurable event parameters
 - **Resilient Polling** - Automatic handling of transient Telegram network errors with backoff and recovery logging
 - **Dynamic Event Lifecycle** - Register events before or during runtime, remove them by name, and enforce unique event names
@@ -302,50 +302,48 @@ app.register_command(cmd)
 
 The framework provides built-in dialog types for common interactions. All dialogs extend `Dialog[T]` (generic base class where `T` is the result type). After completion, the result is available via the `dialog_result` property (`T` or a `DialogResult` sentinel such as `NOT_SET` (internal initial state), `CANCELLED`, or `DONE`).
 
+The dialog module is organized as a `dialog/` subpackage (`base.py`, `choice.py`, `confirm.py`, `paginated.py`, `branch.py`, `input.py`, `composite.py`, `edit.py`, `factories.py`). The public API is unchanged — all imports work from `my_bot_framework.dialog` (or `my_bot_framework`).
+
 **Leaf Dialogs** (atomic single-step):
-- **Inline Keyboard** (attached to message):
-  - `InlineKeyboardChoiceDialog` - User selects from inline keyboard options
-  - `InlineKeyboardPaginatedChoiceDialog` - User selects from paginated inline keyboard options (shows first page as buttons, remaining items as numbered text list)
-  - `InlineKeyboardConfirmDialog` - Yes/No prompt with inline keyboard
-- **Reply Keyboard** (buttons at bottom of chat):
-  - `ReplyKeyboardChoiceDialog` - User selects from reply keyboard options
-  - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
-  - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
+- **Choice dialogs** (use `keyboard_type=KeyboardType.INLINE` or `KeyboardType.REPLY`):
+  - `ChoiceDialog` - User selects from keyboard options
+  - `PaginatedChoiceDialog` - User selects from paginated keyboard options (all pages show items as buttons; navigate with "< Prev" / "Next >" buttons)
+  - `ConfirmDialog` - Yes/No prompt with keyboard
+  - `ChoiceBranchDialog` - User selects branch via keyboard (static or dynamic branches via callable)
 - **Other Leaf Dialogs**:
   - `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input). Supports `keyboard_type` (INLINE or REPLY) to control whether the Cancel button appears as an inline keyboard button or a reply keyboard button. Default is INLINE (backward compatible). Class constant `CANCEL_LABEL` for the Cancel button label.
   - `EditEventDialog` - Edit an event's editable attributes via inline or reply keyboard (configurable via `keyboard_type`)
 
+The old separate `InlineKeyboard*` / `ReplyKeyboard*` classes have been removed.
+
 **Composite Dialogs** (multi-step):
 - `SequenceDialog` - Run dialogs in order
 - `BranchDialog` - Condition-based branching
-- `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard (static or dynamic branches via callable)
-- `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard (static or dynamic branches via callable)
+- `ChoiceBranchDialog` - User selects branch via keyboard (static or dynamic branches via callable)
 - `LoopDialog` - Repeat until exit condition
 - `DialogHandler` - Wrap dialog with completion callback
 
 ```python
 from my_bot_framework import (
-    InlineKeyboardChoiceDialog, InlineKeyboardPaginatedChoiceDialog,
-    InlineKeyboardConfirmDialog, UserInputDialog,
-    ReplyKeyboardChoiceDialog, ReplyKeyboardConfirmDialog,
+    ChoiceDialog, PaginatedChoiceDialog, ConfirmDialog, UserInputDialog,
     SequenceDialog, DialogHandler, DialogCommand,
     KeyboardType, create_choice_dialog, create_confirm_dialog,
-    CANCELLED, DONE, is_cancelled,
+    DialogResult, is_cancelled,
 )
 
 # Simple inline keyboard choice dialog (default)
-color_dialog = InlineKeyboardChoiceDialog("Pick a color:", [
+color_dialog = ChoiceDialog("Pick a color:", [
     ("Red", "red"),
     ("Green", "green"),
     ("Blue", "blue"),
 ])
 
 # Reply keyboard choice dialog (buttons at bottom of chat)
-color_dialog_reply = ReplyKeyboardChoiceDialog("Pick a color:", [
-    ("Red", "red"),
-    ("Green", "green"),
-    ("Blue", "blue"),
-])
+color_dialog_reply = ChoiceDialog(
+    "Pick a color:",
+    [("Red", "red"), ("Green", "green"), ("Blue", "blue")],
+    keyboard_type=KeyboardType.REPLY,
+)
 
 # Using factory function with keyboard type
 color_dialog_factory = create_choice_dialog(
@@ -354,7 +352,7 @@ color_dialog_factory = create_choice_dialog(
     keyboard_type=KeyboardType.REPLY,  # or KeyboardType.INLINE (default)
 )
 
-# Paginated choice dialog (for long lists)
+# Paginated choice dialog (for long lists) — uses next/prev page buttons
 expenses = [
     ("Rent $1200", "1"),
     ("Groceries $95", "2"),
@@ -365,22 +363,22 @@ expenses = [
     ("Insurance $200", "7"),
     # ... many more items
 ]
-expense_dialog = InlineKeyboardPaginatedChoiceDialog(
+expense_dialog = PaginatedChoiceDialog(
     prompt="Select expense to remove:",
     items=expenses,
-    page_size=5,  # Show first 5 as buttons
-    more_label="More...",  # Button label for remaining items
+    page_size=5,  # Items per page; navigate with "< Prev" / "Next >"
+    keyboard_type=KeyboardType.INLINE,  # or KeyboardType.REPLY
 )
 
 # Multi-step sequence with mixed keyboard types
 survey_dialog = SequenceDialog([
     ("name", UserInputDialog("What is your name?")),
-    ("rating", InlineKeyboardChoiceDialog("Rate our service:", [
+    ("rating", ChoiceDialog("Rate our service:", [
         ("5 Stars", "5"),
         ("4 Stars", "4"),
         ("3 Stars", "3"),
     ])),
-    ("recommend", ReplyKeyboardConfirmDialog("Would you recommend us?")),
+    ("recommend", ConfirmDialog("Would you recommend us?", keyboard_type=KeyboardType.REPLY)),
 ])
 
 # DialogHandler with completion callback
@@ -398,7 +396,7 @@ app.register_command(DialogCommand("/survey", "Take survey", handled_dialog))
 
 #### Factory Functions
 
-Factory functions provide a convenient way to create dialogs with a specified keyboard type:
+Factory functions provide a convenient way to create dialogs with a specified keyboard type. They create instances of the merged classes (`ChoiceDialog`, `ConfirmDialog`, `PaginatedChoiceDialog`, `ChoiceBranchDialog`):
 
 ```python
 from my_bot_framework import (
@@ -427,13 +425,12 @@ confirm = create_confirm_dialog(
     include_cancel=False,
 )
 
-# Create paginated choice dialog
+# Create paginated choice dialog (next/prev page navigation)
 paginated = create_paginated_choice_dialog(
     prompt="Select item:",
     items=[("Item 1", "1"), ("Item 2", "2"), ...],
     keyboard_type=KeyboardType.REPLY,
     page_size=5,
-    more_label="More...",
     include_cancel=True,
 )
 
@@ -496,10 +493,10 @@ The dialog shows a field list with current values. Boolean fields use toggle but
 
 #### Cancellation Handling
 
-Use the `CANCELLED` and `DONE` sentinels (instances of `DialogResult`; `NOT_SET` is internal initial state) for unambiguous outcome detection:
+Use the `DialogResult.CANCELLED` and `DialogResult.DONE` sentinels (`NOT_SET` is internal initial state) for unambiguous outcome detection:
 
 ```python
-from my_bot_framework import CANCELLED, DONE, is_cancelled
+from my_bot_framework import DialogResult, is_cancelled
 
 def on_complete(result):
     # Using helper function for cancellation
@@ -508,13 +505,13 @@ def on_complete(result):
         return
     
     # Or direct comparison
-    if result is CANCELLED:
+    if result is DialogResult.CANCELLED:
         print("Cancelled!")
         return
     
     # DONE is another DialogResult sentinel (e.g., from EditEventDialog Done button)
     # NOT_SET is the initial state before dialog completes (internal use)
-    if result is DONE:
+    if result is DialogResult.DONE:
         print("Done without value")
         return
     

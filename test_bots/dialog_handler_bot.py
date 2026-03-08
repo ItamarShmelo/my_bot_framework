@@ -24,9 +24,9 @@ from my_bot_framework import (
     DialogCommand,
     SimpleCommand,
     # Dialog types
-    InlineKeyboardChoiceDialog,
+    ChoiceDialog,
     UserInputDialog,
-    InlineKeyboardConfirmDialog,
+    ConfirmDialog,
     SequenceDialog,
     # New features
     DialogHandler,
@@ -85,7 +85,7 @@ async def on_feedback_complete(result: Any) -> None:
         await get_app().send_messages(f"Thank you for your feedback: {result}")
 
 feedback_dialog = DialogHandler(
-    InlineKeyboardChoiceDialog("How was your experience?", [
+    ChoiceDialog("How was your experience?", [
         ("Excellent", "excellent"),
         ("Good", "good"),
         ("Fair", "fair"),
@@ -122,14 +122,14 @@ async def on_survey_complete(result: Any) -> None:
 survey_dialog = DialogHandler(
     SequenceDialog([
         ("name", UserInputDialog("What is your name?")),
-        ("rating", InlineKeyboardChoiceDialog("Rate our service:", [
+        ("rating", ChoiceDialog("Rate our service:", [
             ("5 Stars", "5"),
             ("4 Stars", "4"),
             ("3 Stars", "3"),
             ("2 Stars", "2"),
             ("1 Star", "1"),
         ])),
-        ("recommend", InlineKeyboardConfirmDialog("Would you recommend us?")),
+        ("recommend", ConfirmDialog("Would you recommend us?")),
     ]),
     on_complete=on_survey_complete,
 )
@@ -165,13 +165,13 @@ async def on_order_complete(result: Any) -> None:
 
 order_dialog = DialogHandler(
     SequenceDialog([
-        ("product", InlineKeyboardChoiceDialog("Select product:", [
+        ("product", ChoiceDialog("Select product:", [
             ("Widget", "widget"),
             ("Gadget", "gadget"),
             ("Gizmo", "gizmo"),
         ])),
         ("quantity", UserInputDialog("Enter quantity (1-10):")),
-        ("confirm", InlineKeyboardConfirmDialog("Confirm order?")),
+        ("confirm", ConfirmDialog("Confirm order?")),
     ]),
     on_complete=on_order_complete,
 )
@@ -208,7 +208,7 @@ async def on_outer_complete(result: Any) -> None:
 
 nested_dialog = DialogHandler(
     DialogHandler(
-        InlineKeyboardChoiceDialog("Pick a color:", [
+        ChoiceDialog("Pick a color:", [
             ("Red", "red"),
             ("Green", "green"),
             ("Blue", "blue"),
@@ -238,7 +238,7 @@ async def on_cancel_test_complete(result: Any) -> None:
     await get_app().send_messages(f"✅ Dialog completed with: {result}")
 
 cancel_test_dialog = DialogHandler(
-    InlineKeyboardConfirmDialog(
+    ConfirmDialog(
         "Try pressing Cancel to see cancellation handling.",
         include_cancel=True,
     ),

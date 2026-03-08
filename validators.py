@@ -20,9 +20,43 @@ import re
 from datetime import datetime
 from typing import Callable
 
+from .accessors import get_logger
+
 
 # Type alias for validator functions
 Validator = Callable[[str], tuple[bool, str]]
+
+
+def _validate_positive_numeric(
+    value: str,
+    parse_fn: Callable[[str], int | float],
+    positive_error: str,
+    parse_error: str,
+) -> tuple[bool, str]:
+    """Validate that input is a positive number using the given parser.
+
+    Args:
+        value: The input string to validate.
+        parse_fn: Function to parse string to number (int or float).
+        positive_error: Error message when value is not positive.
+        parse_error: Error message when value cannot be parsed.
+
+    Returns:
+        Tuple of (is_valid, error_message). Error message is empty on success.
+    """
+    try:
+        num = parse_fn(value)
+    except ValueError:
+        get_logger().debug(
+            "_validate_positive_numeric: parse_failed value=%s",
+            value,
+            exc_info=True,
+        )
+        return False, parse_error
+    
+    if num <= 0: return False, positive_error
+    
+    return True, ""
 
 
 def validate_positive_float(value: str) -> tuple[bool, str]:
@@ -36,13 +70,12 @@ def validate_positive_float(value: str) -> tuple[bool, str]:
     Returns:
         Tuple of (is_valid, error_message). Error message is empty on success.
     """
-    try:
-        num = float(value)
-        if num <= 0:
-            return False, "Value must be positive."
-        return True, ""
-    except ValueError:
-        return False, "Invalid number. Please enter a valid decimal number."
+    return _validate_positive_numeric(
+        value,
+        float,
+        "Value must be positive.",
+        "Invalid number. Please enter a valid decimal number.",
+    )
 
 
 def validate_positive_int(value: str) -> tuple[bool, str]:
@@ -54,13 +87,12 @@ def validate_positive_int(value: str) -> tuple[bool, str]:
     Returns:
         Tuple of (is_valid, error_message). Error message is empty on success.
     """
-    try:
-        num = int(value)
-        if num <= 0:
-            return False, "Value must be a positive integer."
-        return True, ""
-    except ValueError:
-        return False, "Invalid integer. Please enter a whole number."
+    return _validate_positive_numeric(
+        value,
+        int,
+        "Value must be a positive integer.",
+        "Invalid integer. Please enter a whole number.",
+    )
 
 
 def validate_non_empty(value: str) -> tuple[bool, str]:
@@ -98,11 +130,20 @@ def validate_int_range(min_val: int, max_val: int) -> Validator:
         """Validate integer is within the specified range."""
         try:
             num = int(value)
-            if num < min_val or num > max_val:
-                return False, f"Value must be between {min_val} and {max_val}."
-            return True, ""
         except ValueError:
+            get_logger().debug(
+                "validate_int_range: parse_failed value=%s min=%d max=%d",
+                value,
+                min_val,
+                max_val,
+                exc_info=True,
+            )
             return False, "Invalid integer. Please enter a whole number."
+        
+        if num < min_val or num > max_val:
+            return False, f"Value must be between {min_val} and {max_val}."
+        
+        return True, ""
     return validator
 
 
@@ -127,11 +168,20 @@ def validate_float_range(min_val: float, max_val: float) -> Validator:
         """Validate float is within the specified range."""
         try:
             num = float(value)
-            if num < min_val or num > max_val:
-                return False, f"Value must be between {min_val} and {max_val}."
-            return True, ""
         except ValueError:
+            get_logger().debug(
+                "validate_float_range: parse_failed value=%s min=%s max=%s",
+                value,
+                min_val,
+                max_val,
+                exc_info=True,
+            )
             return False, "Invalid number. Please enter a valid decimal number."
+        
+        if num < min_val or num > max_val:
+            return False, f"Value must be between {min_val} and {max_val}."
+        
+        return True, ""
     return validator
 
 
@@ -157,9 +207,17 @@ def validate_date_format(fmt: str = "%m/%Y", description: str = "MM/YYYY") -> Va
         """Validate string matches the specified date format."""
         try:
             datetime.strptime(value.strip(), fmt)
-            return True, ""
         except ValueError:
+            get_logger().debug(
+                "validate_date_format: parse_failed value=%s fmt=%s",
+                value,
+                fmt,
+                exc_info=True,
+            )
             return False, f"Invalid date format. Please use {description}."
+        
+        return True, ""
+    
     return validator
 
 

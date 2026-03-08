@@ -31,7 +31,7 @@ from my_bot_framework import (
     Condition,
     MessageBuilder,
     KeyboardType,
-    InlineKeyboardChoiceDialog,
+    ChoiceDialog,
     UserInputDialog,
     SequenceDialog,
     DialogHandler,
@@ -257,7 +257,7 @@ def main() -> None:
         )
 
     level_dialog = DialogHandler(
-        InlineKeyboardChoiceDialog("Select alert level:", [
+        ChoiceDialog("Select alert level:", [
             ("ℹ️ Info", "info"),
             ("⚠️ Warning", "warning"),
             ("🚨 Critical", "critical"),
@@ -323,7 +323,7 @@ def main() -> None:
                     "Enter a number between 0 and 100"
                 ),
             )),
-            ("level", InlineKeyboardChoiceDialog("Select alert level:", [
+            ("level", ChoiceDialog("Select alert level:", [
                 ("ℹ️ Info", "info"),
                 ("⚠️ Warning", "warning"),
                 ("🚨 Critical", "critical"),

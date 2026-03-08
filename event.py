@@ -22,8 +22,6 @@ from .editable import EditableAttribute, EditableMixin
 if TYPE_CHECKING:
     from .dialog import Dialog
 
-MINIMAL_TIME_BETWEEN_MESSAGES = 5.0 / 60.0
-
 
 class Condition(EditableMixin, ABC):
     """Editable condition interface for ActivateOnConditionEvent."""

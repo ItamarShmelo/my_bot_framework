@@ -368,7 +368,31 @@ raise ValueError("Invalid")
 raise ValueError(f"Expected threshold between 0-100, got {value}")
 ```
 
-### 9. Exception Logging
+### 9. Minimal try/except Scope
+
+Only wrap the code that can actually raise inside `try`. Keep logic that cannot raise (validation, comparisons, returns) outside the `try/except` block.
+
+```python
+# BAD - too much inside try
+try:
+    num = int(value)
+    if num <= 0:
+        return False, "Must be positive"
+    return True, ""
+except ValueError:
+    return False, "Invalid integer"
+
+# GOOD - only the parsing call is wrapped
+try:
+    num = int(value)
+except ValueError:
+    return False, "Invalid integer"
+if num <= 0:
+    return False, "Must be positive"
+return True, ""
+```
+
+### 10. Exception Logging
 
 All logging calls inside `except` blocks MUST include `exc_info=True` to capture the full traceback. Do NOT manually format the exception into the message string.
 
@@ -397,7 +421,7 @@ except Exception:
 
 This applies to ALL log levels (`DEBUG`, `WARNING`, `ERROR`, `CRITICAL`) inside `except` blocks.
 
-### 10. Code Duplication
+### 11. Code Duplication
 
 **Flag and extract duplicate code.** When you see similar code blocks repeated 3+ times, consider extracting to a helper function.
 
@@ -469,6 +493,7 @@ After modifying code:
 - [ ] External module usage is commented
 - [ ] All imports at top of file (no inline imports)
 - [ ] No circular dependencies
+- [ ] try/except blocks only wrap code that can raise (no extra logic inside try)
 - [ ] No code duplication (3+ similar blocks → extract to helper)
 - [ ] No trailing whitespace (spaces at end of lines, empty lines at end of file)
 

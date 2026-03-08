@@ -1,10 +1,10 @@
-"""Test bot for InlineKeyboardPaginatedChoiceDialog.
+"""Test bot for PaginatedChoiceDialog.
 
 Tests:
-- InlineKeyboardPaginatedChoiceDialog with static items
-- InlineKeyboardPaginatedChoiceDialog with dynamic items (callable)
+- PaginatedChoiceDialog with static items
+- PaginatedChoiceDialog with dynamic items (callable)
 - Different page sizes
-- "More..." button behavior and text input selection
+- Next/prev page navigation
 - Cancel functionality
 """
 
@@ -24,7 +24,7 @@ from my_bot_framework import (
     SimpleCommand,
     DialogCommand,
     DialogHandler,
-    InlineKeyboardPaginatedChoiceDialog,
+    PaginatedChoiceDialog,
     is_cancelled,
     get_app,
     get_logger,
@@ -56,14 +56,14 @@ def get_credentials() -> tuple[str, str]:
 # SAMPLE DATA
 # =============================================================================
 
-# Short list - should NOT show "More..." button
+# Short list - fits on single page
 SHORT_ITEMS: list[tuple[str, str]] = [
     ("Apple", "apple"),
     ("Banana", "banana"),
     ("Cherry", "cherry"),
 ]
 
-# Long list - should show "More..." button with default page_size=5
+# Long list - requires pagination with default page_size=5
 EXPENSE_ITEMS: list[tuple[str, str]] = [
     ("Rent $1200", "rent"),
     ("Groceries $95", "groceries"),
@@ -213,9 +213,9 @@ async def on_nocancel_complete(result: Any) -> None:
 # DIALOG DEFINITIONS (wrapped with DialogHandler for on_complete callbacks)
 # =============================================================================
 
-# /short - Tests with a short list (no "More..." button)
+# /short - Tests with a short list (single page)
 short_dialog = DialogHandler(
-    InlineKeyboardPaginatedChoiceDialog(
+    PaginatedChoiceDialog(
         prompt="Select a fruit:",
         items=SHORT_ITEMS,
         page_size=5,
@@ -223,9 +223,9 @@ short_dialog = DialogHandler(
     on_complete=on_short_complete,
 )
 
-# /expenses - Tests with a longer list (shows "More..." button)
+# /expenses - Tests with a longer list (multiple pages)
 expenses_dialog = DialogHandler(
-    InlineKeyboardPaginatedChoiceDialog(
+    PaginatedChoiceDialog(
         prompt="Select expense to remove:",
         items=EXPENSE_ITEMS,
         page_size=5,
@@ -235,29 +235,27 @@ expenses_dialog = DialogHandler(
 
 # /countries - Tests with many items and smaller page size
 countries_dialog = DialogHandler(
-    InlineKeyboardPaginatedChoiceDialog(
+    PaginatedChoiceDialog(
         prompt="Select your country:",
         items=COUNTRY_ITEMS,
         page_size=3,
-        more_label="Show all countries...",
     ),
     on_complete=on_countries_complete,
 )
 
 # /tasks - Tests with dynamic items
 tasks_dialog = DialogHandler(
-    InlineKeyboardPaginatedChoiceDialog(
+    PaginatedChoiceDialog(
         prompt="Select a task to work on:",
         items=get_dynamic_items,
         page_size=4,
-        more_label="View all tasks...",
     ),
     on_complete=on_tasks_complete,
 )
 
 # /nocancel - Tests without cancel button
 nocancel_dialog = DialogHandler(
-    InlineKeyboardPaginatedChoiceDialog(
+    PaginatedChoiceDialog(
         prompt="Select an option (no cancel):",
         items=EXPENSE_ITEMS[:8],
         page_size=3,
@@ -279,12 +277,11 @@ def main() -> None:
     info_text = (
         "<b>Paginated Dialog Bot</b>\n\n"
         "Tests:\n"
-        "• <b>InlineKeyboardPaginatedChoiceDialog</b> - Paginated keyboard selection\n"
+        "• <b>PaginatedChoiceDialog</b> - Paginated keyboard selection\n"
         "• Static items list\n"
         "• Dynamic items via callable\n"
         "• Different page sizes\n"
-        "• \"More...\" button behavior\n"
-        "• Text input selection for remaining items\n"
+        "• Next/prev page navigation\n"
         "• Cancel functionality"
     )
     app.register_command(SimpleCommand(
@@ -310,7 +307,7 @@ def main() -> None:
 
     app.register_command(DialogCommand(
         "/short",
-        "Test short list (no More button)",
+        "Test short list (single page)",
         short_dialog,
     ))
 

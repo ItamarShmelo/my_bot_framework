@@ -46,7 +46,17 @@ my_bot_framework/
 │   ├── time_event.py     # TimeEvent (subclass of ActivateOnConditionEvent)
 │   ├── threshold_event.py # ThresholdEvent (subclass of ActivateOnConditionEvent)
 │   └── factories.py      # Factory functions (create_file_change_event)
-├── dialog.py             # Interactive dialog system
+├── dialog/               # Interactive dialog system (package)
+│   ├── __init__.py       # Public API exports (unchanged from before split)
+│   ├── base.py           # Dialog base, KeyboardType, shared helpers
+│   ├── choice.py         # ChoiceDialog
+│   ├── confirm.py        # ConfirmDialog
+│   ├── paginated.py      # PaginatedChoiceDialog
+│   ├── branch.py         # ChoiceBranchDialog
+│   ├── input.py          # UserInputDialog
+│   ├── composite.py      # SequenceDialog, BranchDialog, LoopDialog, DialogHandler
+│   ├── edit.py           # EditEventDialog
+│   └── factories.py      # create_choice_dialog, create_confirm_dialog, etc.
 ├── telegram_utilities.py # Message type wrappers
 ├── utilities.py          # Helper functions
 └── validators.py         # Reusable validation functions for UserInputDialog
@@ -73,7 +83,7 @@ graph TD
     subgraph business [Business Logic]
         EDITABLE[editable.py]
         EVENT[event.py]
-        DIALOG[dialog.py]
+        DIALOG[dialog/]
     end
 
     subgraph app [Application]
@@ -134,7 +144,7 @@ graph TD
 | `event_examples/factories.py` | `event`, `telegram_utilities` |
 | `event_examples/time_event.py` | `event`, `telegram_utilities` |
 | `event_examples/threshold_event.py` | `event`, `telegram_utilities` |
-| `dialog.py` | `accessors`, `polling`, `telegram_utilities`, `utilities` |
+| `dialog/` | `accessors`, `polling`, `telegram_utilities`, `utilities` |
 | `validators.py` | *(no internal dependencies - uses stdlib only)* |
 | `bot_application.py` | `accessors`, `polling`, `event`, `telegram_utilities` |
 | `__init__.py` | all modules (re-exports public API) |
@@ -146,11 +156,13 @@ graph TD
    breaking the circular dependency chain.
 
 2. **`polling.py`** - Contains `UpdatePollerMixin` and polling functions.
-   Both `event.py` and `dialog.py` need these, so extracting them to a
+   Both `event.py` and `dialog/` need these, so extracting them to a
    separate module prevents circular imports between event and dialog.
 
 3. **All imports at top** - No late/inline imports are needed. This makes
    the code cleaner and dependencies explicit.
+
+**Removed:** The `MINIMAL_TIME_BETWEEN_MESSAGES` constant was removed from `event.py` (dead code).
 
 ## Core Design Patterns
 
@@ -262,19 +274,16 @@ class ComplexBuilder:
 Dialogs use the Composite pattern to build complex flows from simple components.
 
 **Leaf Dialogs** (one question each):
-- **Inline Keyboard Dialogs**:
-  - `InlineKeyboardChoiceDialog` - User selects from inline keyboard options
-  - `InlineKeyboardPaginatedChoiceDialog` - User selects from paginated inline keyboard options
-  - `InlineKeyboardConfirmDialog` - Yes/No prompt with inline keyboard
-  - `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard (static or dynamic branches via callable)
-- **Reply Keyboard Dialogs**:
-  - `ReplyKeyboardChoiceDialog` - User selects from reply keyboard options (buttons at bottom of chat)
-  - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
-  - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
-  - `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard (static or dynamic branches via callable)
+- **Unified Keyboard Dialogs** (single class with `keyboard_type` parameter):
+  - `ChoiceDialog(keyboard_type=KeyboardType.INLINE|REPLY)` - User selects from keyboard options
+  - `PaginatedChoiceDialog(keyboard_type=...)` - User selects from paginated keyboard options (next/prev page navigation)
+  - `ConfirmDialog(keyboard_type=...)` - Yes/No prompt
+  - `ChoiceBranchDialog(keyboard_type=...)` - User selects branch via keyboard (static or dynamic branches via callable)
 - **Other Leaf Dialogs**:
   - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input). Supports `keyboard_type` (INLINE or REPLY): INLINE shows Cancel as an inline keyboard button (callback_query); REPLY shows Cancel as a reply keyboard button (text message). Default is INLINE. Class constant `CANCEL_LABEL` for the Cancel button label.
   - `EditEventDialog` - Edit an event's editable attributes via inline or reply keyboard (configurable via `keyboard_type`)
+
+The old separate `InlineKeyboard*` / `ReplyKeyboard*` classes have been removed. Use the unified classes with the `keyboard_type` parameter.
 
 **Composite Dialogs** (orchestrate children):
 - `SequenceDialog` - Run dialogs in order with named values
@@ -284,14 +293,10 @@ Dialogs use the Composite pattern to build complex flows from simple components.
 
 ```mermaid
 classDiagram
-    Dialog <|-- InlineKeyboardChoiceDialog
-    Dialog <|-- InlineKeyboardPaginatedChoiceDialog
-    Dialog <|-- InlineKeyboardConfirmDialog
-    Dialog <|-- InlineKeyboardChoiceBranchDialog
-    Dialog <|-- ReplyKeyboardChoiceDialog
-    Dialog <|-- ReplyKeyboardPaginatedChoiceDialog
-    Dialog <|-- ReplyKeyboardConfirmDialog
-    Dialog <|-- ReplyKeyboardChoiceBranchDialog
+    Dialog <|-- ChoiceDialog
+    Dialog <|-- PaginatedChoiceDialog
+    Dialog <|-- ConfirmDialog
+    Dialog <|-- ChoiceBranchDialog
     Dialog <|-- UserInputDialog
     Dialog <|-- EditEventDialog
     Dialog <|-- SequenceDialog
@@ -306,18 +311,42 @@ classDiagram
 # Values flow through context automatically
 dialog = SequenceDialog([
     ("name", UserInputDialog("Enter name:")),
-    ("tool", InlineKeyboardChoiceDialog(
+    ("tool", ChoiceDialog(
         prompt="Select tool:",
         choices=lambda ctx: [("Python", "py")] if ctx.get("name") else [],
+        keyboard_type=KeyboardType.INLINE,
     )),
 ])
 
-# Dynamic branches work the same way (InlineKeyboardChoiceBranchDialog, ReplyKeyboardChoiceBranchDialog)
-branch_dialog = InlineKeyboardChoiceBranchDialog(
+# Dynamic branches work the same way (ChoiceBranchDialog)
+branch_dialog = ChoiceBranchDialog(
     prompt="Select action:",
     branches=lambda ctx: {"edit": ("Edit", edit_dialog)} if ctx.get("name") else {},
+    keyboard_type=KeyboardType.INLINE,
 )
 ```
+
+### Handler Pattern (Merged Dialog Classes)
+
+Each merged class (`ChoiceDialog`, `ConfirmDialog`, `PaginatedChoiceDialog`, `ChoiceBranchDialog`) follows a consistent handler pattern:
+
+- **`handle_callback_update(update)`**: Assumes inline keyboard. Early return for reply mode (no-op when `keyboard_type == KeyboardType.REPLY`).
+- **`handle_text_update(update)`**: Assumes reply keyboard. Early return with reminder for inline mode (sends `BUTTON_SELECTION_REMINDER` when user sends text instead of pressing inline buttons).
+- **`_run_dialog()`**: Branches on `keyboard_type` to send the appropriate message type (`TelegramOptionsMessage` for inline, `TelegramReplyKeyboardMessage` for reply).
+
+### Shared Helpers in dialog/base.py
+
+- **`_handle_callback_prelude(update)`** - Answer callback query, remove inline keyboard, return `callback_data` or `None`. Shared prelude for all inline keyboard `handle_callback_update` methods.
+- **`BUTTON_SELECTION_REMINDER`** - Constant message sent when user types text while an inline keyboard is active.
+- **`DONE_CALLBACK`** - Constant for the Done button callback (used by EditEventDialog and similar).
+
+### PaginatedChoiceDialog Redesign
+
+`PaginatedChoiceDialog` was redesigned:
+
+- **No `more_label` parameter** - Removed text-input fallback.
+- **Next/Prev page navigation** - Uses dedicated navigation buttons instead of "More..." + text input.
+- **State tracking**: `_current_page` tracks current page; `_get_page_items(page)` returns items for a page; `_total_pages` property; `_send_page()` method sends the current page keyboard.
 
 **State Machine**:
 ```
@@ -569,10 +598,10 @@ All error handling is centralized in the base class `send()` method. `BadRequest
 
 **Keyboard Message Types:**
 
-- **Inline keyboards** (`TelegramOptionsMessage`): Buttons attached to messages, send `callback_query` events when pressed. Used by `InlineKeyboard*Dialog` classes.
-- **Reply keyboards** (`TelegramReplyKeyboardMessage`): Persistent buttons at bottom of chat, send text messages (button labels) when pressed. Used by `ReplyKeyboard*Dialog` classes. Auto-hide with `one_time_keyboard=True`.
+- **Inline keyboards** (`TelegramOptionsMessage`): Buttons attached to messages, send `callback_query` events when pressed. Used by dialogs with `keyboard_type=KeyboardType.INLINE`.
+- **Reply keyboards** (`TelegramReplyKeyboardMessage`): Persistent buttons at bottom of chat, send text messages (button labels) when pressed. Used by dialogs with `keyboard_type=KeyboardType.REPLY`. Auto-hide with `one_time_keyboard=True`.
 
-**Note:** All message types use `parse_mode=HTML`. Invalid HTML triggers `BadRequest` (fatal). The framework logs a hint to use `html.escape()` and re-raises the error.
+**Note:** All message types use `parse_mode=ParseMode.HTML`. Caption handling is simplified — always passes `parse_mode=ParseMode.HTML`. Invalid HTML triggers `BadRequest` (fatal). The framework logs a hint to use `html.escape()` and re-raises the error.
 
 ## Editable Attributes System
 
@@ -655,12 +684,16 @@ The function signature is:
   - `bool`: `True` if valid, `False` if invalid
   - `str`: Error message (empty string `""` on success, descriptive message on failure)
 
+### Shared Helper
+
+**`_validate_positive_numeric(value, parse_fn, positive_error, parse_error)`** - Internal helper used by `validate_positive_float` and `validate_positive_int` to avoid duplication. Validates that input parses to a positive number using the given parser.
+
 ### Basic Validators
 
 The module provides three simple validators:
 
-1. **`validate_positive_float(value: str)`** - Validates that input is a positive decimal number (accepts both integers and decimals like "5", "3.14", "0.5")
-2. **`validate_positive_int(value: str)`** - Validates that input is a positive integer
+1. **`validate_positive_float(value: str)`** - Validates that input is a positive decimal number (accepts both integers and decimals like "5", "3.14", "0.5"). Uses `_validate_positive_numeric` internally.
+2. **`validate_positive_int(value: str)`** - Validates that input is a positive integer. Uses `_validate_positive_numeric` internally.
 3. **`validate_non_empty(value: str)`** - Validates that input is non-empty after stripping whitespace
 
 ### Factory Validators
@@ -735,6 +768,7 @@ When the user submits text, `UserInputDialog` calls the validator function. If v
 
 The `validators.py` module contains:
 - **`Validator`** - Type alias for validator functions
+- **`_validate_positive_numeric`** - Shared helper for positive numeric validation
 - **Basic validators** - `validate_positive_float`, `validate_positive_int`, `validate_non_empty`
 - **Factory functions** - `validate_int_range`, `validate_float_range`, `validate_date_format`, `validate_regex`
 
@@ -752,7 +786,7 @@ Verifies that a callable accepts exactly one required positional argument. Used 
 
 - **Parameters:** `fn` — the callable to inspect; `name` — human-readable label for assertion messages (e.g., `"choices"`, `"branches"`).
 - **Raises:** `AssertionError` if the callable does not have exactly one required parameter.
-- **Usage:** Dialog classes (`InlineKeyboardChoiceDialog`, `ReplyKeyboardChoiceDialog`, `InlineKeyboardChoiceBranchDialog`, etc.) call this when `choices` or `branches` is a callable, ensuring the callable has the correct signature before use.
+- **Usage:** Dialog classes (`ChoiceDialog`, `ChoiceBranchDialog`, etc.) call this when `choices` or `branches` is a callable, ensuring the callable has the correct signature before use.
 
 ### List Formatting Functions
 
@@ -973,10 +1007,9 @@ pattern using the Template Method:
 ```
 
 Classes that inherit `UpdatePollerMixin`:
-- **Inline Keyboard Leaf Dialogs**: `InlineKeyboardChoiceDialog`, `InlineKeyboardPaginatedChoiceDialog`, `InlineKeyboardConfirmDialog`, `InlineKeyboardChoiceBranchDialog`
-- **Reply Keyboard Leaf Dialogs**: `ReplyKeyboardChoiceDialog`, `ReplyKeyboardPaginatedChoiceDialog`, `ReplyKeyboardConfirmDialog`, `ReplyKeyboardChoiceBranchDialog`
+- **Unified Leaf Dialogs** (with `keyboard_type`): `ChoiceDialog`, `PaginatedChoiceDialog`, `ConfirmDialog`, `ChoiceBranchDialog`
 - **Other Leaf Dialogs**: `UserInputDialog` (Cancel button: inline or reply keyboard based on `keyboard_type`)
-- **Hybrid Dialogs**: `InlineKeyboardChoiceBranchDialog`, `ReplyKeyboardChoiceBranchDialog` (poll for selection, then delegate)
+- **Hybrid Dialogs**: `ChoiceBranchDialog` (poll for selection, then delegate to selected branch)
 - **Events**: `CommandsEvent`
 
 Composite dialogs (`SequenceDialog`, `BranchDialog`, `LoopDialog`, `DialogHandler`)
@@ -985,6 +1018,19 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
 **Note**: `EditEventDialog` does NOT inherit `UpdatePollerMixin` - it delegates to child dialogs. It uses `create_choice_dialog`, `create_confirm_dialog`, and `UserInputDialog` internally, passing through its `keyboard_type` parameter so field selection, boolean editing, and text input fields can use either inline or reply keyboard.
 
 ## Dialog System Architecture
+
+The dialog system was split from a single `dialog.py` file into a `dialog/` package. The public API is unchanged — `dialog/__init__.py` re-exports all public classes and functions.
+
+**Package layout:**
+- `base.py` — Dialog base class, KeyboardType, DialogState, shared helpers (`_handle_callback_prelude`, `BUTTON_SELECTION_REMINDER`, `DONE_CALLBACK`)
+- `choice.py` — ChoiceDialog
+- `confirm.py` — ConfirmDialog
+- `paginated.py` — PaginatedChoiceDialog
+- `branch.py` — ChoiceBranchDialog
+- `input.py` — UserInputDialog
+- `composite.py` — SequenceDialog, BranchDialog, LoopDialog, DialogHandler
+- `edit.py` — EditEventDialog
+- `factories.py` — create_choice_dialog, create_confirm_dialog, etc.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -1012,11 +1058,12 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
    │Leaf Dialogs│    │Composite Dialogs│   │DialogHandler │
    │(+ Mixin)   │    │                 │   │              │
    ├────────────┤    ├─────────────────┤   ├──────────────┤
-   │ Inline KB  │    │ Sequence        │   │ Wrap dialog  │
-   │ Reply KB   │    │ Branch          │   │ Call callback│
-   │ UserInput  │    │ ChoiceBranch*   │   │ on complete  │
-   │ EditEvent  │    │ Loop            │   └──────────────┘
-   └────────────┘    └─────────────────┘   (* hybrid - has Mixin)
+   │ Choice     │    │ Sequence        │   │ Wrap dialog  │
+   │ Paginated  │    │ Branch          │   │ Call callback│
+   │ Confirm    │    │ ChoiceBranch*   │   │ on complete  │
+   │ UserInput  │    │ Loop            │   └──────────────┘
+   │ EditEvent  │    │                 │   (* hybrid - has Mixin)
+   └────────────┘    └─────────────────┘
 ```
 
 ### Keyboard Type System
@@ -1026,9 +1073,9 @@ The framework supports two keyboard types via the `KeyboardType` enum:
 - **`KeyboardType.INLINE`**: Inline keyboards attached to messages (`TelegramOptionsMessage`)
 - **`KeyboardType.REPLY`**: Reply keyboards at bottom of chat (`TelegramReplyKeyboardMessage`)
 
-**Implementation Differences:**
+**Implementation Differences** (per `keyboard_type` in unified classes):
 
-| Aspect | Inline Keyboard Dialogs | Reply Keyboard Dialogs |
+| Aspect | `keyboard_type=INLINE` | `keyboard_type=REPLY` |
 |--------|------------------------|------------------------|
 | **Message Type** | `TelegramOptionsMessage` | `TelegramReplyKeyboardMessage` |
 | **Input Handling** | `handle_callback_update()` processes `callback_query` events | `handle_text_update()` matches text against button labels |
@@ -1036,28 +1083,25 @@ The framework supports two keyboard types via the `KeyboardType` enum:
 | **Auto-hide** | Manual removal required | `one_time_keyboard=True` auto-hides after selection |
 | **Button Press** | Sends `callback_query` with `callback_data` | Sends text message with button label text |
 
-**Class Naming Convention:**
+**Unified Classes:**
 
-- **Inline keyboard dialogs**: `InlineKeyboard*Dialog` (e.g., `InlineKeyboardChoiceDialog`)
-- **Reply keyboard dialogs**: `ReplyKeyboard*Dialog` (e.g., `ReplyKeyboardChoiceDialog`)
+All choice-style dialogs are now single classes with a `keyboard_type` parameter. The old separate `InlineKeyboard*` / `ReplyKeyboard*` classes have been removed.
 
 **Factory Functions:**
 
-Factory functions (`create_choice_dialog`, `create_confirm_dialog`, `create_user_input_dialog`, etc.) accept a `keyboard_type` parameter to create the appropriate dialog class. `create_user_input_dialog` creates a `UserInputDialog` with the specified keyboard type for the Cancel button.
+Factory functions (`create_choice_dialog`, `create_confirm_dialog`, `create_paginated_choice_dialog`, `create_choice_branch_dialog`, `create_user_input_dialog`) accept a `keyboard_type` parameter and return the unified dialog class configured accordingly:
 
 ```python
 def create_choice_dialog(
     prompt: str,
-    choices: list[tuple[str, str]],
+    choices: list[tuple[str, str]] | Callable,
     keyboard_type: KeyboardType = KeyboardType.INLINE,
     include_cancel: bool = True,
 ) -> Dialog[str]:
-    if keyboard_type == KeyboardType.REPLY:
-        return ReplyKeyboardChoiceDialog(prompt, choices, include_cancel)
-    return InlineKeyboardChoiceDialog(prompt, choices, include_cancel)
+    return ChoiceDialog(prompt, choices, include_cancel=include_cancel, keyboard_type=keyboard_type)
 ```
 
-**BranchesType and `create_choice_branch_dialog`**: The `BranchesType` type alias is `dict[str, tuple[str, Dialog]] | Callable[[dict[str, Any]], dict[str, tuple[str, Dialog]]]`. Both `InlineKeyboardChoiceBranchDialog` and `ReplyKeyboardChoiceBranchDialog` accept either a static dict or a callable `context -> dict` for `branches`. The `get_branches()` method evaluates the callable when dynamic. The factory `create_choice_branch_dialog(prompt, branches, keyboard_type, include_cancel)` accepts `BranchesType` for `branches`.
+**BranchesType and `create_choice_branch_dialog`**: The `BranchesType` type alias is `dict[str, tuple[str, Dialog]] | Callable[[dict[str, Any]], dict[str, tuple[str, Dialog]]]`. `ChoiceBranchDialog` accepts either a static dict or a callable `context -> dict` for `branches`. The `get_branches()` method evaluates the callable when dynamic. The factory `create_choice_branch_dialog(prompt, branches, keyboard_type, include_cancel)` accepts `BranchesType` for `branches`.
 
 ### Cancellation with CANCELLED Sentinel
 
@@ -1089,7 +1133,7 @@ Each dialog stores its result in `_dialog_result` and exposes it via the `dialog
 - **DialogHandler**: Store inner dialog's `dialog_result`
 - **EditEventDialog**: Store `{field: value}` dict of staged edits on Done, or `CANCELLED` on Cancel
 
-Inline keyboard dialogs send messages directly via `get_app().send_messages()` (no `_send_response` methods). `cancel()` returns `None`.
+Unified keyboard dialogs send messages directly via `get_app().send_messages()` (no `_send_response` methods). `cancel()` returns `None`.
 
 ## EditEventDialog Architecture
 

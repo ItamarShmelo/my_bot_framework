@@ -213,12 +213,11 @@ class TelegramImageMessage(TelegramMessage):
         image_path = Path(self.image_path)
         logger.debug('TelegramImageMessage._send_impl: sending path="%s"', image_path)
         with image_path.open("rb") as handle:
-            caption_text = self.caption or ""
             await bot.send_photo(
                 chat_id=chat_id,
                 photo=handle,
-                caption=caption_text if caption_text else None,
-                parse_mode=ParseMode.HTML if caption_text else None,
+                caption=self.caption,
+                parse_mode=ParseMode.HTML,
                 write_timeout=60,
             )
         logger.info('TelegramImageMessage._send_impl: sent path="%s"', image_path)
@@ -256,12 +255,11 @@ class TelegramDocumentMessage(TelegramMessage):
         document_path = Path(self.file_path)
         logger.debug('TelegramDocumentMessage._send_impl: sending path="%s"', document_path)
         with document_path.open("rb") as handle:
-            caption_text = self.caption or ""
             await bot.send_document(
                 chat_id=chat_id,
                 document=handle,
-                caption=caption_text if caption_text else None,
-                parse_mode=ParseMode.HTML if caption_text else None,
+                caption=self.caption,
+                parse_mode=ParseMode.HTML,
                 write_timeout=120,
             )
         logger.info('TelegramDocumentMessage._send_impl: sent path="%s"', document_path)
