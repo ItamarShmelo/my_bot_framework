@@ -5,8 +5,10 @@ Tests:
 - CANCELLED sentinel: Unambiguous cancellation detection
 - is_cancelled(): Helper function for checking cancellation
 - Nested DialogHandlers: Multiple handlers in a chain
-- DialogResult: Standardized result structure from build_result()
+- DialogResult: Sentinel class for non-value dialog outcomes (CANCELLED, DONE)
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -69,7 +71,7 @@ def get_credentials() -> tuple[str, str]:
 # /handler - Tests basic DialogHandler with on_complete callback
 async def on_feedback_complete(result: Any) -> None:
     """Callback when feedback dialog completes - sends Telegram message.
-    
+
     Args:
         result: The dialog result (selected choice or CANCELLED).
     """
@@ -96,7 +98,7 @@ feedback_dialog = DialogHandler(
 # /sequence_handler - Tests DialogHandler wrapping a SequenceDialog
 async def on_survey_complete(result: Any) -> None:
     """Callback when survey dialog completes - sends Telegram message.
-    
+
     Args:
         result: The dialog result (dict with survey answers or CANCELLED).
     """
@@ -136,7 +138,7 @@ survey_dialog = DialogHandler(
 # /async_handler - Tests DialogHandler with async on_complete callback
 async def on_order_complete(result: Any) -> None:
     """Async callback when order dialog completes - sends Telegram message.
-    
+
     Args:
         result: The dialog result (dict with order details or CANCELLED).
     """
@@ -178,7 +180,7 @@ order_dialog = DialogHandler(
 # /nested_handler - Tests nested DialogHandlers
 async def on_inner_complete(result: Any) -> None:
     """Callback for inner dialog - sends Telegram message.
-    
+
     Args:
         result: The dialog result (selected choice or CANCELLED).
     """
@@ -192,7 +194,7 @@ async def on_inner_complete(result: Any) -> None:
 
 async def on_outer_complete(result: Any) -> None:
     """Callback for outer dialog - sends Telegram message.
-    
+
     Args:
         result: The dialog result (selected choice or CANCELLED).
     """
@@ -220,7 +222,7 @@ nested_dialog = DialogHandler(
 # /cancel_test - Tests cancellation handling
 async def on_cancel_test_complete(result: Any) -> None:
     """Callback demonstrating CANCELLED sentinel usage - sends Telegram message.
-    
+
     Args:
         result: The dialog result (confirmation boolean or CANCELLED).
     """
@@ -299,7 +301,7 @@ def main() -> None:
         "• <code>CANCELLED</code> sentinel - Unambiguous cancellation detection\n"
         "• <code>is_cancelled()</code> - Helper function for checking cancellation\n"
         "• Nested DialogHandlers - Multiple handlers in a chain\n"
-        "• <code>DialogResult</code> - Standardized result structure\n\n"
+        "• <code>DialogResult</code> - Sentinel class for non-value outcomes (CANCELLED, DONE)\n\n"
         "<b>Commands:</b>\n"
         "/handler - Basic DialogHandler test\n"
         "/sequence_handler - DialogHandler with SequenceDialog\n"

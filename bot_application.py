@@ -1,8 +1,10 @@
 """BotApplication singleton for managing Telegram bot lifecycle."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any
 
 from telegram import Bot
 
@@ -34,19 +36,19 @@ class BotApplication:
     name raises ValueError, and removing a missing event name raises KeyError.
     """
 
-    _instance: Optional["BotApplication"] = None
+    _instance: BotApplication | None = None
 
     bot: Bot
     chat_id: str
     logger: logging.Logger
     stop_event: asyncio.Event
-    events: List["Event"]
-    commands: List["Command"]
+    events: list[Event]
+    commands: list[Command]
     _running: bool
-    _events_by_name: Dict[str, "Event"]
-    _event_tasks: Dict[str, "asyncio.Task[None]"]
-    _task_event_names: Dict["asyncio.Task[None]", str]
-    _removed_event_names: Set[str]
+    _events_by_name: dict[str, Event]
+    _event_tasks: dict[str, asyncio.Task[None]]
+    _task_event_names: dict[asyncio.Task[None], str]
+    _removed_event_names: set[str]
     _new_event_signal: asyncio.Event
 
     def __init__(
@@ -70,7 +72,7 @@ class BotApplication:
         self._new_event_signal = asyncio.Event()
 
     @classmethod
-    def get_instance(cls) -> "BotApplication":
+    def get_instance(cls) -> BotApplication:
         """Get the singleton instance.
 
         Raises:
@@ -91,7 +93,7 @@ class BotApplication:
         token: str,
         chat_id: str,
         logger: logging.Logger,
-    ) -> "BotApplication":
+    ) -> BotApplication:
         """Initialize the singleton with required parameters.
 
         Args:
@@ -112,7 +114,7 @@ class BotApplication:
         logger.info("BotApplication.initialize: initialized chat_id=%s", chat_id)
         return cls._instance
 
-    def register_event(self, event: "Event") -> None:
+    def register_event(self, event: Event) -> None:
         """Register an event to be run by the bot.
 
         If the bot is already running, the event is started immediately.
@@ -195,7 +197,7 @@ class BotApplication:
             event_name,
         )
 
-    def register_command(self, command: "Command") -> None:
+    def register_command(self, command: Command) -> None:
         """Register a command to be available to users."""
         self.commands.append(command)
         self.logger.debug("BotApplication.register_command: registered command=%s", command.command)
@@ -337,7 +339,7 @@ class BotApplication:
                     self._new_event_signal.wait(),
                 )
 
-                wait_tasks: Set[asyncio.Task[Any]] = set(self._event_tasks.values())
+                wait_tasks: set[asyncio.Task[Any]] = set(self._event_tasks.values())
                 wait_tasks.update({stop_task, signal_task})
                 done, _ = await asyncio.wait(
                     wait_tasks,
@@ -392,7 +394,7 @@ class BotApplication:
                     exc_info=True,
                 )
 
-    def _register_event_instance(self, event: "Event") -> None:
+    def _register_event_instance(self, event: Event) -> None:
         """Register an event object in the internal registries.
 
         Args:
@@ -456,7 +458,7 @@ class BotApplication:
                 f"Event with name '{event_name}' is still shutting down."
             )
 
-    def _start_event_task(self, event: "Event") -> None:
+    def _start_event_task(self, event: Event) -> None:
         """Create and track the task for a registered event.
 
         Args:
@@ -472,7 +474,7 @@ class BotApplication:
             len(self._event_tasks),
         )
 
-    def _handle_event_task_completion(self, task: "asyncio.Task[None]") -> None:
+    def _handle_event_task_completion(self, task: asyncio.Task[None]) -> None:
         """Process completion of an event task.
 
         Args:
@@ -546,7 +548,7 @@ class BotApplication:
 
     async def send_messages(
         self,
-        messages: Union[str, TelegramMessage, List[Union[str, TelegramMessage]]],
+        messages: str | TelegramMessage | list[str | TelegramMessage],
     ) -> None:
         """Send one or more messages immediately.
 

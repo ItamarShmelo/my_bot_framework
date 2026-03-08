@@ -300,7 +300,7 @@ app.register_command(cmd)
 
 ### Dialogs
 
-The framework provides built-in dialog types for common interactions:
+The framework provides built-in dialog types for common interactions. All dialogs extend `Dialog[T]` (generic base class where `T` is the result type). After completion, the result is available via the `dialog_result` property (`T` or a `DialogResult` sentinel such as `NOT_SET` (internal initial state), `CANCELLED`, or `DONE`).
 
 **Leaf Dialogs** (atomic single-step):
 - **Inline Keyboard** (attached to message):
@@ -330,11 +330,11 @@ from my_bot_framework import (
     ReplyKeyboardChoiceDialog, ReplyKeyboardConfirmDialog,
     SequenceDialog, DialogHandler, DialogCommand,
     KeyboardType, create_choice_dialog, create_confirm_dialog,
-    CANCELLED, is_cancelled,
+    CANCELLED, DONE, is_cancelled,
 )
 
 # Simple inline keyboard choice dialog (default)
-color_dialog = ChoiceDialog("Pick a color:", [
+color_dialog = InlineKeyboardChoiceDialog("Pick a color:", [
     ("Red", "red"),
     ("Green", "green"),
     ("Blue", "blue"),
@@ -365,7 +365,7 @@ expenses = [
     ("Insurance $200", "7"),
     # ... many more items
 ]
-expense_dialog = PaginatedChoiceDialog(
+expense_dialog = InlineKeyboardPaginatedChoiceDialog(
     prompt="Select expense to remove:",
     items=expenses,
     page_size=5,  # Show first 5 as buttons
@@ -375,7 +375,7 @@ expense_dialog = PaginatedChoiceDialog(
 # Multi-step sequence with mixed keyboard types
 survey_dialog = SequenceDialog([
     ("name", UserInputDialog("What is your name?")),
-    ("rating", ChoiceDialog("Rate our service:", [
+    ("rating", InlineKeyboardChoiceDialog("Rate our service:", [
         ("5 Stars", "5"),
         ("4 Stars", "4"),
         ("3 Stars", "3"),
@@ -496,13 +496,13 @@ The dialog shows a field list with current values. Boolean fields use toggle but
 
 #### Cancellation Handling
 
-Use the `CANCELLED` sentinel for unambiguous cancellation detection:
+Use the `CANCELLED` and `DONE` sentinels (instances of `DialogResult`; `NOT_SET` is internal initial state) for unambiguous outcome detection:
 
 ```python
-from my_bot_framework import CANCELLED, is_cancelled
+from my_bot_framework import CANCELLED, DONE, is_cancelled
 
 def on_complete(result):
-    # Using helper function
+    # Using helper function for cancellation
     if is_cancelled(result):
         print("Cancelled!")
         return
@@ -512,8 +512,16 @@ def on_complete(result):
         print("Cancelled!")
         return
     
+    # DONE is another DialogResult sentinel (e.g., from EditEventDialog Done button)
+    # NOT_SET is the initial state before dialog completes (internal use)
+    if result is DONE:
+        print("Done without value")
+        return
+    
     print(f"Got result: {result}")
 ```
+
+Dialogs are generic: `Dialog[T]` where `T` is the result type (e.g., `Dialog[str]`, `Dialog[bool]`, `Dialog[dict[str, Any]]`). After completion, access the result via the `dialog_result` property.
 
 #### Validators
 

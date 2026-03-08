@@ -1,10 +1,11 @@
 """Generic utilities for the bot framework."""
 
+from __future__ import annotations
+
 import html
-from typing import List
 
 
-def divide_message_to_chunks(message: str, chunk_size: int) -> List[str]:
+def divide_message_to_chunks(message: str, chunk_size: int) -> list[str]:
     """Split a message into fixed-size chunks."""
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")

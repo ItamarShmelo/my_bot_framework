@@ -8,11 +8,13 @@ Tests:
 - Cancel functionality
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -29,7 +31,7 @@ from my_bot_framework import (
 )
 
 
-def get_credentials() -> Tuple[str, str]:
+def get_credentials() -> tuple[str, str]:
     """Get bot credentials from .token and .chat_id files in test_bots directory."""
     test_bots_dir = Path(__file__).resolve().parent
     token_file = test_bots_dir / ".token"
@@ -55,14 +57,14 @@ def get_credentials() -> Tuple[str, str]:
 # =============================================================================
 
 # Short list - should NOT show "More..." button
-SHORT_ITEMS: List[Tuple[str, str]] = [
+SHORT_ITEMS: list[tuple[str, str]] = [
     ("Apple", "apple"),
     ("Banana", "banana"),
     ("Cherry", "cherry"),
 ]
 
 # Long list - should show "More..." button with default page_size=5
-EXPENSE_ITEMS: List[Tuple[str, str]] = [
+EXPENSE_ITEMS: list[tuple[str, str]] = [
     ("Rent $1200", "rent"),
     ("Groceries $95", "groceries"),
     ("Electric $85", "electric"),
@@ -78,7 +80,7 @@ EXPENSE_ITEMS: List[Tuple[str, str]] = [
 ]
 
 # Very long list - for testing with many items
-COUNTRY_ITEMS: List[Tuple[str, str]] = [
+COUNTRY_ITEMS: list[tuple[str, str]] = [
     ("United States", "us"),
     ("Canada", "ca"),
     ("United Kingdom", "uk"),
@@ -102,7 +104,7 @@ COUNTRY_ITEMS: List[Tuple[str, str]] = [
 ]
 
 
-def get_dynamic_items(context: Dict[str, Any]) -> List[Tuple[str, str]]:
+def get_dynamic_items(context: dict[str, Any]) -> list[tuple[str, str]]:
     """Generate items dynamically based on context.
 
     Args:

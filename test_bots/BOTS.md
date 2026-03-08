@@ -172,10 +172,12 @@ python test_bots/dialog_bot.py
 
 **Features tested:**
 - `DialogHandler` - Wrap dialogs with on_complete callback
-- `CANCELLED` sentinel - Unambiguous cancellation detection
+- `CANCELLED` sentinel - Unambiguous cancellation detection (instance of `DialogResult`)
+- `DONE` sentinel - Non-value outcome (instance of `DialogResult`)
+- `NOT_SET` sentinel - Internal initial state before dialog completes (instance of `DialogResult`)
 - `is_cancelled()` - Helper function for checking cancellation
 - Nested `DialogHandler` - Multiple handlers in a chain
-- `DialogResult` - Standardized result structure from `build_result()`
+- `dialog_result` property - Result after completion (T or DialogResult sentinel)
 - Async `on_complete` callbacks
 - Integration with `InlineKeyboardChoiceDialog` and `InlineKeyboardConfirmDialog`
 - Integration with `SequenceDialog`
@@ -195,9 +197,11 @@ python test_bots/dialog_bot.py
 | Feature | Description |
 |---------|-------------|
 | `DialogHandler` | Composite that runs a dialog and calls on_complete |
-| `CANCELLED` | Sentinel object for unambiguous cancellation |
+| `CANCELLED` | DialogResult sentinel for unambiguous cancellation |
+| `DONE` | DialogResult sentinel for non-value outcomes |
+| `NOT_SET` | DialogResult sentinel for internal initial state (before completion) |
 | `is_cancelled()` | Helper to check if result is CANCELLED |
-| `build_result()` | Polymorphic method for standardized results |
+| `dialog_result` | Property exposing result (T or DialogResult) |
 
 **Run:**
 ```bash

@@ -7,13 +7,15 @@ Tests:
 - Manual cross-field validation pattern (educational)
 """
 
+from __future__ import annotations
+
 import asyncio
 import html
 import logging
 import random
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -35,7 +37,7 @@ from my_bot_framework import (
 )
 
 
-def get_credentials() -> Tuple[str, str]:
+def get_credentials() -> tuple[str, str]:
     """Get bot credentials from .token and .chat_id files in test_bots directory.
 
     Returns:
@@ -191,7 +193,7 @@ def main() -> None:
 
     # --- APPROACH 1: EditEventDialog with validator (recommended) ---
 
-    def validate_limits(context: Dict[str, Any]) -> Tuple[bool, str]:
+    def validate_limits(context: dict[str, Any]) -> tuple[bool, str]:
         """Cross-field validation: ensure limit_min < limit_max.
 
         This validator runs after each field edit. It receives the context
@@ -269,7 +271,7 @@ def main() -> None:
         Returns:
             Validator function for UserInputDialog
         """
-        def validator(value_str: str) -> Tuple[bool, str]:
+        def validator(value_str: str) -> tuple[bool, str]:
             try:
                 max_val = float(value_str)
             except ValueError:
@@ -287,7 +289,7 @@ def main() -> None:
 
     def make_min_validator():
         """Create validator for min value (simple range check)."""
-        def validator(value_str: str) -> Tuple[bool, str]:
+        def validator(value_str: str) -> tuple[bool, str]:
             try:
                 min_val = float(value_str)
             except ValueError:

@@ -17,13 +17,13 @@ Composite dialogs:
 - LoopDialog: Repeat until exit condition
 """
 
+from __future__ import annotations
+
 import asyncio
 import inspect
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from enum import Enum
-import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 
@@ -44,13 +44,23 @@ if TYPE_CHECKING:
     from .editable import EditableAttribute
 
 
-# Sentinel for cancelled dialogs - distinct from None which could be a valid value
-CANCELLED = object()
+T = TypeVar("T")
+
+
+class DialogResult(Enum):
+    """Sentinel for non-value dialog outcomes (not set, cancellation, done)."""
+    NOT_SET = "NOT_SET"
+    CANCELLED = "CANCELLED"
+    DONE = "DONE"
+
+
+# String used as callback_data for "Done" in choice dialogs (Telegram API requires strings)
+DONE_CALLBACK = "__done__"
 
 
 def is_cancelled(result: Any) -> bool:
     """Check if a dialog result represents cancellation."""
-    return result is CANCELLED
+    return result is DialogResult.CANCELLED
 
 
 # Global debug flag - when True, dialogs send confirmation messages to user
@@ -62,18 +72,6 @@ def set_dialog_debug(enabled: bool) -> None:
     """Enable or disable dialog debug messages."""
     global DIALOG_DEBUG
     DIALOG_DEBUG = enabled
-
-
-# Type alias for dialog results - nested dictionary mirroring dialog structure
-DialogResult = Union[Any, Dict[str, "DialogResult"]]
-
-# Type alias for branch dialog branches - static dict or dynamic callable.
-# Either a dict mapping keys to (label, dialog) tuples, or a callable(context)
-# that returns such a dict.
-BranchesType = Union[
-    Dict[str, Tuple[str, "Dialog"]],
-    Callable[[Dict[str, Any]], Dict[str, Tuple[str, "Dialog"]]],
-]
 
 
 class DialogState(Enum):
@@ -90,60 +88,43 @@ class KeyboardType(Enum):
     REPLY = "reply"
 
 
-@dataclass
-class DialogResponse:
-    """Response from a dialog - text with optional inline keyboard.
-
-    Attributes:
-        text: The message text to send/edit.
-        keyboard: Optional InlineKeyboardMarkup for buttons.
-        edit_message: If True, edit the existing message. If False, send new.
-    """
-    text: str
-    keyboard: Optional[InlineKeyboardMarkup] = None
-    edit_message: bool = True
-
-    # Sentinel for "no message change needed" - dialog consumed input but no UI update
-    NO_CHANGE: "DialogResponse" = None  # type: ignore[assignment]
-
-
-# Initialize the NO_CHANGE sentinel after class definition
-DialogResponse.NO_CHANGE = DialogResponse(text="", keyboard=None, edit_message=False)
-
-
-class Dialog(ABC):
+class Dialog(ABC, Generic[T]):
     """Base class for all dialogs (leaf and composite).
 
     All dialogs share:
     - state: Current DialogState
-    - value: Result after completion
+    - dialog_result: Result after completion (T or DialogResult sentinel)
     - context: Shared dict for cross-dialog communication
 
     Methods:
     - start(context): Async entry point, runs dialog until complete
     - _run_dialog(): Abstract method subclasses implement
-    - build_result(): Build standardized DialogResult
     - cancel(): Cancel and complete with CANCELLED
     - reset(): Reset for reuse
     """
 
     def __init__(self) -> None:
         self.state = DialogState.INACTIVE
-        self._value: Any = None
-        self._context: Dict[str, Any] = {}
+        self._dialog_result: T | DialogResult = DialogResult.NOT_SET
+        self._context: dict[str, Any] = {}
+
+    @abstractmethod
+    async def _run_dialog(self) -> T | DialogResult:
+        """Run the dialog logic. Subclasses implement this."""
+        ...
 
     @property
-    def value(self) -> Any:
+    def dialog_result(self) -> T | DialogResult:
         """Result value after dialog completes."""
-        return self._value
+        return self._dialog_result
 
     @property
-    def context(self) -> Dict[str, Any]:
+    def context(self) -> dict[str, Any]:
         """Shared context dict for cross-dialog communication."""
         return self._context
 
     @context.setter
-    def context(self, ctx: Dict[str, Any]) -> None:
+    def context(self, ctx: dict[str, Any]) -> None:
         """Set the shared context."""
         self._context = ctx
 
@@ -159,8 +140,8 @@ class Dialog(ABC):
 
     async def start(
         self,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> DialogResult:
+        context: dict[str, Any] | None = None,
+    ) -> T | DialogResult:
         """Start and run the dialog until complete.
 
         Template method that:
@@ -172,44 +153,42 @@ class Dialog(ABC):
             context: Optional shared context dict.
 
         Returns:
-            DialogResult
+            The dialog's result value or a DialogResult sentinel.
         """
+        get_logger().debug("Dialog.start: started")
         self.reset()
         self._context = context if context is not None else {}
-        return await self._run_dialog()
+        result = await self._run_dialog()
+        get_logger().debug("Dialog.start: completed")
+        return result
 
-    @abstractmethod
-    async def _run_dialog(self) -> DialogResult:
-        """Run the dialog logic. Subclasses implement this."""
-        ...
-
-    @abstractmethod
-    def build_result(self) -> DialogResult:
-        """Build the standardized result for this dialog.
-
-        Each dialog type implements its own result structure.
-        """
-        ...
-
-    def cancel(self) -> DialogResponse:
-        """Cancel dialog - sets value=CANCELLED, state=COMPLETE."""
-        self._value = CANCELLED
+    def cancel(self) -> None:
+        """Cancel dialog - sets dialog_result=CANCELLED, state=COMPLETE."""
+        self._dialog_result = DialogResult.CANCELLED
         self.state = DialogState.COMPLETE
-        logger = get_logger()
-        logger.info("Dialog.cancel: cancelled")
-        return DialogResponse(text="Cancelled.", keyboard=None, edit_message=False)
+        get_logger().info("Dialog.cancel: cancelled")
 
     def reset(self) -> None:
         """Reset dialog for reuse (e.g., in LoopDialog)."""
         self.state = DialogState.INACTIVE
-        self._value = None
+        self._dialog_result = DialogResult.NOT_SET
+        get_logger().debug("Dialog.reset: reset state=INACTIVE")
+
+
+# Type alias for branch dialog branches - static dict or dynamic callable.
+# Either a dict mapping keys to (label, dialog) tuples, or a callable(context)
+# that returns such a dict.
+BranchesType = (
+    dict[str, tuple[str, Dialog]]
+    | Callable[[dict[str, Any]], dict[str, tuple[str, Dialog]]]
+)
 
 
 # =============================================================================
 # LEAF DIALOGS
 # =============================================================================
 
-class InlineKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
+class InlineKeyboardChoiceDialog(Dialog[str], UpdatePollerMixin):
     """Leaf dialog: User selects from inline keyboard options.
 
     Supports static choices list or dynamic choices via callable.
@@ -222,7 +201,7 @@ class InlineKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
     def __init__(
         self,
         prompt: str,
-        choices: Union[List[Tuple[str, str]], Callable[[Dict[str, Any]], List[Tuple[str, str]]]],
+        choices: list[tuple[str, str]] | Callable[[dict[str, Any]], list[tuple[str, str]]],
         include_cancel: bool = True,
     ) -> None:
         """Create a choice dialog.
@@ -246,7 +225,23 @@ class InlineKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
         self.include_cancel = include_cancel
         self._text_reminder_sent = False  # Spam control
 
-    def get_choices(self) -> List[Tuple[str, str]]:
+    async def _run_dialog(self) -> str | DialogResult:
+        """Send prompt with keyboard, then poll until selection made."""
+        self.state = DialogState.ACTIVE
+        self._text_reminder_sent = False  # Reset spam control
+
+        get_logger().debug(
+            "InlineKeyboardChoiceDialog._run_dialog: sending prompt prompt='%.80s'",
+            self.prompt,
+        )
+        # Send initial message with keyboard
+        await get_app().send_messages(TelegramOptionsMessage(self.prompt, self._build_keyboard()))
+        get_logger().info("InlineKeyboardChoiceDialog._run_dialog: prompt_sent polling")
+
+        # Poll until complete
+        return await self.poll()
+
+    def get_choices(self) -> list[tuple[str, str]]:
         """Get choices - evaluates callable if dynamic."""
         if callable(self._choices):
             return self._choices(self.context)
@@ -260,6 +255,12 @@ class InlineKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
         """Answer callback, remove keyboard, handle button press."""
         callback_query = update.callback_query
         if callback_query is None or callback_query.data is None:
+            get_logger().debug(
+                "InlineKeyboardChoiceDialog.handle_callback_update: skipped invalid_callback "
+                "callback_query=%s data=%s",
+                callback_query is not None,
+                callback_query.data if callback_query else None,
+            )
             return
         # Answer callback and remove keyboard
         await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
@@ -272,15 +273,15 @@ class InlineKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
         callback_data: str = callback_query.data
 
         if callback_data == self.CANCEL_CALLBACK:
-            response: DialogResponse = self.cancel()
+            self.cancel()
         else:
             # Verify callback is valid
-            valid_callbacks: List[str] = [cb for _, cb in self.get_choices()]
+            valid_callbacks: list[str] = [cb for _, cb in self.get_choices()]
             if callback_data not in valid_callbacks:
                 get_logger().debug("InlineKeyboardChoiceDialog.handle_callback_update: unknown_callback callback_data=%s", callback_data)
                 return  # Unknown callback
 
-            self._value = callback_data
+            self._dialog_result = callback_data
             self.state = DialogState.COMPLETE
 
             # Find the label for the selected choice
@@ -291,16 +292,7 @@ class InlineKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
 
             # Only send confirmation message if debug mode is enabled
             if DIALOG_DEBUG:
-                response = DialogResponse(
-                    text=f"Selected: {label}",
-                    keyboard=None,
-                    edit_message=False,
-                )
-            else:
-                response = DialogResponse.NO_CHANGE
-
-        if response:
-            await self._send_response(response)
+                await get_app().send_messages(f"Selected: {label}")
 
     async def handle_text_update(self, update: Update) -> None:
         """ChoiceDialog ignores text - clarify to user (once per activation)."""
@@ -308,39 +300,9 @@ class InlineKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
             self._text_reminder_sent = True
             await get_app().send_messages("Please use the buttons to make a selection.")
 
-    def _get_poll_result(self) -> Any:
+    def _get_poll_result(self) -> str | DialogResult:
         """Return the dialog result after polling completes."""
-        return self.build_result()
-
-    def build_result(self) -> DialogResult:
-        """Leaf returns raw value."""
-        return self.value
-
-    async def _send_response(self, response: DialogResponse) -> None:
-        """Send a dialog response via Telegram."""
-        if response is DialogResponse.NO_CHANGE:
-            return
-
-        if response.keyboard:
-            await get_app().send_messages(TelegramOptionsMessage(response.text, response.keyboard))
-        else:
-            await get_app().send_messages(response.text)
-
-    async def _run_dialog(self) -> DialogResult:
-        """Send prompt with keyboard, then poll until selection made."""
-        self.state = DialogState.ACTIVE
-        self._text_reminder_sent = False  # Reset spam control
-
-        # Send initial message with keyboard
-        response = DialogResponse(
-            text=self.prompt,
-            keyboard=self._build_keyboard(),
-            edit_message=False,
-        )
-        await self._send_response(response)
-
-        # Poll until complete
-        return await self.poll()
+        return self.dialog_result
 
     def _build_keyboard(self) -> InlineKeyboardMarkup:
         """Build keyboard from choices."""
@@ -353,7 +315,7 @@ class InlineKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
         return InlineKeyboardMarkup(buttons)
 
 
-class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
+class InlineKeyboardPaginatedChoiceDialog(Dialog[str], UpdatePollerMixin):
     """Leaf dialog: User selects from a paginated list of inline keyboard options.
 
     Shows first `page_size` items as buttons. If there are more items,
@@ -370,7 +332,7 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
     def __init__(
         self,
         prompt: str,
-        items: Union[List[Tuple[str, str]], Callable[[Dict[str, Any]], List[Tuple[str, str]]]],
+        items: list[tuple[str, str]] | Callable[[dict[str, Any]], list[tuple[str, str]]],
         page_size: int = 5,
         more_label: str = "More...",
         include_cancel: bool = True,
@@ -400,19 +362,41 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
         self.include_cancel = include_cancel
         self._showing_more = False  # True when in text input mode for remaining items
         self._text_reminder_sent = False  # Spam control
-        self._prompt_message_id: Optional[int] = None  # Track prompt for keyboard removal
+        self._prompt_message_id: int | None = None  # Track prompt for keyboard removal
 
-    def get_items(self) -> List[Tuple[str, str]]:
+    async def _run_dialog(self) -> str | DialogResult:
+        """Send prompt with keyboard, then poll until selection made."""
+        self.state = DialogState.ACTIVE
+        self._showing_more = False
+        self._text_reminder_sent = False  # Reset spam control
+
+        get_logger().debug(
+            "InlineKeyboardPaginatedChoiceDialog._run_dialog: sending prompt prompt='%.80s' page_size=%d",
+            self.prompt,
+            self.page_size,
+        )
+        # Send initial message with keyboard
+        msg = TelegramOptionsMessage(self.prompt, self._build_keyboard())
+        await get_app().send_messages(msg)
+        if msg.sent_message:
+            self._prompt_message_id = msg.sent_message.message_id
+
+        get_logger().info("InlineKeyboardPaginatedChoiceDialog._run_dialog: prompt_sent polling")
+
+        # Poll until complete
+        return await self.poll()
+
+    def get_items(self) -> list[tuple[str, str]]:
         """Get items - evaluates callable if dynamic."""
         if callable(self._items):
             return self._items(self.context)
         return self._items
 
-    def _get_first_page_items(self) -> List[Tuple[str, str]]:
+    def _get_first_page_items(self) -> list[tuple[str, str]]:
         """Get items for the first page (buttons)."""
         return self.get_items()[:self.page_size]
 
-    def _get_remaining_items(self) -> List[Tuple[str, str]]:
+    def _get_remaining_items(self) -> list[tuple[str, str]]:
         """Get items beyond the first page."""
         return self.get_items()[self.page_size:]
 
@@ -420,30 +404,23 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
         """Check if there are items beyond the first page."""
         return len(self.get_items()) > self.page_size
 
-    def _build_error_response(self, remaining: List[Tuple[str, str]]) -> DialogResponse:
-        """Build error response for invalid text input.
-
-        Args:
-            remaining: List of remaining items to display.
-
-        Returns:
-            DialogResponse with error message and re-prompt.
-        """
+    async def _send_remaining_items_error(self, remaining: list[tuple[str, str]]) -> None:
+        """Send error message when invalid number input in 'more' mode."""
         lines = [f"{i + 1}. {label}" for i, (label, _) in enumerate(remaining)]
         error_text = f"Please enter a number between 1 and {len(remaining)}.\n\n"
         text_prompt = f"{self.prompt}\n\n" + "\n".join(lines) + "\n\nEnter the number of your choice:"
-
-        keyboard = None
+        keyboard: InlineKeyboardMarkup | None = None
         if self.include_cancel:
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)]
             ])
-
-        return DialogResponse(
-            text=error_text + text_prompt,
-            keyboard=keyboard,
-            edit_message=False,
-        )
+        if keyboard:
+            msg = TelegramOptionsMessage(error_text + text_prompt, keyboard)
+            await get_app().send_messages(msg)
+            if msg.sent_message:
+                self._prompt_message_id = msg.sent_message.message_id
+        else:
+            await get_app().send_messages(error_text + text_prompt)
 
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:
@@ -454,6 +431,12 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
         """Answer callback, remove keyboard, handle button press or show more."""
         callback_query = update.callback_query
         if callback_query is None or callback_query.data is None:
+            get_logger().debug(
+                "InlineKeyboardPaginatedChoiceDialog.handle_callback_update: skipped invalid_callback "
+                "callback_query=%s data=%s",
+                callback_query is not None,
+                callback_query.data if callback_query else None,
+            )
             return
         # Answer callback and remove keyboard
         await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
@@ -466,18 +449,18 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
         callback_data: str = callback_query.data
 
         if callback_data == self.CANCEL_CALLBACK:
-            response: DialogResponse = self.cancel()
+            self.cancel()
         elif callback_data == self.MORE_CALLBACK:
             # Switch to text input mode for remaining items
             self._showing_more = True
             self.state = DialogState.AWAITING_TEXT
 
             # Build numbered list of remaining items
-            remaining: List[Tuple[str, str]] = self._get_remaining_items()
-            lines: List[str] = [f"{i + 1}. {label}" for i, (label, _) in enumerate(remaining)]
+            remaining: list[tuple[str, str]] = self._get_remaining_items()
+            lines: list[str] = [f"{i + 1}. {label}" for i, (label, _) in enumerate(remaining)]
             text: str = f"{self.prompt}\n\n" + "\n".join(lines) + "\n\nEnter the number of your choice:"
 
-            keyboard: Optional[InlineKeyboardMarkup] = None
+            keyboard: InlineKeyboardMarkup | None = None
             if self.include_cancel:
                 keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)]
@@ -485,19 +468,21 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
 
             get_logger().info("InlineKeyboardPaginatedChoiceDialog.handle_callback_update: showing_more remaining_count=%d", len(remaining))
 
-            response = DialogResponse(
-                text=text,
-                keyboard=keyboard,
-                edit_message=False,
-            )
+            if keyboard:
+                msg = TelegramOptionsMessage(text, keyboard)
+                await get_app().send_messages(msg)
+                if msg.sent_message:
+                    self._prompt_message_id = msg.sent_message.message_id
+            else:
+                await get_app().send_messages(text)
         else:
             # Verify callback is valid (from first page)
-            valid_callbacks: List[str] = [cb for _, cb in self._get_first_page_items()]
+            valid_callbacks: list[str] = [cb for _, cb in self._get_first_page_items()]
             if callback_data not in valid_callbacks:
                 get_logger().debug("InlineKeyboardPaginatedChoiceDialog.handle_callback_update: unknown_callback callback_data=%s", callback_data)
                 return  # Unknown callback
 
-            self._value = callback_data
+            self._dialog_result = callback_data
             self.state = DialogState.COMPLETE
 
             # Find the label for the selected choice
@@ -508,16 +493,7 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
 
             # Only send confirmation message if debug mode is enabled
             if DIALOG_DEBUG:
-                response = DialogResponse(
-                    text=f"Selected: {label}",
-                    keyboard=None,
-                    edit_message=False,
-                )
-            else:
-                response = DialogResponse.NO_CHANGE
-
-        if response:
-            await self._send_response(response)
+                await get_app().send_messages(f"Selected: {label}")
 
     async def handle_text_update(self, update: Update) -> None:
         """Handle text input - only valid when showing more items."""
@@ -533,7 +509,7 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
 
         text: str = update.message.text.strip()
 
-        remaining: List[Tuple[str, str]] = self._get_remaining_items()
+        remaining: list[tuple[str, str]] = self._get_remaining_items()
 
         # Try to parse as number
         try:
@@ -544,82 +520,39 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
                 text,
                 exc_info=True,
             )
-            response: DialogResponse = self._build_error_response(remaining)
-        else:
-            # Validate range
-            if choice_num < 1 or choice_num > len(remaining):
-                response = self._build_error_response(remaining)
-            else:
-                # Valid choice - get the selected item
-                selected_label: str
-                selected_callback: str
-                selected_label, selected_callback = remaining[choice_num - 1]
-                self._value = selected_callback
-                self.state = DialogState.COMPLETE
+            await self._send_remaining_items_error(remaining)
+            return
+        # Validate range
+        if choice_num < 1 or choice_num > len(remaining):
+            await self._send_remaining_items_error(remaining)
+            return
 
-                # Log selection
-                get_logger().info(
-                    "InlineKeyboardPaginatedChoiceDialog.handle_text_update: selected label=%s value=%s",
-                    selected_label,
-                    selected_callback,
-                )
+        # Valid choice - get the selected item
+        selected_label: str
+        selected_callback: str
+        selected_label, selected_callback = remaining[choice_num - 1]
+        self._dialog_result = selected_callback
+        self.state = DialogState.COMPLETE
 
-                # Only send confirmation message if debug mode is enabled
-                if DIALOG_DEBUG:
-                    response = DialogResponse(
-                        text=f"Selected: {selected_label}",
-                        keyboard=None,
-                        edit_message=False,
-                    )
-                else:
-                    response = DialogResponse.NO_CHANGE
+        # Log selection
+        get_logger().info(
+            "InlineKeyboardPaginatedChoiceDialog.handle_text_update: selected label=%s value=%s",
+            selected_label,
+            selected_callback,
+        )
 
         # Remove keyboard from previous prompt
         if self._prompt_message_id is not None:
             await get_app().send_messages(TelegramRemoveKeyboardMessage(self._prompt_message_id))
             self._prompt_message_id = None
 
-        if response:
-            await self._send_response(response)
+        # Only send confirmation message if debug mode is enabled
+        if DIALOG_DEBUG:
+            await get_app().send_messages(f"Selected: {selected_label}")
 
-    def _get_poll_result(self) -> Any:
+    def _get_poll_result(self) -> str | DialogResult:
         """Return the dialog result after polling completes."""
-        return self.build_result()
-
-    def build_result(self) -> DialogResult:
-        """Leaf returns raw value."""
-        return self.value
-
-    async def _send_response(self, response: DialogResponse) -> None:
-        """Send a dialog response via Telegram."""
-        if response is DialogResponse.NO_CHANGE:
-            return
-
-        if response.keyboard:
-            msg = TelegramOptionsMessage(response.text, response.keyboard)
-            await get_app().send_messages(msg)
-            # Track message ID for later keyboard removal
-            if msg.sent_message:
-                self._prompt_message_id = msg.sent_message.message_id
-        else:
-            await get_app().send_messages(response.text)
-
-    async def _run_dialog(self) -> DialogResult:
-        """Send prompt with keyboard, then poll until selection made."""
-        self.state = DialogState.ACTIVE
-        self._showing_more = False
-        self._text_reminder_sent = False  # Reset spam control
-
-        # Send initial message with keyboard
-        response = DialogResponse(
-            text=self.prompt,
-            keyboard=self._build_keyboard(),
-            edit_message=False,
-        )
-        await self._send_response(response)
-
-        # Poll until complete
-        return await self.poll()
+        return self.dialog_result
 
     def _build_keyboard(self) -> InlineKeyboardMarkup:
         """Build keyboard from first page items, plus More and Cancel buttons."""
@@ -641,7 +574,7 @@ class InlineKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
         self._prompt_message_id = None
 
 
-class UserInputDialog(Dialog, UpdatePollerMixin):
+class UserInputDialog(Dialog[str], UpdatePollerMixin):
     """Leaf dialog: User enters text.
 
     Optionally validates input before accepting.
@@ -656,8 +589,8 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
 
     def __init__(
         self,
-        prompt: Union[str, Callable[[], str]],
-        validator: Optional[Callable[[str], Tuple[bool, str]]] = None,
+        prompt: str | Callable[[], str],
+        validator: Callable[[str], tuple[bool, str]] | None = None,
         include_cancel: bool = True,
         keyboard_type: KeyboardType = KeyboardType.INLINE,
     ) -> None:
@@ -676,7 +609,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         self.validator = validator
         self.include_cancel = include_cancel
         self.keyboard_type = keyboard_type
-        self._prompt_message_id: Optional[int] = None
+        self._prompt_message_id: int | None = None
 
     @property
     def prompt(self) -> str:
@@ -684,12 +617,47 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         return self._prompt()
 
     @prompt.setter
-    def prompt(self, value: Union[str, Callable[[], str]]) -> None:
+    def prompt(self, value: str | Callable[[], str]) -> None:
         """Set prompt as a string or callable returning a string."""
         if callable(value):
             self._prompt = value
         else:
             self._prompt = lambda: value
+
+    async def _run_dialog(self) -> str | DialogResult:
+        """Show prompt and poll until text input received."""
+        self.state = DialogState.AWAITING_TEXT
+        get_logger().debug(
+            "UserInputDialog._run_dialog: started keyboard_type=%s include_cancel=%s",
+            self.keyboard_type.value,
+            self.include_cancel,
+        )
+
+        if self.keyboard_type == KeyboardType.REPLY:
+            if self.include_cancel:
+                await get_app().send_messages(
+                    TelegramReplyKeyboardMessage(
+                        text=self.prompt,
+                        keyboard=[[self.CANCEL_LABEL]],
+                        one_time_keyboard=False,
+                    )
+                )
+            else:
+                await get_app().send_messages(self.prompt)
+        elif self.keyboard_type == KeyboardType.INLINE:
+            if self.include_cancel:
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(self.CANCEL_LABEL, callback_data=self.CANCEL_CALLBACK)]
+                ])
+                msg = TelegramOptionsMessage(self.prompt, keyboard)
+                await get_app().send_messages(msg)
+                if msg.sent_message:
+                    self._prompt_message_id = msg.sent_message.message_id
+            else:
+                await get_app().send_messages(self.prompt)
+
+        # Poll until complete
+        return await self.poll()
 
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:
@@ -699,6 +667,12 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         """Answer callback, remove keyboard, handle cancel button."""
         callback_query = update.callback_query
         if callback_query is None or callback_query.data is None:
+            get_logger().debug(
+                "UserInputDialog.handle_callback_update: skipped invalid_callback "
+                "callback_query=%s data=%s",
+                callback_query is not None,
+                callback_query.data if callback_query else None,
+            )
             return
         # Answer callback and remove keyboard
         await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
@@ -709,8 +683,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             )
 
         if callback_query.data == self.CANCEL_CALLBACK:
-            response = self.cancel()
-            await self._send_response(response)
+            self.cancel()
 
     async def handle_text_update(self, update: Update) -> None:
         """Validate and accept text input, remove keyboard from previous prompt."""
@@ -732,8 +705,6 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
             self.cancel()
             return
 
-        response: Optional[DialogResponse] = None
-
         # Validate if validator provided
         if self.validator:
             is_valid: bool
@@ -748,7 +719,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
                 )
                 if self.keyboard_type == KeyboardType.REPLY:
                     # Re-show prompt with reply keyboard Cancel button
-                    keyboard: List[List[str]] = [[self.CANCEL_LABEL]] if self.include_cancel else []
+                    keyboard: list[list[str]] = [[self.CANCEL_LABEL]] if self.include_cancel else []
                     await get_app().send_messages(
                         TelegramReplyKeyboardMessage(
                             text=f"{error_msg}\n\n{self.prompt}",
@@ -759,101 +730,38 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
                     return
                 elif self.keyboard_type == KeyboardType.INLINE:
                     # Re-show prompt with inline keyboard Cancel button
-                    inline_keyboard: Optional[InlineKeyboardMarkup] = None
                     if self.include_cancel:
                         inline_keyboard = InlineKeyboardMarkup([
                             [InlineKeyboardButton(self.CANCEL_LABEL, callback_data=self.CANCEL_CALLBACK)]
                         ])
-                    response = DialogResponse(
-                        text=f"{error_msg}\n\n{self.prompt}",
-                        keyboard=inline_keyboard,
-                        edit_message=False,
-                    )
+                        msg = TelegramOptionsMessage(f"{error_msg}\n\n{self.prompt}", inline_keyboard)
+                        await get_app().send_messages(msg)
+                        if msg.sent_message:
+                            self._prompt_message_id = msg.sent_message.message_id
+                    else:
+                        await get_app().send_messages(f"{error_msg}\n\n{self.prompt}")
+                    return
 
-        if response is None:
-            # Validation passed (or no validator)
-            self._value = text
-            self.state = DialogState.COMPLETE
+        # Validation passed (or no validator)
+        self._dialog_result = text
+        self.state = DialogState.COMPLETE
 
-            # Log input
-            text_preview: str = text[:50] if len(text) > 50 else text
-            get_logger().info("UserInputDialog.handle_text_update: received text=%s", text_preview)
-
-            # Only send confirmation message if debug mode is enabled
-            if DIALOG_DEBUG:
-                response = DialogResponse(
-                    text=f"Received: {text}",
-                    keyboard=None,
-                    edit_message=False,
-                )
-            else:
-                response = DialogResponse.NO_CHANGE
+        # Log input
+        text_preview: str = text[:50] if len(text) > 50 else text
+        get_logger().info("UserInputDialog.handle_text_update: received text=%s", text_preview)
 
         # Remove inline keyboard from previous prompt (not needed for reply keyboards)
         if self.keyboard_type == KeyboardType.INLINE and self._prompt_message_id is not None:
             await get_app().send_messages(TelegramRemoveKeyboardMessage(self._prompt_message_id))
             self._prompt_message_id = None
 
-        if response:
-            await self._send_response(response)
+        # Only send confirmation message if debug mode is enabled
+        if DIALOG_DEBUG:
+            await get_app().send_messages(f"Received: {text}")
 
-    def _get_poll_result(self) -> Any:
+    def _get_poll_result(self) -> str | DialogResult:
         """Return the dialog result after polling completes."""
-        return self.build_result()
-
-    def build_result(self) -> DialogResult:
-        """Leaf returns raw value."""
-        return self.value
-
-    async def _send_response(self, response: DialogResponse) -> None:
-        """Send a dialog response via Telegram."""
-        if response is DialogResponse.NO_CHANGE:
-            return
-
-        if response.keyboard:
-            msg = TelegramOptionsMessage(response.text, response.keyboard)
-            await get_app().send_messages(msg)
-            # Track message ID for later keyboard removal
-            if msg.sent_message:
-                self._prompt_message_id = msg.sent_message.message_id
-        else:
-            await get_app().send_messages(response.text)
-
-    async def _run_dialog(self) -> DialogResult:
-        """Show prompt and poll until text input received."""
-        self.state = DialogState.AWAITING_TEXT
-        get_logger().debug(
-            "UserInputDialog._run_dialog: started keyboard_type=%s include_cancel=%s",
-            self.keyboard_type.value,
-            self.include_cancel,
-        )
-
-        if self.keyboard_type == KeyboardType.REPLY:
-            if self.include_cancel:
-                await get_app().send_messages(
-                    TelegramReplyKeyboardMessage(
-                        text=self.prompt,
-                        keyboard=[[self.CANCEL_LABEL]],
-                        one_time_keyboard=False,
-                    )
-                )
-            else:
-                await get_app().send_messages(self.prompt)
-        elif self.keyboard_type == KeyboardType.INLINE:
-            keyboard = None
-            if self.include_cancel:
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton(self.CANCEL_LABEL, callback_data=self.CANCEL_CALLBACK)]
-                ])
-            response = DialogResponse(
-                text=self.prompt,
-                keyboard=keyboard,
-                edit_message=False,
-            )
-            await self._send_response(response)
-
-        # Poll until complete
-        return await self.poll()
+        return self.dialog_result
 
     def reset(self) -> None:
         """Reset dialog for reuse."""
@@ -861,7 +769,7 @@ class UserInputDialog(Dialog, UpdatePollerMixin):
         self._prompt_message_id = None
 
 
-class InlineKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
+class InlineKeyboardConfirmDialog(Dialog[bool], UpdatePollerMixin):
     """Leaf dialog: Yes/No confirmation prompt using inline keyboard.
 
     Convenience dialog for common Yes/No flows.
@@ -895,6 +803,30 @@ class InlineKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
         self.include_cancel = include_cancel
         self._text_reminder_sent = False  # Spam control
 
+    async def _run_dialog(self) -> bool | DialogResult:
+        """Show prompt with Yes/No buttons, then poll until selection made."""
+        self.state = DialogState.ACTIVE
+        self._text_reminder_sent = False  # Reset spam control
+
+        get_logger().debug(
+            "InlineKeyboardConfirmDialog._run_dialog: sending prompt prompt='%.80s'",
+            self.prompt,
+        )
+        buttons = [
+            [
+                InlineKeyboardButton(self.yes_label, callback_data=self.YES_CALLBACK),
+                InlineKeyboardButton(self.no_label, callback_data=self.NO_CALLBACK),
+            ]
+        ]
+        if self.include_cancel:
+            buttons.append([InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)])
+
+        await get_app().send_messages(TelegramOptionsMessage(self.prompt, InlineKeyboardMarkup(buttons)))
+        get_logger().info("InlineKeyboardConfirmDialog._run_dialog: prompt_sent polling")
+
+        # Poll until complete
+        return await self.poll()
+
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:
         return self.is_complete
@@ -903,6 +835,12 @@ class InlineKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
         """Answer callback, remove keyboard, handle Yes/No/Cancel button press."""
         callback_query = update.callback_query
         if callback_query is None or callback_query.data is None:
+            get_logger().debug(
+                "InlineKeyboardConfirmDialog.handle_callback_update: skipped invalid_callback "
+                "callback_query=%s data=%s",
+                callback_query is not None,
+                callback_query.data if callback_query else None,
+            )
             return
         # Answer callback and remove keyboard
         await get_app().send_messages(TelegramCallbackAnswerMessage(callback_query.id))
@@ -915,37 +853,22 @@ class InlineKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
         callback_data: str = callback_query.data
 
         if callback_data == self.CANCEL_CALLBACK:
-            response: DialogResponse = self.cancel()
+            self.cancel()
         elif callback_data == self.YES_CALLBACK:
-            self._value = True
+            self._dialog_result = True
             self.state = DialogState.COMPLETE
             get_logger().info("InlineKeyboardConfirmDialog.handle_callback_update: selected value=True label=%s", self.yes_label)
             if DIALOG_DEBUG:
-                response = DialogResponse(
-                    text=f"{self.yes_label}",
-                    keyboard=None,
-                    edit_message=False,
-                )
-            else:
-                response = DialogResponse.NO_CHANGE
+                await get_app().send_messages(f"{self.yes_label}")
         elif callback_data == self.NO_CALLBACK:
-            self._value = False
+            self._dialog_result = False
             self.state = DialogState.COMPLETE
             get_logger().info("InlineKeyboardConfirmDialog.handle_callback_update: selected value=False label=%s", self.no_label)
             if DIALOG_DEBUG:
-                response = DialogResponse(
-                    text=f"{self.no_label}",
-                    keyboard=None,
-                    edit_message=False,
-                )
-            else:
-                response = DialogResponse.NO_CHANGE
+                await get_app().send_messages(f"{self.no_label}")
         else:
             get_logger().debug("InlineKeyboardConfirmDialog.handle_callback_update: unknown_callback callback_data=%s", callback_data)
             return  # Unknown callback
-
-        if response:
-            await self._send_response(response)
 
     async def handle_text_update(self, update: Update) -> None:
         """ConfirmDialog ignores text - clarify to user (once per activation)."""
@@ -953,54 +876,16 @@ class InlineKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
             self._text_reminder_sent = True
             await get_app().send_messages("Please use the buttons to make a selection.")
 
-    def _get_poll_result(self) -> Any:
+    def _get_poll_result(self) -> bool | DialogResult:
         """Return the dialog result after polling completes."""
-        return self.build_result()
-
-    def build_result(self) -> DialogResult:
-        """Leaf returns raw value."""
-        return self.value
-
-    async def _send_response(self, response: DialogResponse) -> None:
-        """Send a dialog response via Telegram."""
-        if response is DialogResponse.NO_CHANGE:
-            return
-
-        if response.keyboard:
-            await get_app().send_messages(TelegramOptionsMessage(response.text, response.keyboard))
-        else:
-            await get_app().send_messages(response.text)
-
-    async def _run_dialog(self) -> DialogResult:
-        """Show prompt with Yes/No buttons, then poll until selection made."""
-        self.state = DialogState.ACTIVE
-        self._text_reminder_sent = False  # Reset spam control
-
-        buttons = [
-            [
-                InlineKeyboardButton(self.yes_label, callback_data=self.YES_CALLBACK),
-                InlineKeyboardButton(self.no_label, callback_data=self.NO_CALLBACK),
-            ]
-        ]
-        if self.include_cancel:
-            buttons.append([InlineKeyboardButton("Cancel", callback_data=self.CANCEL_CALLBACK)])
-
-        response = DialogResponse(
-            text=self.prompt,
-            keyboard=InlineKeyboardMarkup(buttons),
-            edit_message=False,
-        )
-        await self._send_response(response)
-
-        # Poll until complete
-        return await self.poll()
+        return self.dialog_result
 
 
 # =============================================================================
 # COMPOSITE DIALOGS
 # =============================================================================
 
-class SequenceDialog(Dialog):
+class SequenceDialog(Dialog[dict[str, Any]]):
     """Composite dialog: Run child dialogs in sequence.
 
     Supports named dialogs for easy value access:
@@ -1013,7 +898,7 @@ class SequenceDialog(Dialog):
 
     def __init__(
         self,
-        dialogs: List[Union[Dialog, Tuple[str, Dialog]]],
+        dialogs: list[Dialog | tuple[str, Dialog]],
     ) -> None:
         """Create a sequence dialog.
 
@@ -1022,7 +907,7 @@ class SequenceDialog(Dialog):
         """
         super().__init__()
         # Normalize to list of (name, dialog) tuples
-        self._dialogs: List[Tuple[str, Dialog]] = []
+        self._dialogs: list[tuple[str, Dialog]] = []
         for i, item in enumerate(dialogs):
             if isinstance(item, tuple):
                 name, dialog = item
@@ -1031,29 +916,19 @@ class SequenceDialog(Dialog):
                 self._dialogs.append((f"step_{i}", item))
         self._current_index = 0
 
-    @property
-    def current_dialog(self) -> Optional[Dialog]:
-        """Get the currently active child dialog."""
-        if self._current_index < len(self._dialogs):
-            return self._dialogs[self._current_index][1]
-        return None
-
-    @property
-    def values(self) -> Dict[str, Any]:
-        """Named values dict: {name: dialog.value}"""
-        return {name: d.value for name, d in self._dialogs}
-
-    def build_result(self) -> DialogResult:
-        """Sequence returns dict of named child results."""
-        return {name: d.build_result() for name, d in self._dialogs}
-
-    async def _run_dialog(self) -> DialogResult:
+    async def _run_dialog(self) -> dict[str, Any] | DialogResult:
         """Run each child's start() in sequence."""
         self.state = DialogState.ACTIVE
         self._current_index = 0
 
+        get_logger().debug(
+            "SequenceDialog._run_dialog: started steps=%d",
+            len(self._dialogs),
+        )
+
         if not self._dialogs:
             self.state = DialogState.COMPLETE
+            get_logger().info("SequenceDialog._run_dialog: completed empty_sequence")
             return {}
 
         for name, dialog in self._dialogs:
@@ -1062,14 +937,35 @@ class SequenceDialog(Dialog):
             self.context[name] = result
             self._current_index += 1
 
-            if result is CANCELLED:
-                self._value = CANCELLED
+            if isinstance(result, DialogResult):
+                self._dialog_result = DialogResult.CANCELLED
                 self.state = DialogState.COMPLETE
-                return CANCELLED
+                get_logger().info(
+                    "SequenceDialog._run_dialog: cancelled step=%s",
+                    name,
+                )
+                return DialogResult.CANCELLED
 
-        self._value = self.values
+        self._dialog_result = {name: d.dialog_result for name, d in self._dialogs}
         self.state = DialogState.COMPLETE
-        return self.build_result()
+        get_logger().info(
+            "SequenceDialog._run_dialog: completed steps=%d values=%s",
+            len(self._dialogs),
+            list(self._dialog_result.keys()) if isinstance(self._dialog_result, dict) else self._dialog_result,
+        )
+        return self.dialog_result
+
+    @property
+    def current_dialog(self) -> Dialog | None:
+        """Get the currently active child dialog."""
+        if self._current_index < len(self._dialogs):
+            return self._dialogs[self._current_index][1]
+        return None
+
+    @property
+    def values(self) -> dict[str, Any]:
+        """Named values dict: {name: dialog.dialog_result}"""
+        return {name: d.dialog_result for name, d in self._dialogs}
 
     def reset(self) -> None:
         """Reset sequence and all child dialogs."""
@@ -1079,7 +975,7 @@ class SequenceDialog(Dialog):
             dialog.reset()
 
 
-class BranchDialog(Dialog):
+class BranchDialog(Dialog[dict[str, Any] | None]):
     """Composite dialog: Condition-based branching.
 
     Evaluates a condition function on start to select which branch to run.
@@ -1088,8 +984,8 @@ class BranchDialog(Dialog):
 
     def __init__(
         self,
-        condition: Callable[[Dict[str, Any]], str],
-        branches: Dict[str, Dialog],
+        condition: Callable[[dict[str, Any]], str],
+        branches: dict[str, Dialog],
     ) -> None:
         """Create a branch dialog.
 
@@ -1100,16 +996,10 @@ class BranchDialog(Dialog):
         super().__init__()
         self.condition = condition
         self.branches = branches
-        self._active_branch: Optional[Dialog] = None
-        self._active_key: Optional[str] = None
+        self._active_branch: Dialog | None = None
+        self._active_key: str | None = None
 
-    def build_result(self) -> DialogResult:
-        """Branch returns {selected_key: branch_result}."""
-        if self._active_key and self._active_branch:
-            return {self._active_key: self._active_branch.build_result()}
-        return None
-
-    async def _run_dialog(self) -> DialogResult:
+    async def _run_dialog(self) -> dict[str, Any] | None | DialogResult:
         """Evaluate condition and run selected branch."""
         self.state = DialogState.ACTIVE
 
@@ -1119,18 +1009,18 @@ class BranchDialog(Dialog):
         if branch_key not in self.branches:
             logger = get_logger()
             logger.error("BranchDialog._run_dialog: key_not_found key=%s", branch_key)
-            self._value = CANCELLED
+            self._dialog_result = DialogResult.CANCELLED
             self.state = DialogState.COMPLETE
-            return CANCELLED
+            return DialogResult.CANCELLED
 
         self._active_key = branch_key
         self._active_branch = self.branches[branch_key]
 
         # Child's start() handles reset and context internally
         result = await self._active_branch.start(self.context)
-        self._value = result
+        self._dialog_result = {self._active_key: result}
         self.state = DialogState.COMPLETE
-        return self.build_result()
+        return self.dialog_result
 
     def reset(self) -> None:
         """Reset branch dialog."""
@@ -1141,7 +1031,7 @@ class BranchDialog(Dialog):
             dialog.reset()
 
 
-class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
+class InlineKeyboardChoiceBranchDialog(Dialog[dict[str, Any] | None], UpdatePollerMixin):
     """Hybrid dialog: User selects branch via inline keyboard, then delegates.
 
     Shows a prompt with inline keyboard buttons, each button leads to a
@@ -1179,11 +1069,42 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
             )
         self._branches: BranchesType = branches
         self.include_cancel: bool = include_cancel
-        self._active_branch: Optional[Dialog] = None
-        self._active_key: Optional[str] = None
+        self._active_branch: Dialog | None = None
+        self._active_key: str | None = None
         self._choosing: bool = True
 
-    def get_branches(self) -> Dict[str, Tuple[str, Dialog]]:
+    async def _run_dialog(self) -> dict[str, Any] | None | DialogResult:
+        """Show choice, poll for selection, then run selected branch."""
+        self.state = DialogState.ACTIVE
+        self._choosing = True
+        self._active_branch = None
+        self._active_key = None
+
+        get_logger().debug(
+            "InlineKeyboardChoiceBranchDialog._run_dialog: sending prompt prompt='%.80s'",
+            self.prompt,
+        )
+        await get_app().send_messages(TelegramOptionsMessage(self.prompt, self._build_keyboard()))
+        get_logger().info("InlineKeyboardChoiceBranchDialog._run_dialog: prompt_sent polling")
+
+        # Poll until user selects a branch
+        poll_result = await self.poll()
+
+        if poll_result is DialogResult.CANCELLED:
+            self.state = DialogState.COMPLETE
+            return DialogResult.CANCELLED
+
+        # Run selected branch - child's start() handles reset internally
+        if self._active_branch is None:
+            self._dialog_result = DialogResult.CANCELLED
+            self.state = DialogState.COMPLETE
+            return DialogResult.CANCELLED
+        result = await self._active_branch.start(self.context)
+        self._dialog_result = {self._active_key: result} if self._active_key else None
+        self.state = DialogState.COMPLETE
+        return self.dialog_result
+
+    def get_branches(self) -> dict[str, tuple[str, Dialog]]:
         """Get the current branch mapping.
 
         Evaluates the branches callable with context if dynamic; otherwise
@@ -1228,7 +1149,7 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
         branches = self.get_branches()
 
         if callback_data == self.CANCEL_CALLBACK:
-            response: DialogResponse = self.cancel()
+            self.cancel()
             self._choosing = False
         elif callback_data not in branches:
             get_logger().debug(
@@ -1255,16 +1176,7 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
             )
 
             if DIALOG_DEBUG:
-                response = DialogResponse(
-                    text=f"Selected: {label}",
-                    keyboard=None,
-                    edit_message=False,
-                )
-            else:
-                response = DialogResponse.NO_CHANGE
-
-        if response:
-            await self._send_response(response)
+                await get_app().send_messages(f"Selected: {label}")
 
     async def handle_text_update(self, update: Update) -> None:
         """Ignore text input while choosing branch (uses inline keyboard)."""
@@ -1272,56 +1184,9 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
             "InlineKeyboardChoiceBranchDialog.handle_text_update: ignoring text during branch selection"
         )
 
-    async def _send_response(self, response: DialogResponse) -> None:
-        """Send a dialog response via Telegram."""
-        if response is DialogResponse.NO_CHANGE:
-            return
-
-        if response.keyboard:
-            await get_app().send_messages(TelegramOptionsMessage(response.text, response.keyboard))
-        else:
-            await get_app().send_messages(response.text)
-
-    def build_result(self) -> DialogResult:
-        """Choice branch returns {selected_key: branch_result}."""
-        if self._active_key and self._active_branch:
-            return {self._active_key: self._active_branch.build_result()}
-        return None
-
-    def _get_poll_result(self) -> Any:
+    def _get_poll_result(self) -> dict[str, Any] | None | DialogResult:
         """Return the value after polling (for cancel detection)."""
-        return self.value  # Don't use build_result() - only need raw value for cancel check
-
-    async def _run_dialog(self) -> DialogResult:
-        """Show choice, poll for selection, then run selected branch."""
-        self.state = DialogState.ACTIVE
-        self._choosing = True
-        self._active_branch = None
-        self._active_key = None
-
-        response = DialogResponse(
-            text=self.prompt,
-            keyboard=self._build_keyboard(),
-            edit_message=False,
-        )
-        await self._send_response(response)
-
-        # Poll until user selects a branch
-        poll_result = await self.poll()
-
-        if poll_result is CANCELLED:
-            self.state = DialogState.COMPLETE
-            return CANCELLED
-
-        # Run selected branch - child's start() handles reset internally
-        if self._active_branch is None:
-            self._value = CANCELLED
-            self.state = DialogState.COMPLETE
-            return CANCELLED
-        result = await self._active_branch.start(self.context)
-        self._value = result
-        self.state = DialogState.COMPLETE
-        return self.build_result()
+        return self.dialog_result
 
     def _build_keyboard(self) -> InlineKeyboardMarkup:
         """Build inline keyboard from branch labels and keys."""
@@ -1344,13 +1209,13 @@ class InlineKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
                 dialog.reset()
 
 
-class LoopDialog(Dialog):
+class LoopDialog(Dialog[Any]):
     """Composite dialog: Repeat a dialog until exit condition.
 
     Runs the inner dialog repeatedly until:
-    - value is CANCELLED, OR
-    - value == exit_value, OR
-    - exit_condition(value) returns True, OR
+    - dialog_result is CANCELLED, OR
+    - dialog_result == exit_value, OR
+    - exit_condition(dialog_result) returns True, OR
     - max_iterations reached
 
     Does NOT poll - delegates to inner dialog.
@@ -1359,15 +1224,15 @@ class LoopDialog(Dialog):
     def __init__(
         self,
         dialog: Dialog,
-        exit_value: Optional[Any] = None,
-        exit_condition: Optional[Callable[[Any], bool]] = None,
-        max_iterations: Optional[int] = None,
+        exit_value: Any = None,
+        exit_condition: Callable[[Any], bool] | None = None,
+        max_iterations: int | None = None,
     ) -> None:
         """Create a loop dialog.
 
         Args:
             dialog: The dialog to repeat.
-            exit_value: Exit when dialog.value == this value.
+            exit_value: Exit when dialog.dialog_result == this value.
             exit_condition: Exit when this callable returns True.
             max_iterations: Maximum number of iterations (safety limit).
         """
@@ -1377,15 +1242,53 @@ class LoopDialog(Dialog):
         self.exit_condition = exit_condition
         self.max_iterations = max_iterations
         self._iterations = 0
-        self._all_values: List[Any] = []
+        self._all_values: list[Any] = []
 
-    def build_result(self) -> DialogResult:
-        """Loop returns final value only."""
-        return self.value
+    async def _run_dialog(self) -> Any:
+        """Run inner dialog repeatedly until exit condition."""
+        self.state = DialogState.ACTIVE
+        self._iterations = 0
+        self._all_values = []
+
+        get_logger().debug(
+            "LoopDialog._run_dialog: started max_iterations=%s",
+            self.max_iterations,
+        )
+
+        while True:
+            # Child's start() handles reset internally - no need to call reset() here
+            result = await self.dialog.start(self.context)
+
+            if isinstance(result, DialogResult):
+                self._dialog_result = DialogResult.CANCELLED
+                self.state = DialogState.COMPLETE
+                get_logger().info(
+                    "LoopDialog._run_dialog: cancelled iteration=%d",
+                    self._iterations,
+                )
+                return DialogResult.CANCELLED
+
+            self._all_values.append(result)
+            self._iterations += 1
+
+            get_logger().debug(
+                "LoopDialog._run_dialog: iteration=%d result=%s",
+                self._iterations,
+                result,
+            )
+
+            if self._should_exit(result):
+                self._dialog_result = result
+                self.state = DialogState.COMPLETE
+                get_logger().info(
+                    "LoopDialog._run_dialog: completed iterations=%d",
+                    self._iterations,
+                )
+                return self.dialog_result
 
     def _should_exit(self, result: Any) -> bool:
         """Check if the loop should exit based on result."""
-        if result is CANCELLED:
+        if isinstance(result, DialogResult):
             return True
         if self.exit_value is not None and result == self.exit_value:
             return True
@@ -1395,29 +1298,6 @@ class LoopDialog(Dialog):
             return True
         return False
 
-    async def _run_dialog(self) -> DialogResult:
-        """Run inner dialog repeatedly until exit condition."""
-        self.state = DialogState.ACTIVE
-        self._iterations = 0
-        self._all_values = []
-
-        while True:
-            # Child's start() handles reset internally - no need to call reset() here
-            result = await self.dialog.start(self.context)
-
-            if result is CANCELLED:
-                self._value = CANCELLED
-                self.state = DialogState.COMPLETE
-                return CANCELLED
-
-            self._all_values.append(result)
-            self._iterations += 1
-
-            if self._should_exit(result):
-                self._value = result
-                self.state = DialogState.COMPLETE
-                return self.build_result()
-
     def reset(self) -> None:
         """Reset loop dialog."""
         super().reset()
@@ -1426,7 +1306,7 @@ class LoopDialog(Dialog):
         self.dialog.reset()
 
 
-class DialogHandler(Dialog):
+class DialogHandler(Dialog[Any]):
     """Composite dialog: Wraps a dialog, runs it, calls on_complete.
 
     Does NOT poll - delegates to inner dialog.
@@ -1436,7 +1316,7 @@ class DialogHandler(Dialog):
     def __init__(
         self,
         dialog: Dialog,
-        on_complete: Optional[Callable[[DialogResult], Any]] = None,
+        on_complete: Callable[[Any], Any] | None = None,
     ) -> None:
         """Create a dialog handler.
 
@@ -1449,11 +1329,7 @@ class DialogHandler(Dialog):
         self.dialog = dialog
         self.on_complete = on_complete
 
-    def build_result(self) -> DialogResult:
-        """Handler returns inner dialog's result."""
-        return self.dialog.build_result()
-
-    async def _run_dialog(self) -> DialogResult:
+    async def _run_dialog(self) -> Any:
         """Run inner dialog and call on_complete handler."""
         # Child's start() handles reset and context internally
         result = await self.dialog.start(self.context)
@@ -1464,9 +1340,9 @@ class DialogHandler(Dialog):
             if asyncio.iscoroutine(maybe_awaitable):
                 await maybe_awaitable
 
-        self._value = result
+        self._dialog_result = result
         self.state = DialogState.COMPLETE
-        return self.build_result()
+        return self.dialog_result
 
     def reset(self) -> None:
         """Reset handler and inner dialog."""
@@ -1474,7 +1350,7 @@ class DialogHandler(Dialog):
         self.dialog.reset()
 
 
-class EditEventDialog(Dialog):
+class EditEventDialog(Dialog[dict[str, Any]]):
     """Dialog for editing an event's editable attributes.
 
     Supports both inline and reply keyboard modes via the keyboard_type
@@ -1500,12 +1376,10 @@ class EditEventDialog(Dialog):
         dialog_reply = EditEventDialog(my_event, keyboard_type=KeyboardType.REPLY)
     """
 
-    DONE_VALUE = "__done__"
-
     def __init__(
         self,
-        event: "ActivateOnConditionEvent",
-        validator: Optional[Callable[[Dict[str, Any]], Tuple[bool, str]]] = None,
+        event: ActivateOnConditionEvent,
+        validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
         keyboard_type: KeyboardType = KeyboardType.INLINE,
     ) -> None:
         """Create an edit event dialog.
@@ -1522,14 +1396,70 @@ class EditEventDialog(Dialog):
         self.event = event
         self.validator = validator
         self.keyboard_type = keyboard_type
-        self._staged_edits: Dict[str, Any] = {}
+        self._staged_edits: dict[str, Any] = {}
         get_logger().info(
             "EditEventDialog.__init__: initialized event=%s keyboard_type=%s",
             event.event_name,
             keyboard_type.name,
         )
 
-    def _is_bool_field(self, attr: "EditableAttribute") -> bool:
+    async def _run_dialog(self) -> dict[str, Any] | DialogResult:
+        """Run the edit dialog loop until Done or Cancel."""
+        self.state = DialogState.ACTIVE
+        self._staged_edits = {}
+        logger = get_logger()
+        logger.info("EditEventDialog._run_dialog: started")
+
+        while True:
+            # Show field selection dialog
+            field_dialog = create_choice_dialog(
+                prompt=self._get_field_list_prompt(),
+                choices=self._build_field_choices,
+                keyboard_type=self.keyboard_type,
+                include_cancel=True,
+            )
+            result = await field_dialog.start(self.context)
+
+            if is_cancelled(result):
+                # Cancel from field list - exit without applying edits
+                self._dialog_result = DialogResult.CANCELLED
+                self.state = DialogState.COMPLETE
+                logger.info("EditEventDialog._run_dialog: cancelled")
+                return DialogResult.CANCELLED
+
+            if result == DONE_CALLBACK:
+                # Done - apply all edits
+                self._apply_all_edits()
+                self._dialog_result = dict(self._staged_edits)
+                self.state = DialogState.COMPLETE
+                logger.info("EditEventDialog._run_dialog: done edits=%s", self._staged_edits)
+                return self.dialog_result
+
+            # Field selected - edit it
+            if not isinstance(result, str):
+                logger.debug(
+                    "EditEventDialog._run_dialog: skip_invalid_result result_type=%s",
+                    type(result).__name__,
+                )
+                continue
+            field_name = result
+            if field_name not in self.event.editable_attributes:
+                logger.debug(
+                    "EditEventDialog._run_dialog: field_not_editable field=%s",
+                    field_name,
+                )
+                continue
+
+            attr = self.event.editable_attributes[field_name]
+
+            if self._is_bool_field(attr):
+                await self._edit_bool_field(field_name)
+            else:
+                await self._edit_text_field(field_name)
+
+            # After editing (success or cancel), loop back to field list
+
+    def _is_bool_field(self, attr: EditableAttribute) -> bool:
         """Check if an attribute is a boolean type."""
         if attr.field_type == bool:
             return True
@@ -1543,18 +1473,18 @@ class EditEventDialog(Dialog):
             return str(self._staged_edits[field_name])
         return str(self.event.get(field_name))
 
-    def _build_field_choices(self, context: Dict[str, Any]) -> List[Tuple[str, str]]:
+    def _build_field_choices(self, context: dict[str, Any]) -> list[tuple[str, str]]:
         """Build choices list for field selection dialog.
 
         Args:
             context: Dialog context (passed by ChoiceDialog, unused).
         """
-        choices: List[Tuple[str, str]] = []
+        choices: list[tuple[str, str]] = []
         for name in self.event.editable_attributes:
             display_value = self._get_field_display_value(name)
             label = f"{name}: {display_value}"
             choices.append((label, name))
-        choices.append(("Done", self.DONE_VALUE))
+        choices.append(("Done", DONE_CALLBACK))
         return choices
 
     def _get_field_list_prompt(self) -> str:
@@ -1566,7 +1496,7 @@ class EditEventDialog(Dialog):
         self,
         field_name: str,
         parsed_value: Any,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Validate a parsed value and stage it in ``_staged_edits`` if valid.
 
         Args:
@@ -1668,7 +1598,7 @@ class EditEventDialog(Dialog):
 
         def make_validator():
             """Create a validator that parses and validates the input."""
-            def validator(text: str) -> Tuple[bool, str]:
+            def validator(text: str) -> tuple[bool, str]:
                 # Parse the input
                 try:
                     parsed_value = attr.parse(text)
@@ -1719,6 +1649,11 @@ class EditEventDialog(Dialog):
         # Parse and stage the value (validator already checked it's valid)
         # UserInputDialog returns str, but mypy sees DialogResult which is Union
         if not isinstance(result, str):
+            logger.debug(
+                "EditEventDialog._edit_text_field: unexpected_result_type field=%s result_type=%s",
+                field_name,
+                type(result).__name__,
+            )
             return False
         parsed_value = attr.parse(result)
         self._staged_edits[field_name] = parsed_value
@@ -1728,66 +1663,6 @@ class EditEventDialog(Dialog):
             parsed_value,
         )
         return True
-
-    async def _run_dialog(self) -> DialogResult:
-        """Run the edit dialog loop until Done or Cancel."""
-        self.state = DialogState.ACTIVE
-        self._staged_edits = {}
-        logger = get_logger()
-        logger.info("EditEventDialog._run_dialog: started")
-
-        while True:
-            # Show field selection dialog
-            field_dialog = create_choice_dialog(
-                prompt=self._get_field_list_prompt(),
-                choices=self._build_field_choices,
-                keyboard_type=self.keyboard_type,
-                include_cancel=True,
-            )
-            result = await field_dialog.start(self.context)
-
-            if is_cancelled(result):
-                # Cancel from field list - exit without applying edits
-                self._value = CANCELLED
-                self.state = DialogState.COMPLETE
-                logger.info("EditEventDialog._run_dialog: cancelled")
-                return CANCELLED
-
-            if result == self.DONE_VALUE:
-                # Done - apply all edits
-                self._apply_all_edits()
-                self._value = dict(self._staged_edits)
-                self.state = DialogState.COMPLETE
-                logger.info("EditEventDialog._run_dialog: done edits=%s", self._staged_edits)
-                return self.build_result()
-
-            # Field selected - edit it
-            if not isinstance(result, str):
-                logger.debug(
-                    "EditEventDialog._run_dialog: skip_invalid_result result_type=%s",
-                    type(result).__name__,
-                )
-                continue
-            field_name = result
-            if field_name not in self.event.editable_attributes:
-                logger.debug(
-                    "EditEventDialog._run_dialog: field_not_editable field=%s",
-                    field_name,
-                )
-                continue
-
-            attr = self.event.editable_attributes[field_name]
-
-            if self._is_bool_field(attr):
-                await self._edit_bool_field(field_name)
-            else:
-                await self._edit_text_field(field_name)
-
-            # After editing (success or cancel), loop back to field list
-
-    def build_result(self) -> DialogResult:
-        """Return the context dict with all staged edits."""
-        return self.value
 
     def reset(self) -> None:
         """Reset the dialog for reuse."""
@@ -1800,7 +1675,7 @@ class EditEventDialog(Dialog):
 # REPLY KEYBOARD DIALOGS
 # =============================================================================
 
-class ReplyKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
+class ReplyKeyboardChoiceDialog(Dialog[str], UpdatePollerMixin):
     """Leaf dialog: User selects from reply keyboard options.
 
     Alternative to InlineKeyboardChoiceDialog that uses Telegram's reply keyboard
@@ -1816,7 +1691,7 @@ class ReplyKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
     def __init__(
         self,
         prompt: str,
-        choices: Union[List[Tuple[str, str]], Callable[[Dict[str, Any]], List[Tuple[str, str]]]],
+        choices: list[tuple[str, str]] | Callable[[dict[str, Any]], list[tuple[str, str]]],
         include_cancel: bool = True,
     ) -> None:
         """Create a reply keyboard choice dialog.
@@ -1836,11 +1711,38 @@ class ReplyKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
                 f"choices callable must accept exactly 1 argument (context), "
                 f"got {len(params)} required parameters"
             )
-        self._choices: Union[List[Tuple[str, str]], Callable[[Dict[str, Any]], List[Tuple[str, str]]]] = choices
+        self._choices: list[tuple[str, str]] | Callable[[dict[str, Any]], list[tuple[str, str]]] = choices
         self.include_cancel: bool = include_cancel
-        self._label_to_callback: Dict[str, str] = {}
+        self._label_to_callback: dict[str, str] = {}
 
-    def get_choices(self) -> List[Tuple[str, str]]:
+    async def _run_dialog(self) -> str | DialogResult:
+        """Send prompt with reply keyboard, then poll until selection made."""
+        self.state = DialogState.ACTIVE
+
+        get_logger().debug(
+            "ReplyKeyboardChoiceDialog._run_dialog: sending prompt prompt='%.80s'",
+            self.prompt,
+        )
+        # Build label mapping
+        self._build_label_mapping()
+
+        # Build keyboard layout
+        keyboard = self._build_keyboard()
+
+        # Send message with reply keyboard
+        await get_app().send_messages(
+            TelegramReplyKeyboardMessage(
+                text=self.prompt,
+                keyboard=keyboard,
+                one_time_keyboard=True,
+            )
+        )
+        get_logger().info("ReplyKeyboardChoiceDialog._run_dialog: prompt_sent polling")
+
+        # Poll until complete
+        return await self.poll()
+
+    def get_choices(self) -> list[tuple[str, str]]:
         """Get choices - evaluates callable if dynamic."""
         if callable(self._choices):
             return self._choices(self.context)
@@ -1883,7 +1785,7 @@ class ReplyKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
                 TelegramRemoveReplyKeyboardMessage("✓")
             )
 
-            self._value = callback_data
+            self._dialog_result = callback_data
             self.state = DialogState.COMPLETE
 
             # Log selection
@@ -1899,35 +1801,9 @@ class ReplyKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
 
     def _get_poll_result(self) -> Any:
         """Return the dialog result after polling completes."""
-        return self.build_result()
+        return self.dialog_result
 
-    def build_result(self) -> DialogResult:
-        """Leaf returns raw value."""
-        return self.value
-
-    async def _run_dialog(self) -> DialogResult:
-        """Send prompt with reply keyboard, then poll until selection made."""
-        self.state = DialogState.ACTIVE
-
-        # Build label mapping
-        self._build_label_mapping()
-
-        # Build keyboard layout
-        keyboard = self._build_keyboard()
-
-        # Send message with reply keyboard
-        await get_app().send_messages(
-            TelegramReplyKeyboardMessage(
-                text=self.prompt,
-                keyboard=keyboard,
-                one_time_keyboard=True,
-            )
-        )
-
-        # Poll until complete
-        return await self.poll()
-
-    def _build_keyboard(self) -> List[List[str]]:
+    def _build_keyboard(self) -> list[list[str]]:
         """Build reply keyboard layout from choices."""
         keyboard = [[label] for label, _ in self.get_choices()]
         if self.include_cancel:
@@ -1940,7 +1816,7 @@ class ReplyKeyboardChoiceDialog(Dialog, UpdatePollerMixin):
         self._label_to_callback = {}
 
 
-class ReplyKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
+class ReplyKeyboardConfirmDialog(Dialog[bool], UpdatePollerMixin):
     """Leaf dialog: Yes/No confirmation prompt using reply keyboard.
 
     Alternative to InlineKeyboardConfirmDialog that uses Telegram's reply keyboard
@@ -1974,6 +1850,32 @@ class ReplyKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
         self.no_label: str = no_label
         self.include_cancel: bool = include_cancel
 
+    async def _run_dialog(self) -> bool | DialogResult:
+        """Show prompt with Yes/No reply keyboard, then poll until selection made."""
+        self.state = DialogState.ACTIVE
+
+        get_logger().debug(
+            "ReplyKeyboardConfirmDialog._run_dialog: sending prompt prompt='%.80s'",
+            self.prompt,
+        )
+        # Build keyboard layout
+        keyboard = [[self.yes_label, self.no_label]]
+        if self.include_cancel:
+            keyboard.append([self.CANCEL_LABEL])
+
+        # Send message with reply keyboard
+        await get_app().send_messages(
+            TelegramReplyKeyboardMessage(
+                text=self.prompt,
+                keyboard=keyboard,
+                one_time_keyboard=True,
+            )
+        )
+        get_logger().info("ReplyKeyboardConfirmDialog._run_dialog: prompt_sent polling")
+
+        # Poll until complete
+        return await self.poll()
+
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:
         """Stop polling when dialog is complete."""
@@ -2003,7 +1905,7 @@ class ReplyKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
             await get_app().send_messages(
                 TelegramRemoveReplyKeyboardMessage("✓")
             )
-            self._value = True
+            self._dialog_result = True
             self.state = DialogState.COMPLETE
             get_logger().info(
                 "ReplyKeyboardConfirmDialog.handle_text_update: selected value=True label=%s",
@@ -2018,7 +1920,7 @@ class ReplyKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
             await get_app().send_messages(
                 TelegramRemoveReplyKeyboardMessage("✓")
             )
-            self._value = False
+            self._dialog_result = False
             self.state = DialogState.COMPLETE
             get_logger().info(
                 "ReplyKeyboardConfirmDialog.handle_text_update: selected value=False label=%s",
@@ -2028,37 +1930,12 @@ class ReplyKeyboardConfirmDialog(Dialog, UpdatePollerMixin):
                 await get_app().send_messages(f"{self.no_label}")
             return
 
-    def _get_poll_result(self) -> Any:
+    def _get_poll_result(self) -> bool | DialogResult:
         """Return the dialog result after polling completes."""
-        return self.build_result()
-
-    def build_result(self) -> DialogResult:
-        """Leaf returns raw value."""
-        return self.value
-
-    async def _run_dialog(self) -> DialogResult:
-        """Show prompt with Yes/No reply keyboard, then poll until selection made."""
-        self.state = DialogState.ACTIVE
-
-        # Build keyboard layout
-        keyboard = [[self.yes_label, self.no_label]]
-        if self.include_cancel:
-            keyboard.append([self.CANCEL_LABEL])
-
-        # Send message with reply keyboard
-        await get_app().send_messages(
-            TelegramReplyKeyboardMessage(
-                text=self.prompt,
-                keyboard=keyboard,
-                one_time_keyboard=True,
-            )
-        )
-
-        # Poll until complete
-        return await self.poll()
+        return self.dialog_result
 
 
-class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
+class ReplyKeyboardPaginatedChoiceDialog(Dialog[str], UpdatePollerMixin):
     """Leaf dialog: User selects from a paginated list of reply keyboard options.
 
     Alternative to InlineKeyboardPaginatedChoiceDialog that uses Telegram's reply
@@ -2077,7 +1954,7 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
     def __init__(
         self,
         prompt: str,
-        items: Union[List[Tuple[str, str]], Callable[[Dict[str, Any]], List[Tuple[str, str]]]],
+        items: list[tuple[str, str]] | Callable[[dict[str, Any]], list[tuple[str, str]]],
         page_size: int = 5,
         more_label: str = "More...",
         include_cancel: bool = True,
@@ -2106,19 +1983,48 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
         self.more_label = more_label
         self.include_cancel = include_cancel
         self._showing_more = False  # True when in text input mode for remaining items
-        self._label_to_callback: Dict[str, str] = {}
+        self._label_to_callback: dict[str, str] = {}
 
-    def get_items(self) -> List[Tuple[str, str]]:
+    async def _run_dialog(self) -> str | DialogResult:
+        """Send prompt with reply keyboard, then poll until selection made."""
+        self.state = DialogState.ACTIVE
+        self._showing_more = False
+
+        get_logger().debug(
+            "ReplyKeyboardPaginatedChoiceDialog._run_dialog: sending prompt prompt='%.80s' page_size=%d",
+            self.prompt,
+            self.page_size,
+        )
+        # Build label mapping for first page
+        self._build_label_mapping()
+
+        # Build keyboard layout
+        keyboard = self._build_keyboard()
+
+        # Send message with reply keyboard
+        await get_app().send_messages(
+            TelegramReplyKeyboardMessage(
+                text=self.prompt,
+                keyboard=keyboard,
+                one_time_keyboard=True,
+            )
+        )
+        get_logger().info("ReplyKeyboardPaginatedChoiceDialog._run_dialog: prompt_sent polling")
+
+        # Poll until complete
+        return await self.poll()
+
+    def get_items(self) -> list[tuple[str, str]]:
         """Get items - evaluates callable if dynamic."""
         if callable(self._items):
             return self._items(self.context)
         return self._items
 
-    def _get_first_page_items(self) -> List[Tuple[str, str]]:
+    def _get_first_page_items(self) -> list[tuple[str, str]]:
         """Get items for the first page (buttons)."""
         return self.get_items()[:self.page_size]
 
-    def _get_remaining_items(self) -> List[Tuple[str, str]]:
+    def _get_remaining_items(self) -> list[tuple[str, str]]:
         """Get items beyond the first page."""
         return self.get_items()[self.page_size:]
 
@@ -2158,7 +2064,7 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
 
         if self._showing_more:
             # In text input mode - expecting a number
-            remaining: List[Tuple[str, str]] = self._get_remaining_items()
+            remaining: list[tuple[str, str]] = self._get_remaining_items()
 
             # Try to parse as number
             try:
@@ -2186,7 +2092,7 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
                 TelegramRemoveReplyKeyboardMessage("✓")
             )
 
-            self._value = selected_callback
+            self._dialog_result = selected_callback
             self.state = DialogState.COMPLETE
 
             get_logger().info(
@@ -2206,11 +2112,11 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
 
             # Build numbered list of remaining items
             remaining = self._get_remaining_items()
-            lines: List[str] = [f"{i + 1}. {label}" for i, (label, _) in enumerate(remaining)]
+            lines: list[str] = [f"{i + 1}. {label}" for i, (label, _) in enumerate(remaining)]
             msg_text: str = f"{self.prompt}\n\n" + "\n".join(lines) + "\n\nEnter the number of your choice:"
 
             # Build keyboard with just Cancel
-            keyboard: List[List[str]] = []
+            keyboard: list[list[str]] = []
             if self.include_cancel:
                 keyboard.append([self.CANCEL_LABEL])
 
@@ -2236,7 +2142,7 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
                 TelegramRemoveReplyKeyboardMessage("✓")
             )
 
-            self._value = callback_data
+            self._dialog_result = callback_data
             self.state = DialogState.COMPLETE
 
             get_logger().info(
@@ -2248,13 +2154,13 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
             if DIALOG_DEBUG:
                 await get_app().send_messages(f"Selected: {text}")
 
-    async def _send_more_error(self, remaining: List[Tuple[str, str]]) -> None:
+    async def _send_more_error(self, remaining: list[tuple[str, str]]) -> None:
         """Send error message when invalid number input in 'more' mode."""
         lines = [f"{i + 1}. {label}" for i, (label, _) in enumerate(remaining)]
         error_text = f"Please enter a number between 1 and {len(remaining)}.\n\n"
         text_prompt = f"{self.prompt}\n\n" + "\n".join(lines) + "\n\nEnter the number of your choice:"
 
-        keyboard: List[List[str]] = []
+        keyboard: list[list[str]] = []
         if self.include_cancel:
             keyboard.append([self.CANCEL_LABEL])
 
@@ -2266,38 +2172,11 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
             )
         )
 
-    def _get_poll_result(self) -> Any:
+    def _get_poll_result(self) -> str | DialogResult:
         """Return the dialog result after polling completes."""
-        return self.build_result()
+        return self.dialog_result
 
-    def build_result(self) -> DialogResult:
-        """Leaf returns raw value."""
-        return self.value
-
-    async def _run_dialog(self) -> DialogResult:
-        """Send prompt with reply keyboard, then poll until selection made."""
-        self.state = DialogState.ACTIVE
-        self._showing_more = False
-
-        # Build label mapping for first page
-        self._build_label_mapping()
-
-        # Build keyboard layout
-        keyboard = self._build_keyboard()
-
-        # Send message with reply keyboard
-        await get_app().send_messages(
-            TelegramReplyKeyboardMessage(
-                text=self.prompt,
-                keyboard=keyboard,
-                one_time_keyboard=True,
-            )
-        )
-
-        # Poll until complete
-        return await self.poll()
-
-    def _build_keyboard(self) -> List[List[str]]:
+    def _build_keyboard(self) -> list[list[str]]:
         """Build reply keyboard layout from first page items, plus More and Cancel."""
         keyboard = [[label] for label, _ in self._get_first_page_items()]
         if self._has_more_items():
@@ -2313,7 +2192,7 @@ class ReplyKeyboardPaginatedChoiceDialog(Dialog, UpdatePollerMixin):
         self._label_to_callback = {}
 
 
-class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
+class ReplyKeyboardChoiceBranchDialog(Dialog[dict[str, Any] | None], UpdatePollerMixin):
     """Hybrid dialog: User selects branch via reply keyboard, then delegates.
 
     Alternative to InlineKeyboardChoiceBranchDialog that uses Telegram's reply
@@ -2354,12 +2233,60 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
             )
         self._branches: BranchesType = branches
         self.include_cancel: bool = include_cancel
-        self._active_branch: Optional[Dialog] = None
-        self._active_key: Optional[str] = None
+        self._active_branch: Dialog | None = None
+        self._active_key: str | None = None
         self._choosing: bool = True
-        self._label_to_key: Dict[str, str] = {}
+        self._label_to_key: dict[str, str] = {}
 
-    def get_branches(self) -> Dict[str, Tuple[str, Dialog]]:
+    async def _run_dialog(self) -> dict[str, Any] | None | DialogResult:
+        """Show choice, poll for selection, then run selected branch."""
+        self.state = DialogState.ACTIVE
+        self._choosing = True
+        self._active_branch = None
+        self._active_key = None
+
+        get_logger().info(
+            "ReplyKeyboardChoiceBranchDialog._run_dialog: started prompt='%.80s'",
+            self.prompt,
+        )
+
+        # Build label mapping
+        self._build_label_mapping()
+
+        # Build keyboard layout
+        keyboard = self._build_keyboard()
+
+        # Send message with reply keyboard
+        await get_app().send_messages(
+            TelegramReplyKeyboardMessage(
+                text=self.prompt,
+                keyboard=keyboard,
+                one_time_keyboard=True,
+            )
+        )
+
+        # Poll until user selects a branch
+        poll_result = await self.poll()
+
+        if isinstance(poll_result, DialogResult):
+            get_logger().info(
+                "ReplyKeyboardChoiceBranchDialog._run_dialog: cancelled"
+            )
+            self._dialog_result = DialogResult.CANCELLED
+            self.state = DialogState.COMPLETE
+            return DialogResult.CANCELLED
+
+        # Run selected branch - child's start() handles reset internally
+        if self._active_branch is None:
+            self._dialog_result = DialogResult.CANCELLED
+            self.state = DialogState.COMPLETE
+            return DialogResult.CANCELLED
+        result = await self._active_branch.start(self.context)
+        self._dialog_result = {self._active_key: result}
+        self.state = DialogState.COMPLETE
+        return self.dialog_result
+
+    def get_branches(self) -> dict[str, tuple[str, Dialog]]:
         """Get branches - evaluates callable if dynamic."""
         if callable(self._branches):
             return self._branches(self.context)
@@ -2397,9 +2324,10 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
 
         if update.message is None or update.message.text is None:
             get_logger().debug(
-                "ReplyKeyboardChoiceBranchDialog.handle_text_update: skipped empty_message "
-                "message=%s",
+                "ReplyKeyboardChoiceBranchDialog.handle_text_update: skipped_no_message_or_text "
+                "has_message=%s has_text=%s",
                 update.message is not None,
+                update.message.text is not None if update.message else False,
             )
             return
 
@@ -2445,64 +2373,11 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
                 text,
             )
 
-    def _get_poll_result(self) -> Any:
+    def _get_poll_result(self) -> dict[str, Any] | None | DialogResult:
         """Return the value after polling (for cancel detection)."""
-        return self.value  # Don't use build_result() - only need raw value for cancel check
+        return self.dialog_result
 
-    def build_result(self) -> DialogResult:
-        """Choice branch returns {selected_key: branch_result}."""
-        if self._active_key and self._active_branch:
-            return {self._active_key: self._active_branch.build_result()}
-        return None
-
-    async def _run_dialog(self) -> DialogResult:
-        """Show choice, poll for selection, then run selected branch."""
-        self.state = DialogState.ACTIVE
-        self._choosing = True
-        self._active_branch = None
-        self._active_key = None
-
-        get_logger().info(
-            "ReplyKeyboardChoiceBranchDialog._run_dialog: started prompt='%.80s'",
-            self.prompt,
-        )
-
-        # Build label mapping
-        self._build_label_mapping()
-
-        # Build keyboard layout
-        keyboard = self._build_keyboard()
-
-        # Send message with reply keyboard
-        await get_app().send_messages(
-            TelegramReplyKeyboardMessage(
-                text=self.prompt,
-                keyboard=keyboard,
-                one_time_keyboard=True,
-            )
-        )
-
-        # Poll until user selects a branch
-        poll_result = await self.poll()
-
-        if poll_result is CANCELLED:
-            get_logger().info(
-                "ReplyKeyboardChoiceBranchDialog._run_dialog: cancelled"
-            )
-            self.state = DialogState.COMPLETE
-            return CANCELLED
-
-        # Run selected branch - child's start() handles reset internally
-        if self._active_branch is None:
-            self._value = CANCELLED
-            self.state = DialogState.COMPLETE
-            return CANCELLED
-        result = await self._active_branch.start(self.context)
-        self._value = result
-        self.state = DialogState.COMPLETE
-        return self.build_result()
-
-    def _build_keyboard(self) -> List[List[str]]:
+    def _build_keyboard(self) -> list[list[str]]:
         """Build reply keyboard layout from branch labels."""
         keyboard = [
             [label]
@@ -2530,10 +2405,10 @@ class ReplyKeyboardChoiceBranchDialog(Dialog, UpdatePollerMixin):
 
 def create_choice_dialog(
     prompt: str,
-    choices: Union[List[Tuple[str, str]], Callable[[Dict[str, Any]], List[Tuple[str, str]]]],
+    choices: list[tuple[str, str]] | Callable[[dict[str, Any]], list[tuple[str, str]]],
     keyboard_type: KeyboardType = KeyboardType.INLINE,
     include_cancel: bool = True,
-) -> Dialog:
+) -> Dialog[str]:
     """Create a choice dialog with specified keyboard type.
 
     Factory function that creates either an InlineKeyboardChoiceDialog or
@@ -2559,7 +2434,7 @@ def create_confirm_dialog(
     yes_label: str = "Yes",
     no_label: str = "No",
     include_cancel: bool = False,
-) -> Dialog:
+) -> Dialog[bool]:
     """Create a confirmation dialog with specified keyboard type.
 
     Factory function that creates either an InlineKeyboardConfirmDialog or
@@ -2592,12 +2467,12 @@ def create_confirm_dialog(
 
 def create_paginated_choice_dialog(
     prompt: str,
-    items: Union[List[Tuple[str, str]], Callable[[Dict[str, Any]], List[Tuple[str, str]]]],
+    items: list[tuple[str, str]] | Callable[[dict[str, Any]], list[tuple[str, str]]],
     keyboard_type: KeyboardType = KeyboardType.INLINE,
     page_size: int = 5,
     more_label: str = "More...",
     include_cancel: bool = True,
-) -> Dialog:
+) -> Dialog[str]:
     """Create a paginated choice dialog with specified keyboard type.
 
     Factory function that creates either an InlineKeyboardPaginatedChoiceDialog or
@@ -2628,7 +2503,7 @@ def create_choice_branch_dialog(
     branches: BranchesType,
     keyboard_type: KeyboardType = KeyboardType.INLINE,
     include_cancel: bool = True,
-) -> Dialog:
+) -> Dialog[dict[str, Any] | None]:
     """Create a choice-branch dialog with specified keyboard type.
 
     Factory function that creates either an InlineKeyboardChoiceBranchDialog or
@@ -2658,9 +2533,9 @@ def create_choice_branch_dialog(
 
 
 def create_user_input_dialog(
-    prompt: Union[str, Callable[[], str]],
+    prompt: str | Callable[[], str],
     keyboard_type: KeyboardType = KeyboardType.INLINE,
-    validator: Optional[Callable[[str], Tuple[bool, str]]] = None,
+    validator: Callable[[str], tuple[bool, str]] | None = None,
     include_cancel: bool = True,
 ) -> UserInputDialog:
     """Create a user input dialog with specified keyboard type.

@@ -14,16 +14,18 @@ Example:
     )
 """
 
+from __future__ import annotations
+
 import re
 from datetime import datetime
-from typing import Callable, Tuple
+from typing import Callable
 
 
 # Type alias for validator functions
-Validator = Callable[[str], Tuple[bool, str]]
+Validator = Callable[[str], tuple[bool, str]]
 
 
-def validate_positive_float(value: str) -> Tuple[bool, str]:
+def validate_positive_float(value: str) -> tuple[bool, str]:
     """Validate that input is a positive decimal number.
 
     Accepts both integers and decimals (e.g., "5", "3.14", "0.5").
@@ -43,7 +45,7 @@ def validate_positive_float(value: str) -> Tuple[bool, str]:
         return False, "Invalid number. Please enter a valid decimal number."
 
 
-def validate_positive_int(value: str) -> Tuple[bool, str]:
+def validate_positive_int(value: str) -> tuple[bool, str]:
     """Validate that input is a positive integer.
 
     Args:
@@ -61,7 +63,7 @@ def validate_positive_int(value: str) -> Tuple[bool, str]:
         return False, "Invalid integer. Please enter a whole number."
 
 
-def validate_non_empty(value: str) -> Tuple[bool, str]:
+def validate_non_empty(value: str) -> tuple[bool, str]:
     """Validate that input is non-empty after stripping whitespace.
 
     Args:
@@ -92,7 +94,7 @@ def validate_int_range(min_val: int, max_val: int) -> Validator:
         validator = validate_int_range(1, 100)
         dialog = UserInputDialog(prompt="Enter age:", validator=validator)
     """
-    def validator(value: str) -> Tuple[bool, str]:
+    def validator(value: str) -> tuple[bool, str]:
         """Validate integer is within the specified range."""
         try:
             num = int(value)
@@ -121,7 +123,7 @@ def validate_float_range(min_val: float, max_val: float) -> Validator:
         validator = validate_float_range(0.0, 1.0)
         dialog = UserInputDialog(prompt="Enter probability:", validator=validator)
     """
-    def validator(value: str) -> Tuple[bool, str]:
+    def validator(value: str) -> tuple[bool, str]:
         """Validate float is within the specified range."""
         try:
             num = float(value)
@@ -151,7 +153,7 @@ def validate_date_format(fmt: str = "%m/%Y", description: str = "MM/YYYY") -> Va
         validator = validate_date_format("%Y-%m-%d", "YYYY-MM-DD")
         dialog = UserInputDialog(prompt="Enter date:", validator=validator)
     """
-    def validator(value: str) -> Tuple[bool, str]:
+    def validator(value: str) -> tuple[bool, str]:
         """Validate string matches the specified date format."""
         try:
             datetime.strptime(value.strip(), fmt)
@@ -180,7 +182,7 @@ def validate_regex(pattern: str, error_msg: str) -> Validator:
     """
     compiled = re.compile(pattern)
 
-    def validator(value: str) -> Tuple[bool, str]:
+    def validator(value: str) -> tuple[bool, str]:
         """Validate string matches the specified regex pattern."""
         if compiled.fullmatch(value):
             return True, ""

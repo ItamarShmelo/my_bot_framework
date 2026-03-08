@@ -3,8 +3,10 @@
 This is an example of extending ActivateOnConditionEvent for a common pattern.
 """
 
+from __future__ import annotations
+
 import time
-from typing import Any, Callable, List, Union
+from typing import Any, Callable
 
 from ..event import (
     ActivateOnConditionEvent,
@@ -20,10 +22,10 @@ MINIMAL_INTERVAL_HOURS = 5.0 / 60.0  # 5 minutes
 
 class TimeEvent(ActivateOnConditionEvent):
     """Emit messages at regular time intervals.
-    
+
     A subclass of ActivateOnConditionEvent that uses a time-based condition.
     The interval is editable at runtime.
-    
+
     Example:
         >>> event = TimeEvent(
         ...     event_name="hourly_status",
@@ -32,21 +34,21 @@ class TimeEvent(ActivateOnConditionEvent):
         ...     fire_on_first_check=True,
         ... )
         >>> app.register_event(event)
-        >>> 
+        >>>
         >>> # Edit interval at runtime:
         >>> event.interval_hours = 0.5  # Change to 30 minutes
     """
-    
+
     def __init__(
         self,
         event_name: str,
         interval_hours: float,
-        message_builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
+        message_builder: Callable[[], None | TelegramMessage | str | list[TelegramMessage]],
         fire_on_first_check: bool = False,
         fire_when_edited: bool = False,
     ) -> None:
         """Initialize the time-based event.
-        
+
         Args:
             event_name: Unique identifier for the event.
             interval_hours: Hours between emissions (minimum 5 minutes). Editable at runtime.
@@ -77,14 +79,14 @@ class TimeEvent(ActivateOnConditionEvent):
                     "first_check": True,
                 }
                 self._fire_on_first_check = fire_on_first_check
-            
+
             def check(self) -> bool:
                 """Return True when the interval has elapsed."""
                 now = time.time()
-                
+
                 # Get current interval from editable attribute
                 current_interval_seconds = self.get("interval_hours") * 3600.0
-                
+
                 # Handle first check
                 if self._state["first_check"]:
                     self._state["first_check"] = False
@@ -94,19 +96,19 @@ class TimeEvent(ActivateOnConditionEvent):
                     else:
                         self._state["last_fire_time"] = now
                         return False
-                
+
                 # Check if interval has elapsed
                 if self._state["last_fire_time"] is None:
                     self._state["last_fire_time"] = now
                     return False
-                
+
                 elapsed = now - self._state["last_fire_time"]
                 if elapsed >= current_interval_seconds:
                     self._state["last_fire_time"] = now
                     return True
-                
+
                 return False
-            
+
         # Calculate poll interval (poll at least twice per interval, max 60s)
         initial_interval_seconds = interval_hours * 3600.0
         poll_seconds = min(initial_interval_seconds / 2, 60.0)
@@ -120,12 +122,12 @@ class TimeEvent(ActivateOnConditionEvent):
             poll_seconds=poll_seconds,
             fire_when_edited=fire_when_edited,
         )
-    
+
     @property
     def interval_hours(self) -> float:
         """Get the current interval in hours."""
         return self.get("condition.interval_hours")
-    
+
     @interval_hours.setter
     def interval_hours(self, value: float) -> None:
         """Set the interval in hours."""

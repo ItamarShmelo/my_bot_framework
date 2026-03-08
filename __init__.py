@@ -73,12 +73,11 @@ from .telegram_utilities import (
 from .dialog import (
     Dialog,
     DialogState,
-    DialogResponse,
     DialogResult,
     DialogHandler,
     KeyboardType,
     BranchesType,
-    # Inline keyboard dialogs (new names)
+    # Inline keyboard dialogs
     InlineKeyboardChoiceDialog,
     InlineKeyboardConfirmDialog,
     InlineKeyboardPaginatedChoiceDialog,
@@ -101,7 +100,6 @@ from .dialog import (
     create_choice_branch_dialog,
     create_user_input_dialog,
     # Sentinels and debug
-    CANCELLED,
     is_cancelled,
     DIALOG_DEBUG,
     set_dialog_debug,
@@ -167,7 +165,6 @@ __all__ = [
     # Dialog
     "Dialog",
     "DialogState",
-    "DialogResponse",
     "DialogResult",
     "DialogHandler",
     "KeyboardType",
@@ -197,7 +194,6 @@ __all__ = [
     # Mixins
     "UpdatePollerMixin",
     # Sentinels and Debug
-    "CANCELLED",
     "is_cancelled",
     "DIALOG_DEBUG",
     "set_dialog_debug",

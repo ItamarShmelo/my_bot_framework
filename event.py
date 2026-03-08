@@ -1,9 +1,11 @@
 """Event system for the bot framework."""
 
+from __future__ import annotations
+
 import asyncio
 import inspect
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Coroutine, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from telegram import Update
 
@@ -18,7 +20,7 @@ from .polling import UpdatePollerMixin, set_next_update_id
 from .editable import EditableAttribute, EditableMixin
 
 if TYPE_CHECKING:
-    from .dialog import Dialog, DialogResponse
+    from .dialog import Dialog
 
 MINIMAL_TIME_BETWEEN_MESSAGES = 5.0 / 60.0
 
@@ -36,7 +38,7 @@ class MessageBuilder(EditableMixin, ABC):
     """Editable message builder interface for ActivateOnConditionEvent."""
 
     @abstractmethod
-    def build(self) -> Union[None, TelegramMessage, str, List[TelegramMessage]]:
+    def build(self) -> None | TelegramMessage | str | list[TelegramMessage]:
         """Build message content for enqueueing."""
         ...
 
@@ -73,17 +75,17 @@ class FunctionCondition(Condition):
 class FunctionMessageBuilder(MessageBuilder):
     """Message builder wrapper for no-arg callables."""
 
-    _builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]]
+    _builder: Callable[[], None | TelegramMessage | str | list[TelegramMessage]]
 
     def __init__(
         self,
-        builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
+        builder: Callable[[], None | TelegramMessage | str | list[TelegramMessage]],
     ) -> None:
         """Initialize a function-based message builder.
 
         Args:
             builder: No-argument callable that returns a message or None.
-                Can return str, TelegramMessage, List[TelegramMessage], or None.
+                Can return str, TelegramMessage, list[TelegramMessage], or None.
 
         Raises:
             TypeError: If builder is not callable.
@@ -97,7 +99,7 @@ class FunctionMessageBuilder(MessageBuilder):
         self.editable_attributes = []
         self._builder = builder
 
-    def build(self) -> Union[None, TelegramMessage, str, List[TelegramMessage]]:
+    def build(self) -> None | TelegramMessage | str | list[TelegramMessage]:
         """Build the message content."""
         return self._builder()
 
@@ -133,14 +135,14 @@ class ActivateOnConditionEvent(Event, EditableMixin):
     message_builder: MessageBuilder
     poll_seconds: float
     fire_when_edited: bool
-    _editable_attributes: dict[str, "EditableAttribute"]
+    _editable_attributes: dict[str, EditableAttribute]
 
     def __init__(
         self,
         event_name: str,
         condition: Condition,
         message_builder: MessageBuilder,
-        editable_attributes: Optional[List[EditableAttribute]] = None,
+        editable_attributes: list[EditableAttribute] | None = None,
         poll_seconds: float = 5.0,
         fire_when_edited: bool = True,
     ) -> None:
@@ -167,7 +169,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         self.fire_when_edited = fire_when_edited
 
     @property
-    def editable_attributes(self) -> dict[str, "EditableAttribute"]:
+    def editable_attributes(self) -> dict[str, EditableAttribute]:
         """Combined editable attributes from event, condition, and builder.
 
         Returns a dict with:
@@ -188,7 +190,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         return combined
 
     @editable_attributes.setter
-    def editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
+    def editable_attributes(self, attributes: list[EditableAttribute]) -> None:
         """Initialize the event's own editable attributes (not condition/builder)."""
         self._init_editable_attributes(attributes)
 
@@ -268,16 +270,23 @@ class CommandsEvent(Event, UpdatePollerMixin):
     5. Ignores non-command messages (no "/" prefix)
     """
 
-    commands: List["Command"]
+    commands: list[Command]
     poll_seconds: float
-    _stop_event: Optional[asyncio.Event]
+    _stop_event: asyncio.Event | None
 
     def __init__(
         self,
         event_name: str,
-        commands: List["Command"],
+        commands: list[Command],
         poll_seconds: float = 2.0,
     ) -> None:
+        """Initialize the commands event.
+
+        Args:
+            event_name: Unique identifier for the event.
+            commands: List of Command instances to handle.
+            poll_seconds: How often to poll for updates (default 2.0).
+        """
         super().__init__(event_name)
         self.commands = commands
         self.poll_seconds = poll_seconds
@@ -332,7 +341,7 @@ class CommandsEvent(Event, UpdatePollerMixin):
         self._stop_event = stop_event
         await self.poll()
 
-    def _match_command(self, text: str) -> Optional["Command"]:
+    def _match_command(self, text: str) -> Command | None:
         """Match the first token against known commands."""
         command_token = text.split(maxsplit=1)[0]
         for command in self.commands:
@@ -359,11 +368,16 @@ async def _wait_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=seconds)
     except asyncio.TimeoutError:
+        get_logger().debug(
+            "_wait_or_stop: timeout_expired seconds=%.1f (expected)",
+            seconds,
+            exc_info=True,
+        )
         return
 
 
 async def _maybe_await(
-    func: Union[Callable[..., Any], Callable[..., Coroutine[Any, Any, Any]]],
+    func: Callable[..., Any] | Callable[..., Coroutine[Any, Any, Any]],
     *args: Any,
     **kwargs: Any,
 ) -> Any:
@@ -385,6 +399,12 @@ class Command(ABC):
     description: str
 
     def __init__(self, command: str, description: str) -> None:
+        """Initialize the command.
+
+        Args:
+            command: The command string (e.g., "/start").
+            description: Human-readable description for help text.
+        """
         self.command = command
         self.description = description
 
@@ -405,20 +425,27 @@ class SimpleCommand(Command):
     a message (str, TelegramMessage, list of messages, or None).
     """
 
-    message_builder: Union[
-        Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
-        Callable[[], Coroutine[Any, Any, Union[None, TelegramMessage, str, List[TelegramMessage]]]],
-    ]
+    message_builder: (
+        Callable[[], None | TelegramMessage | str | list[TelegramMessage]]
+        | Callable[[], Coroutine[Any, Any, None | TelegramMessage | str | list[TelegramMessage]]]
+    )
 
     def __init__(
         self,
         command: str,
         description: str,
-        message_builder: Union[
-            Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
-            Callable[[], Coroutine[Any, Any, Union[None, TelegramMessage, str, List[TelegramMessage]]]],
-        ],
+        message_builder: (
+            Callable[[], None | TelegramMessage | str | list[TelegramMessage]]
+            | Callable[[], Coroutine[Any, Any, None | TelegramMessage | str | list[TelegramMessage]]]
+        ),
     ) -> None:
+        """Initialize the simple command.
+
+        Args:
+            command: The command string (e.g., "/start").
+            description: Human-readable description for help text.
+            message_builder: Callable returning message content (sync or async).
+        """
         super().__init__(command, description)
         self.message_builder = message_builder
 
@@ -441,14 +468,21 @@ class DialogCommand(Command):
     DialogCommand simply calls dialog.start() and returns the final offset.
     """
 
-    dialog: "Dialog"
+    dialog: Dialog
 
     def __init__(
         self,
         command: str,
         description: str,
-        dialog: "Dialog",
+        dialog: Dialog,
     ) -> None:
+        """Initialize the dialog command.
+
+        Args:
+            command: The command string (e.g., "/setup").
+            description: Human-readable description for help text.
+            dialog: The Dialog instance to run when command is invoked.
+        """
         super().__init__(command, description)
         self.dialog = dialog
 

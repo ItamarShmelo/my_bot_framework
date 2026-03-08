@@ -9,12 +9,14 @@ Tests:
 - EditEventDialog with reply keyboard (/edit_reply)
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
 import sys
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -118,7 +120,7 @@ class AlertMessageBuilder(MessageBuilder):
         self._condition = condition
         self._alert_count = 0
 
-    def build(self) -> Optional[str]:
+    def build(self) -> str | None:
         """Build alert message with current value and level."""
         max_alerts = self.get("max_alerts")
 

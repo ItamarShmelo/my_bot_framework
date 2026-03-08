@@ -11,11 +11,13 @@ Tests:
 - Dynamic choices via callable
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -41,7 +43,7 @@ from my_bot_framework import (
 )
 
 
-def get_credentials() -> Tuple[str, str]:
+def get_credentials() -> tuple[str, str]:
     """Get bot credentials from .token and .chat_id files in test_bots directory."""
     test_bots_dir = Path(__file__).resolve().parent
     token_file = test_bots_dir / ".token"
@@ -163,7 +165,7 @@ paginated_factory_dialog = create_paginated_choice_dialog(
 
 
 # /dynamic_choice - Tests dynamic choices via callable
-def get_dynamic_choices(context: Dict[str, str]) -> List[Tuple[str, str]]:
+def get_dynamic_choices(context: dict[str, str]) -> list[tuple[str, str]]:
     """Get choices based on context."""
     category = context.get("category", "general")
     if category == "food":
@@ -236,7 +238,7 @@ branch_factory_dialog = create_choice_branch_dialog(
 
 
 # /dynamic_branch - Tests ReplyKeyboardChoiceBranchDialog with dynamic callable branches
-def get_dynamic_branches(context: Dict[str, Any]) -> Dict[str, Tuple[str, Any]]:
+def get_dynamic_branches(context: dict[str, Any]) -> dict[str, tuple[str, Any]]:
     """Get branches based on context - branches vary by user_type selection."""
     user_type = context.get("user_type", "basic")
     if user_type == "developer":

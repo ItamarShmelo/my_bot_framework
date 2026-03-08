@@ -10,11 +10,13 @@ Tests ALL dialog types:
 - LoopDialog: Repeat until exit condition
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -147,7 +149,7 @@ branch_dialog = InlineKeyboardChoiceBranchDialog(
 
 
 # /dynamic_branch - Tests InlineKeyboardChoiceBranchDialog with dynamic callable branches
-def get_dynamic_branches(context: Dict[str, Any]) -> Dict[str, Tuple[str, Any]]:
+def get_dynamic_branches(context: dict[str, Any]) -> dict[str, tuple[str, Any]]:
     """Get branches based on context - branches vary by user_type selection."""
     user_type = context.get("user_type", "basic")
     if user_type == "developer":

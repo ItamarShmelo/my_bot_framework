@@ -23,11 +23,13 @@ Expected behavior by failure mode:
   then successful polling resets consecutive_failures and updates last_successful_cycle.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -38,7 +40,7 @@ from telegram.error import NetworkError, TimedOut
 from my_bot_framework import BotApplication, SimpleCommand, TimeEvent
 
 
-def get_credentials() -> Tuple[str, str]:
+def get_credentials() -> tuple[str, str]:
     """Get bot credentials from .token and .chat_id files in test_bots directory.
 
     Returns:
@@ -145,7 +147,7 @@ def patch_get_updates(bot: Bot, logger: logging.Logger) -> None:
     async def patched_get_updates(
         *args: Any,
         **kwargs: Any,
-    ) -> Tuple[Update, ...]:
+    ) -> tuple[Update, ...]:
         """Wrapper that injects failures on a fixed schedule.
 
         Returns:

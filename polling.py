@@ -9,10 +9,12 @@ This module provides:
 - UpdatePollerMixin: Mixin class for update polling with Template Method Pattern
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple, cast
+from typing import Any, cast
 
 from telegram import Bot, Update
 from telegram.error import NetworkError, RetryAfter, TimedOut
@@ -146,7 +148,7 @@ def _log_poll_recovery(logger: logging.Logger) -> None:
         _poll_consecutive_failures = 0
 
 
-async def poll_updates(bot: Bot, timeout: int = GET_UPDATES_TIMEOUT_SECONDS) -> List[Update]:
+async def poll_updates(bot: Bot, timeout: int = GET_UPDATES_TIMEOUT_SECONDS) -> list[Update]:
     """Poll for updates and update the global next_update_id.
 
     Catches transient Telegram network errors (TimedOut, NetworkError)
@@ -163,7 +165,7 @@ async def poll_updates(bot: Bot, timeout: int = GET_UPDATES_TIMEOUT_SECONDS) -> 
     logger.debug("poll_updates: polling offset=%d timeout=%d", get_next_update_id(), timeout)
 
     try:
-        updates_tuple: Tuple[Update, ...] = await run_with_transient_retry(
+        updates_tuple: tuple[Update, ...] = await run_with_transient_retry(
             lambda: bot.get_updates(
                 offset=get_next_update_id(),
                 timeout=timeout,
@@ -191,7 +193,7 @@ async def poll_updates(bot: Bot, timeout: int = GET_UPDATES_TIMEOUT_SECONDS) -> 
         )
         return []
 
-    updates: List[Update] = list(updates_tuple)
+    updates: list[Update] = list(updates_tuple)
     if updates:
         next_update_id: int = max(updates, key=lambda u: u.update_id).update_id + 1
         set_next_update_id(next_update_id)
@@ -201,7 +203,7 @@ async def poll_updates(bot: Bot, timeout: int = GET_UPDATES_TIMEOUT_SECONDS) -> 
     return updates
 
 
-def get_chat_id_from_update(update: Update) -> Optional[int]:
+def get_chat_id_from_update(update: Update) -> int | None:
     """Extract chat_id from update.
 
     Args:
@@ -263,7 +265,7 @@ class UpdatePollerMixin(ABC):
         logger.info("UpdatePollerMixin.poll: started")
         while not self.should_stop_polling():
             try:
-                updates: List[Update] = await poll_updates(bot)
+                updates: list[Update] = await poll_updates(bot)
             except Exception:
                 logger.error(
                     "UpdatePollerMixin.poll: poll_updates_failed retry_delay_seconds=%d",
@@ -274,7 +276,7 @@ class UpdatePollerMixin(ABC):
                 continue
 
             for update in updates:
-                update_chat_id: Optional[int] = get_chat_id_from_update(update)
+                update_chat_id: int | None = get_chat_id_from_update(update)
                 if update_chat_id is None or str(update_chat_id) != chat_id:
                     logger.debug(
                         "UpdatePollerMixin.poll: filtered update wrong_chat=%s expected=%s",

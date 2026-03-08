@@ -1,10 +1,12 @@
 """Telegram message wrappers for sending various message types."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Final, Optional
+from typing import Final
 
 from telegram import Bot, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import MessageLimit, ParseMode
@@ -270,7 +272,7 @@ class TelegramOptionsMessage(TelegramMessage):
 
     text: str
     reply_markup: InlineKeyboardMarkup
-    sent_message: Optional[Message]
+    sent_message: Message | None
 
     def __init__(self, text: str, reply_markup: InlineKeyboardMarkup) -> None:
         """Create a message with inline keyboard.
@@ -311,13 +313,13 @@ class TelegramEditMessage(TelegramMessage):
 
     message_id: int
     text: str
-    reply_markup: Optional[InlineKeyboardMarkup]
+    reply_markup: InlineKeyboardMarkup | None
 
     def __init__(
         self,
         message_id: int,
         text: str,
-        reply_markup: Optional[InlineKeyboardMarkup] = None,
+        reply_markup: InlineKeyboardMarkup | None = None,
     ) -> None:
         """Create an edit message payload.
 
@@ -358,9 +360,9 @@ class TelegramCallbackAnswerMessage(TelegramMessage):
     """Answer a callback query (acknowledge button press)."""
 
     callback_query_id: str
-    text: Optional[str]
+    text: str | None
 
-    def __init__(self, callback_query_id: str, text: Optional[str] = None) -> None:
+    def __init__(self, callback_query_id: str, text: str | None = None) -> None:
         """Create a callback answer payload.
 
         Args:
@@ -455,7 +457,7 @@ class TelegramReplyKeyboardMessage(TelegramMessage):
     keyboard: list[list[str]]
     resize_keyboard: bool
     one_time_keyboard: bool
-    sent_message: Optional[Message]
+    sent_message: Message | None
 
     def __init__(
         self,
@@ -510,7 +512,7 @@ class TelegramRemoveReplyKeyboardMessage(TelegramMessage):
     """Remove the persistent reply keyboard."""
 
     text: str
-    sent_message: Optional[Message]
+    sent_message: Message | None
 
     def __init__(self, text: str = "Keyboard removed.") -> None:
         """Create a message that removes the reply keyboard.

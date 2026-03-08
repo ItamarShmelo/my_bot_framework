@@ -7,11 +7,13 @@ Tests:
 - Targeted and bulk runtime removal of heartbeat events
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Callable, Coroutine, Dict, List
+from typing import Callable, Coroutine
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -68,9 +70,9 @@ class HeartbeatMessageBuilder(MessageBuilder):
 def _register_heartbeat(
     app: BotApplication,
     logger: logging.Logger,
-    heartbeat_names: List[str],
-    heartbeat_labels: Dict[str, str],
-    heartbeat_origins: Dict[str, str],
+    heartbeat_names: list[str],
+    heartbeat_labels: dict[str, str],
+    heartbeat_origins: dict[str, str],
     event_name: str,
     label: str,
     origin: str,
@@ -116,9 +118,9 @@ def _register_heartbeat(
 def _remove_heartbeat(
     app: BotApplication,
     logger: logging.Logger,
-    heartbeat_names: List[str],
-    heartbeat_labels: Dict[str, str],
-    heartbeat_origins: Dict[str, str],
+    heartbeat_names: list[str],
+    heartbeat_labels: dict[str, str],
+    heartbeat_origins: dict[str, str],
     event_name: str,
 ) -> str:
     """Remove a tracked heartbeat event and return a user-facing message.
@@ -162,9 +164,9 @@ def _remove_heartbeat(
 
 def _make_add_heartbeat_handler(
     logger: logging.Logger,
-    heartbeat_names: List[str],
-    heartbeat_labels: Dict[str, str],
-    heartbeat_origins: Dict[str, str],
+    heartbeat_names: list[str],
+    heartbeat_labels: dict[str, str],
+    heartbeat_origins: dict[str, str],
 ) -> Callable[[], Coroutine[None, None, str]]:
     """Build a command handler that registers a new heartbeat event.
 
@@ -178,7 +180,7 @@ def _make_add_heartbeat_handler(
         Async handler that registers a new heartbeat event and returns a
         user-facing confirmation message.
     """
-    dynamic_event_index: List[int] = [0]
+    dynamic_event_index: list[int] = [0]
 
     async def _add_heartbeat() -> str:
         """Register the next dynamic heartbeat event."""
@@ -208,9 +210,9 @@ def _make_add_heartbeat_handler(
 
 def _make_remove_last_heartbeat_handler(
     logger: logging.Logger,
-    heartbeat_names: List[str],
-    heartbeat_labels: Dict[str, str],
-    heartbeat_origins: Dict[str, str],
+    heartbeat_names: list[str],
+    heartbeat_labels: dict[str, str],
+    heartbeat_origins: dict[str, str],
 ) -> Callable[[], Coroutine[None, None, str]]:
     """Build a command handler that removes the most recent heartbeat.
 
@@ -247,9 +249,9 @@ def _make_remove_last_heartbeat_handler(
 
 def _make_remove_named_heartbeat_handler(
     logger: logging.Logger,
-    heartbeat_names: List[str],
-    heartbeat_labels: Dict[str, str],
-    heartbeat_origins: Dict[str, str],
+    heartbeat_names: list[str],
+    heartbeat_labels: dict[str, str],
+    heartbeat_origins: dict[str, str],
     event_name: str,
 ) -> Callable[[], Coroutine[None, None, str]]:
     """Build a command handler that removes a specific heartbeat by name.
@@ -292,9 +294,9 @@ def _make_remove_named_heartbeat_handler(
 
 def _make_remove_all_heartbeats_handler(
     logger: logging.Logger,
-    heartbeat_names: List[str],
-    heartbeat_labels: Dict[str, str],
-    heartbeat_origins: Dict[str, str],
+    heartbeat_names: list[str],
+    heartbeat_labels: dict[str, str],
+    heartbeat_origins: dict[str, str],
 ) -> Callable[[], Coroutine[None, None, str]]:
     """Build a command handler that removes all tracked heartbeats.
 
@@ -337,9 +339,9 @@ def _make_remove_all_heartbeats_handler(
 
 
 def _make_list_heartbeats_handler(
-    heartbeat_names: List[str],
-    heartbeat_labels: Dict[str, str],
-    heartbeat_origins: Dict[str, str],
+    heartbeat_names: list[str],
+    heartbeat_labels: dict[str, str],
+    heartbeat_origins: dict[str, str],
 ) -> Callable[[], str]:
     """Build a command handler that lists the tracked heartbeat events.
 
@@ -419,9 +421,9 @@ def main() -> None:
         logger=logger,
     )
 
-    heartbeat_names: List[str] = []
-    heartbeat_labels: Dict[str, str] = {}
-    heartbeat_origins: Dict[str, str] = {}
+    heartbeat_names: list[str] = []
+    heartbeat_labels: dict[str, str] = {}
+    heartbeat_origins: dict[str, str] = {}
 
     _register_heartbeat(
         app=app,

@@ -297,11 +297,6 @@ classDiagram
     Dialog <|-- BranchDialog
     Dialog <|-- LoopDialog
     Dialog <|-- DialogHandler
-    
-    InlineKeyboardChoiceDialog --|> ChoiceDialog : alias
-    InlineKeyboardPaginatedChoiceDialog --|> PaginatedChoiceDialog : alias
-    InlineKeyboardConfirmDialog --|> ConfirmDialog : alias
-    InlineKeyboardChoiceBranchDialog --|> ChoiceBranchDialog : alias
 ```
 
 **Shared Context**: All dialogs share a `context` dict for cross-dialog communication:
@@ -310,7 +305,7 @@ classDiagram
 # Values flow through context automatically
 dialog = SequenceDialog([
     ("name", UserInputDialog("Enter name:")),
-    ("tool", ChoiceDialog(
+    ("tool", InlineKeyboardChoiceDialog(
         prompt="Select tool:",
         choices=lambda ctx: [("Python", "py")] if ctx.get("name") else [],
     )),
@@ -327,7 +322,7 @@ branch_dialog = InlineKeyboardChoiceBranchDialog(
 ```
 INACTIVE ──start()──► ACTIVE/AWAITING_TEXT ──complete──► COMPLETE
                               │
-                              └──cancel()──► COMPLETE (value=None)
+                              └──cancel()──► COMPLETE (dialog_result=CANCELLED)
 ```
 
 ```python
@@ -439,20 +434,15 @@ async def run():
 **DialogCommand execution:**
 ```
 async def run():
-    response = dialog.start()
-    send_message_with_keyboard(response)
+    result = await dialog.start(context)
 
-    while dialog.state != COMPLETE:
-        updates = poll_updates()
+    # Dialogs send messages directly via get_app().send_messages() in _run_dialog()
+    # No separate send_message_with_keyboard - inline keyboard dialogs send
+    # TelegramOptionsMessage etc. from within _run_dialog() and handle_*_update()
+    # Polling is handled by UpdatePollerMixin.poll() for leaf dialogs, or delegated
+    # to children for composite dialogs.
 
-        for update in updates:
-            if update.callback_query:
-                handle_callback_update(update)   # answer, remove keyboard, process
-
-            elif update.message.text:
-                handle_text_update(update)       # validate, accept, or clarify
-
-    return current_offset
+    return result  # T | DialogResult
 ```
 
 ### 4. Message Sending Flow
@@ -655,7 +645,7 @@ The `validators.py` module provides reusable validation functions for `UserInput
 All validators implement the `Validator` type alias:
 
 ```python
-Validator = Callable[[str], Tuple[bool, str]]
+Validator = Callable[[str], tuple[bool, str]]
 ```
 
 The function signature is:
@@ -702,7 +692,7 @@ Factory functions create validators with custom parameters using closures:
 
 ```python
 def validate_int_range(min_val: int, max_val: int) -> Validator:
-    def validator(value: str) -> Tuple[bool, str]:
+    def validator(value: str) -> tuple[bool, str]:
         # Closure captures min_val and max_val
         try:
             num = int(value)
@@ -720,7 +710,7 @@ def validate_int_range(min_val: int, max_val: int) -> Validator:
 def validate_regex(pattern: str, error_msg: str) -> Validator:
     compiled = re.compile(pattern)  # Compile once
     
-    def validator(value: str) -> Tuple[bool, str]:
+    def validator(value: str) -> tuple[bool, str]:
         if compiled.fullmatch(value):  # Reuse compiled pattern
             return True, ""
         return False, error_msg
@@ -987,8 +977,8 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                       Dialog (ABC)                          │
-│              start(context) -> DialogResult                 │
+│                    Dialog[T] (ABC, Generic)                  │
+│         start(context) -> T | DialogResult                   │
 ├─────────────────────────────────────────────────────────────┤
 │  Template method:                                           │
 │    start():                                                 │
@@ -997,8 +987,11 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
 │      3. _run_dialog() - delegate to subclass                │
 │                                                             │
 │  Abstract:                                                  │
-│    • _run_dialog() -> DialogResult                          │
-│    • build_result() -> DialogResult                         │
+│    • _run_dialog() -> T | DialogResult                      │
+│                                                             │
+│  Properties:                                                │
+│    • dialog_result: T | DialogResult (result after complete) │
+│    • cancel() -> None (sets dialog_result=CANCELLED)        │
 └─────────────────────────────────────────────────────────────┘
                               │
           ┌───────────────────┼───────────────────┐
@@ -1044,16 +1037,16 @@ Factory functions (`create_choice_dialog`, `create_confirm_dialog`, `create_user
 ```python
 def create_choice_dialog(
     prompt: str,
-    choices: List[Tuple[str, str]],
+    choices: list[tuple[str, str]],
     keyboard_type: KeyboardType = KeyboardType.INLINE,
     include_cancel: bool = True,
-) -> Dialog:
+) -> Dialog[str]:
     if keyboard_type == KeyboardType.REPLY:
         return ReplyKeyboardChoiceDialog(prompt, choices, include_cancel)
     return InlineKeyboardChoiceDialog(prompt, choices, include_cancel)
 ```
 
-**BranchesType and `create_choice_branch_dialog`**: The `BranchesType` type alias is `Union[Dict[str, Tuple[str, Dialog]], Callable[[Dict[str, Any]], Dict[str, Tuple[str, Dialog]]]]`. Both `InlineKeyboardChoiceBranchDialog` and `ReplyKeyboardChoiceBranchDialog` accept either a static dict or a callable `context -> dict` for `branches`. The `get_branches()` method evaluates the callable when dynamic. The factory `create_choice_branch_dialog(prompt, branches, keyboard_type, include_cancel)` accepts `BranchesType` for `branches`.
+**BranchesType and `create_choice_branch_dialog`**: The `BranchesType` type alias is `dict[str, tuple[str, Dialog]] | Callable[[dict[str, Any]], dict[str, tuple[str, Dialog]]]`. Both `InlineKeyboardChoiceBranchDialog` and `ReplyKeyboardChoiceBranchDialog` accept either a static dict or a callable `context -> dict` for `branches`. The `get_branches()` method evaluates the callable when dynamic. The factory `create_choice_branch_dialog(prompt, branches, keyboard_type, include_cancel)` accepts `BranchesType` for `branches`.
 
 ### Cancellation with CANCELLED Sentinel
 
@@ -1072,16 +1065,20 @@ if result is CANCELLED:
     pass
 ```
 
-### DialogResult and build_result()
+### DialogResult Sentinel and dialog_result
 
-Each dialog implements `build_result()` to create standardized nested dictionaries:
+`DialogResult` is a sentinel class for non-value outcomes. `NOT_SET` (internal initial state), `CANCELLED`, and `DONE` are instances of `DialogResult` (exported from `__init__.py`). Use `is_cancelled(result)` or `result is CANCELLED` to detect cancellation.
 
-- **Leaf dialogs**: Return raw `value`
-- **SequenceDialog**: Return `{name: child.build_result()}`
-- **BranchDialog/ChoiceBranchDialog/InlineKeyboardChoiceBranchDialog/ReplyKeyboardChoiceBranchDialog**: Return `{selected_key: branch.build_result()}`
-- **LoopDialog**: Return final `value`
-- **DialogHandler**: Return inner dialog's `build_result()`
-- **EditEventDialog**: Return context dict with all edited field values
+Each dialog stores its result in `_dialog_result` and exposes it via the `dialog_result` property. Composite dialogs store structured results directly:
+
+- **Leaf dialogs**: Store raw value (e.g., `str`, `bool`) or `CANCELLED`
+- **SequenceDialog**: Store `{name: child.dialog_result}` for each child
+- **BranchDialog/ChoiceBranchDialog**: Store `{selected_key: branch.dialog_result}`
+- **LoopDialog**: Store final value from last iteration
+- **DialogHandler**: Store inner dialog's `dialog_result`
+- **EditEventDialog**: Store `{field: value}` dict of staged edits on Done, or `CANCELLED` on Cancel
+
+Inline keyboard dialogs send messages directly via `get_app().send_messages()` (no `_send_response` methods). `cancel()` returns `None`.
 
 ## EditEventDialog Architecture
 
@@ -1122,7 +1119,7 @@ Edits are staged in a private `_staged_edits` dict (not the shared context) and 
 Optional `validator` parameter enables complex validation rules. The validator receives the staged edits dict (the same dict passed to `event.edit()` on Done), not the shared dialog context.
 
 ```python
-def validate_range(staged_edits: Dict[str, Any]) -> Tuple[bool, str]:
+def validate_range(staged_edits: dict[str, Any]) -> tuple[bool, str]:
     """Ensure min < max. Called after each field edit."""
     min_val = staged_edits.get("condition.limit_min", event.get("condition.limit_min"))
     max_val = staged_edits.get("condition.limit_max", event.get("condition.limit_max"))
@@ -1167,29 +1164,26 @@ The framework provides built-in dialog types. If you need a custom leaf dialog
 that handles its own polling, inherit from both `Dialog` and `UpdatePollerMixin`:
 
 ```python
-from my_bot_framework import Dialog, UpdatePollerMixin
+from my_bot_framework import Dialog, DialogResult, UpdatePollerMixin, get_app, TelegramOptionsMessage
 
-class CustomDialog(Dialog, UpdatePollerMixin):
-    async def _run_dialog(self) -> DialogResult:
-        # Send initial UI
-        await self._send_response(response)
+class CustomDialog(Dialog[str], UpdatePollerMixin):
+    async def _run_dialog(self) -> str | DialogResult:
+        # Send initial UI directly via get_app().send_messages()
+        await get_app().send_messages(TelegramOptionsMessage("Choose:", keyboard))
         # Poll until complete
         return await self.poll()
-    
-    def build_result(self) -> DialogResult:
-        return self.value
     
     def should_stop_polling(self) -> bool:
         return self.is_complete
     
-    # Uses singleton accessors: get_bot(), get_chat_id(), get_logger()
+    # Uses singleton accessors: get_app(), get_bot(), get_chat_id(), get_logger()
     
     async def handle_callback_update(self, update: Update) -> None:
-        # Handle callback queries
+        # Handle callback queries; set self._dialog_result and self.state
         pass
     
     async def handle_text_update(self, update: Update) -> None:
-        # Handle text input
+        # Handle text input; set self._dialog_result and self.state
         pass
 ```
 
