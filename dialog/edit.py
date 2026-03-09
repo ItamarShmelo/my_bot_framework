@@ -118,7 +118,8 @@ class EditEventDialog(Dialog[dict[str, Any]]):
                 continue
 
             attr = self.event.editable_attributes[field_name]
-
+            if await self._edit_custom_field(field_name):
+                continue
             if self._is_bool_field(attr):
                 await self._edit_bool_field(field_name)
             else:
@@ -196,6 +197,28 @@ class EditEventDialog(Dialog[dict[str, Any]]):
         for field_name, value in self._staged_edits.items():
             self.event.edit(field_name, value)
         self.event.edited = True
+
+    async def _edit_custom_field(self, field_name: str) -> bool:
+        """Handle editing of a field with a custom dialog.
+
+        Called in the edit loop after verifying the field exists in
+        editable_attributes, but before the default bool/text dispatch.
+        Subclasses override this to launch a custom dialog for specific
+        fields (e.g., a list editor instead of a text input).
+
+        Args:
+            field_name: Name of the editable attribute selected by the user.
+
+        Returns:
+            True if the field was handled by a custom editor (the loop
+            continues to the next field selection). False to fall through
+            to the default bool/text editing.
+        """
+        get_logger().debug(
+            "EditEventDialog._edit_custom_field: fallthrough field=%s (no custom handler)",
+            field_name,
+        )
+        return False
 
     async def _edit_bool_field(self, field_name: str) -> bool:
         """Edit a boolean field using ConfirmDialog.

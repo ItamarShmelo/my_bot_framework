@@ -1191,6 +1191,15 @@ The validator runs after each field edit. If it fails, the user must fix the val
 
 **Note:** Validation error messages are displayed as HTML. If your error messages contain special characters like `<`, `>`, or `&`, use `html.escape()` to prevent parsing errors.
 
+### Custom Field Editing Hook
+
+Subclasses can override `_edit_custom_field(field_name: str) -> bool` to provide custom editing dialogs for specific fields. The hook is invoked in the edit loop after verifying the field exists in `editable_attributes` but **before** the default bool/text dispatch (`_edit_bool_field` / `_edit_text_field`).
+
+- **Returns `True`** if the field was handled by a custom editor — the loop continues to the field selection screen.
+- **Returns `False`** (default) to fall through to the default bool or text editing.
+
+Use this to substitute a `ChoiceDialog`, `PaginatedChoiceDialog`, or other custom flow instead of the default text input for particular fields (e.g., icon-labeled choices, list pickers). `editable_bot.py` demonstrates `CustomEditDialog` overriding this hook for the `builder.alert_level` field.
+
 ## Extension Points
 
 ### Custom Event

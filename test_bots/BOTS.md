@@ -222,6 +222,7 @@ python test_bots/dialog_handler_bot.py
 - `ActivateOnConditionEvent` with editable parameters
 - `EditEventDialog` with inline and reply keyboards
 - `KeyboardType` for choosing keyboard style in EditEventDialog
+- `EditEventDialog._edit_custom_field` hook via `CustomEditDialog` subclass
 
 **Commands:**
 | Command | Description |
@@ -233,6 +234,7 @@ python test_bots/dialog_handler_bot.py
 | `/edit_all` | Edit all settings via SequenceDialog |
 | `/edit_inline` | Edit all settings via EditEventDialog (inline keyboard) |
 | `/edit_reply` | Edit all settings via EditEventDialog (reply keyboard) |
+| `/edit_custom` | Edit all settings via CustomEditDialog (custom alert_level ChoiceDialog) |
 | `/info` | Shows what this bot tests |
 
 **Events:**

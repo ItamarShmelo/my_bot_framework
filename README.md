@@ -489,6 +489,23 @@ validated_dialog = EditEventDialog(event, validator=validate_limits)
 app.register_command(DialogCommand("/edit", "Edit event settings", validated_dialog))
 ```
 
+Subclasses can override `_edit_custom_field(field_name: str) -> bool` to provide custom editing dialogs for specific fields. The hook is called after verifying the field exists but before the default bool/text dispatch. Return `True` if the field was handled (loop continues to field selection); return `False` to fall through to the default editor.
+
+```python
+class CustomEditDialog(EditEventDialog):
+    async def _edit_custom_field(self, field_name: str) -> bool:
+        if field_name != "builder.alert_level":
+            return False
+        # Show ChoiceDialog instead of text input for this field
+        result = await create_choice_dialog(...).start(self.context)
+        if is_cancelled(result):
+            return True
+        success, error = self._validate_and_stage_value(field_name, result)
+        if not success:
+            await get_app().send_messages(f"⚠️ {error}")
+        return True  # Handled
+```
+
 The dialog shows a field list with current values. Boolean fields use toggle buttons (Yes/No), other fields use text input. Field selection and boolean editing use either inline or reply keyboard based on `keyboard_type`. Edits are staged and only applied when clicking Done.
 
 #### Cancellation Handling
