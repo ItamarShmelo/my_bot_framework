@@ -38,6 +38,7 @@ my_bot_framework/
 ├── __init__.py           # Public API exports
 ├── accessors.py          # Singleton accessor functions (breaks circular deps)
 ├── bot_application.py    # BotApplication singleton
+├── retry_utilities.py    # Shared retry logic for transient + RetryAfter
 ├── polling.py            # Update polling utilities and UpdatePollerMixin
 ├── event.py              # Event system and commands
 ├── event_examples/       # Event subclasses and factories
@@ -45,7 +46,17 @@ my_bot_framework/
 │   ├── time_event.py     # TimeEvent (subclass of ActivateOnConditionEvent)
 │   ├── threshold_event.py # ThresholdEvent (subclass of ActivateOnConditionEvent)
 │   └── factories.py      # Factory functions (create_file_change_event)
-├── dialog.py             # Interactive dialog system
+├── dialog/               # Interactive dialog system (package)
+│   ├── __init__.py       # Public API exports (unchanged from before split)
+│   ├── base.py           # Dialog base, KeyboardType, shared helpers
+│   ├── choice.py         # ChoiceDialog
+│   ├── confirm.py        # ConfirmDialog
+│   ├── paginated.py      # PaginatedChoiceDialog
+│   ├── branch.py         # ChoiceBranchDialog
+│   ├── input.py          # UserInputDialog
+│   ├── composite.py      # SequenceDialog, BranchDialog, LoopDialog, DialogHandler
+│   ├── edit.py           # EditEventDialog
+│   └── factories.py      # create_choice_dialog, create_confirm_dialog, etc.
 ├── telegram_utilities.py # Message type wrappers
 ├── utilities.py          # Helper functions
 └── validators.py         # Reusable validation functions for UserInputDialog
@@ -60,6 +71,7 @@ top of each file (no late/inline imports needed).
 graph TD
     subgraph core [Core Modules]
         ACC[accessors.py]
+        RU[retry_utilities.py]
         TU[telegram_utilities.py]
         UTIL[utilities.py]
     end
@@ -71,7 +83,7 @@ graph TD
     subgraph business [Business Logic]
         EDITABLE[editable.py]
         EVENT[event.py]
-        DIALOG[dialog.py]
+        DIALOG[dialog/]
     end
 
     subgraph app [Application]
@@ -82,9 +94,12 @@ graph TD
     %% Core has no internal dependencies
     ACC --> |no internal deps| ACC
     TU --> UTIL
+    TU --> RU
+    RU --> |no internal deps| RU
 
-    %% Polling depends only on accessors
+    %% Polling depends on accessors and retry
     POLL --> ACC
+    POLL --> RU
 
     %% Business logic depends on core and polling
     EDITABLE --> ACC
@@ -98,6 +113,7 @@ graph TD
     DIALOG --> ACC
     DIALOG --> POLL
     DIALOG --> TU
+    DIALOG --> UTIL
 
     %% Application depends on everything
     BOT --> ACC
@@ -120,14 +136,15 @@ graph TD
 |--------|--------------|
 | `accessors.py` | *(no internal dependencies)* |
 | `utilities.py` | *(no internal dependencies)* |
-| `telegram_utilities.py` | `utilities` |
-| `polling.py` | `accessors` |
+| `retry_utilities.py` | *(no internal dependencies)* |
+| `telegram_utilities.py` | `utilities`, `retry_utilities` |
+| `polling.py` | `accessors`, `retry_utilities` |
 | `editable.py` | `accessors`, `telegram_utilities` |
 | `event.py` | `accessors`, `polling`, `telegram_utilities`, `editable` |
 | `event_examples/factories.py` | `event`, `telegram_utilities` |
 | `event_examples/time_event.py` | `event`, `telegram_utilities` |
 | `event_examples/threshold_event.py` | `event`, `telegram_utilities` |
-| `dialog.py` | `accessors`, `polling`, `telegram_utilities` |
+| `dialog/` | `accessors`, `polling`, `telegram_utilities`, `utilities` |
 | `validators.py` | *(no internal dependencies - uses stdlib only)* |
 | `bot_application.py` | `accessors`, `polling`, `event`, `telegram_utilities` |
 | `__init__.py` | all modules (re-exports public API) |
@@ -139,11 +156,13 @@ graph TD
    breaking the circular dependency chain.
 
 2. **`polling.py`** - Contains `UpdatePollerMixin` and polling functions.
-   Both `event.py` and `dialog.py` need these, so extracting them to a
+   Both `event.py` and `dialog/` need these, so extracting them to a
    separate module prevents circular imports between event and dialog.
 
 3. **All imports at top** - No late/inline imports are needed. This makes
    the code cleaner and dependencies explicit.
+
+**Removed:** The `MINIMAL_TIME_BETWEEN_MESSAGES` constant was removed from `event.py` (dead code).
 
 ## Core Design Patterns
 
@@ -255,19 +274,16 @@ class ComplexBuilder:
 Dialogs use the Composite pattern to build complex flows from simple components.
 
 **Leaf Dialogs** (one question each):
-- **Inline Keyboard Dialogs**:
-  - `InlineKeyboardChoiceDialog` - User selects from inline keyboard options
-  - `InlineKeyboardPaginatedChoiceDialog` - User selects from paginated inline keyboard options
-  - `InlineKeyboardConfirmDialog` - Yes/No prompt with inline keyboard
-  - `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard
-- **Reply Keyboard Dialogs**:
-  - `ReplyKeyboardChoiceDialog` - User selects from reply keyboard options (buttons at bottom of chat)
-  - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
-  - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
-  - `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard
+- **Unified Keyboard Dialogs** (single class with `keyboard_type` parameter):
+  - `ChoiceDialog(keyboard_type=KeyboardType.INLINE|REPLY)` - User selects from keyboard options
+  - `PaginatedChoiceDialog(keyboard_type=...)` - User selects from paginated keyboard options (next/prev page navigation)
+  - `ConfirmDialog(keyboard_type=...)` - Yes/No prompt
+  - `ChoiceBranchDialog(keyboard_type=...)` - User selects branch via keyboard (static or dynamic branches via callable)
 - **Other Leaf Dialogs**:
-  - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input)
-  - `EditEventDialog` - Edit an event's editable attributes via inline keyboard
+  - `UserInputDialog` - User enters text with optional validation (prompt may be callable; keyboard removed on text input). Supports `keyboard_type` (INLINE or REPLY): INLINE shows Cancel as an inline keyboard button (callback_query); REPLY shows Cancel as a reply keyboard button (text message). Default is INLINE. Class constant `CANCEL_LABEL` for the Cancel button label.
+  - `EditEventDialog` - Edit an event's editable attributes via inline or reply keyboard (configurable via `keyboard_type`)
+
+The old separate `InlineKeyboard*` / `ReplyKeyboard*` classes have been removed. Use the unified classes with the `keyboard_type` parameter.
 
 **Composite Dialogs** (orchestrate children):
 - `SequenceDialog` - Run dialogs in order with named values
@@ -277,25 +293,16 @@ Dialogs use the Composite pattern to build complex flows from simple components.
 
 ```mermaid
 classDiagram
-    Dialog <|-- InlineKeyboardChoiceDialog
-    Dialog <|-- InlineKeyboardPaginatedChoiceDialog
-    Dialog <|-- InlineKeyboardConfirmDialog
-    Dialog <|-- InlineKeyboardChoiceBranchDialog
-    Dialog <|-- ReplyKeyboardChoiceDialog
-    Dialog <|-- ReplyKeyboardPaginatedChoiceDialog
-    Dialog <|-- ReplyKeyboardConfirmDialog
-    Dialog <|-- ReplyKeyboardChoiceBranchDialog
+    Dialog <|-- ChoiceDialog
+    Dialog <|-- PaginatedChoiceDialog
+    Dialog <|-- ConfirmDialog
+    Dialog <|-- ChoiceBranchDialog
     Dialog <|-- UserInputDialog
     Dialog <|-- EditEventDialog
     Dialog <|-- SequenceDialog
     Dialog <|-- BranchDialog
     Dialog <|-- LoopDialog
     Dialog <|-- DialogHandler
-    
-    InlineKeyboardChoiceDialog --|> ChoiceDialog : alias
-    InlineKeyboardPaginatedChoiceDialog --|> PaginatedChoiceDialog : alias
-    InlineKeyboardConfirmDialog --|> ConfirmDialog : alias
-    InlineKeyboardChoiceBranchDialog --|> ChoiceBranchDialog : alias
 ```
 
 **Shared Context**: All dialogs share a `context` dict for cross-dialog communication:
@@ -307,15 +314,45 @@ dialog = SequenceDialog([
     ("tool", ChoiceDialog(
         prompt="Select tool:",
         choices=lambda ctx: [("Python", "py")] if ctx.get("name") else [],
+        keyboard_type=KeyboardType.INLINE,
     )),
 ])
+
+# Dynamic branches work the same way (ChoiceBranchDialog)
+branch_dialog = ChoiceBranchDialog(
+    prompt="Select action:",
+    branches=lambda ctx: {"edit": ("Edit", edit_dialog)} if ctx.get("name") else {},
+    keyboard_type=KeyboardType.INLINE,
+)
 ```
+
+### Handler Pattern (Merged Dialog Classes)
+
+Each merged class (`ChoiceDialog`, `ConfirmDialog`, `PaginatedChoiceDialog`, `ChoiceBranchDialog`) follows a consistent handler pattern:
+
+- **`handle_callback_update(update)`**: Assumes inline keyboard. Early return for reply mode (no-op when `keyboard_type == KeyboardType.REPLY`).
+- **`handle_text_update(update)`**: Assumes reply keyboard. Early return with reminder for inline mode (sends `BUTTON_SELECTION_REMINDER` when user sends text instead of pressing inline buttons).
+- **`_run_dialog()`**: Branches on `keyboard_type` to send the appropriate message type (`TelegramOptionsMessage` for inline, `TelegramReplyKeyboardMessage` for reply).
+
+### Shared Helpers in dialog/base.py
+
+- **`_handle_callback_prelude(update)`** - Answer callback query, remove inline keyboard, return `callback_data` or `None`. Shared prelude for all inline keyboard `handle_callback_update` methods.
+- **`BUTTON_SELECTION_REMINDER`** - Constant message sent when user types text while an inline keyboard is active.
+- **`DONE_CALLBACK`** - Constant for the Done button callback (used by EditEventDialog and similar).
+
+### PaginatedChoiceDialog Redesign
+
+`PaginatedChoiceDialog` was redesigned:
+
+- **No `more_label` parameter** - Removed text-input fallback.
+- **Next/Prev page navigation** - Uses dedicated navigation buttons instead of "More..." + text input.
+- **State tracking**: `_current_page` tracks current page; `_get_page_items(page)` returns items for a page; `_total_pages` property; `_send_page()` method sends the current page keyboard.
 
 **State Machine**:
 ```
 INACTIVE ──start()──► ACTIVE/AWAITING_TEXT ──complete──► COMPLETE
                               │
-                              └──cancel()──► COMPLETE (value=None)
+                              └──cancel()──► COMPLETE (dialog_result=CANCELLED)
 ```
 
 ```python
@@ -339,21 +376,28 @@ await app.run()
 
 **Inside `app.run()`:**
 
+The `run()` method accepts an optional `skip_commands` parameter and is structured as a clean orchestrator that delegates to three private methods:
+
 ```
-1. Initialize bot's HTTP session (await bot.initialize())
-2. Register built-in commands (/terminate, /commands)
-3. Flush pending updates (ignore messages sent before startup)
-4. Create CommandsEvent with initial offset
-5. Start all event tasks concurrently (each runs submit(stop_event))
-6. Wait for stop_event to be set
-7. Cancel all event tasks
-8. Wait for tasks to complete cancellation
-9. Return exit code (0)
+1. _register_commands(skip_commands) - Register /commands and optionally CommandsEvent
+   - /terminate is handled globally in UpdatePollerMixin.poll() (intercepted at polling level, works anytime including during dialogs)
+   - If skip_commands=True, CommandsEvent is not registered (commands won't be polled)
+2. _initialize_http_session() - Initialize bot's HTTP session (await bot.initialize())
+3. _run_event_loop() - Supervisor loop (see below):
+   a. Flush pending updates (ignore messages sent before startup)
+   b. Set _running=True, create tasks for all events, store them in `_event_tasks` keyed by event name
+   c. Supervisor loop: wait on event tasks | {stop_task, signal_task}
+   d. When _new_event_signal is set: register_event() or remove_event() changed the event set mid-run
+   e. When a task completes: treat intentional remove_event() cancellation as normal; unexpected exceptions stay fatal
+   f. When stop_event is set: cancel remaining tasks, gather, return 0
+   g. Finally block: _running=False, shut down HTTP session
 ```
+
+**Supervisor Loop Pattern:** The event loop uses a supervisor pattern to support dynamic mid-run event registration and removal. It waits on `asyncio.wait(return_when=FIRST_COMPLETED)` over the running event tasks plus a `stop_task` (stop_event.wait) and a `signal_task` (_new_event_signal.wait). Before `run()` starts, `register_event()` and `remove_event()` only mutate the registration tables, so pre-run removal has no task to cancel. When `register_event()` is called while running, the new task is added to `_event_tasks` immediately and `_new_event_signal` wakes the supervisor. When `remove_event()` is called while running, the event is removed from the registration tables, only that event task is cancelled, and the supervisor treats that completion as intentional rather than fatal. Unexpected task exceptions still propagate and terminate the bot.
 
 **HTTP Session Management:** The bot's HTTP session is initialized at step 1 and always shut down in a `finally` block (executes after step 9, even on return or exception). This ensures proper cleanup and prevents "Event loop is closed" errors when terminating the bot.
 
-**Fresh Start:** The bot calls `flush_pending_updates()` on startup to clear any old messages. This ensures the bot only processes commands sent after it started.
+**Fresh Start:** The bot calls `flush_pending_updates()` on startup to clear any old messages. Flush uses `run_with_transient_retry` with `GET_UPDATES_TIMEOUT_SECONDS` (5) for timeout and the shared retry default `DEFAULT_RETRY_MAX_ATTEMPTS` for transient failures.
 
 ### 2. Event Loop Flow
 
@@ -383,10 +427,14 @@ while not stop_event.is_set():
 
 ### 3. Command Processing Flow
 
+**Global /terminate interception:**
+
+`/terminate` is intercepted in `UpdatePollerMixin.poll()` before any handler processes the update. When a text message equals `/terminate`, the poll loop sets the update offset, calls `get_app().terminate()`, and returns. This ensures `/terminate` works anytime — including during active dialogs (which run their own poll loops via the same mixin).
+
 **CommandsEvent polling:**
 ```
 while not stop_event.is_set():
-    updates = await poll_updates(bot)
+    updates = await poll_updates(bot)  # Handles TimedOut/NetworkError internally
 
     for update in updates:
         if update.message.text.startswith("/"):
@@ -402,6 +450,8 @@ while not stop_event.is_set():
     await _wait_or_stop(stop_event, poll_seconds)
 ```
 
+**Note:** `poll_updates()` uses `run_with_transient_retry` for transient receive errors (`TimedOut`, `NetworkError`, `RetryAfter`). On failure it logs backoff via `_log_poll_failure` (throttled to every Nth failure) and returns an empty list. On success after a failure streak it logs recovery via `_log_poll_recovery`. `UpdatePollerMixin.poll()` includes a safety-net around truly unexpected polling exceptions.
+
 **SimpleCommand execution:**
 ```
 async def run():
@@ -414,45 +464,48 @@ async def run():
 **DialogCommand execution:**
 ```
 async def run():
-    response = dialog.start()
-    send_message_with_keyboard(response)
+    result = await dialog.start(context)
 
-    while dialog.state != COMPLETE:
-        updates = poll_updates()
+    # Dialogs send messages directly via get_app().send_messages() in _run_dialog()
+    # No separate send_message_with_keyboard - inline keyboard dialogs send
+    # TelegramOptionsMessage etc. from within _run_dialog() and handle_*_update()
+    # Polling is handled by UpdatePollerMixin.poll() for leaf dialogs, or delegated
+    # to children for composite dialogs.
 
-        for update in updates:
-            if update.callback_query:
-                answer_callback(update.callback_query.id)
-                response = dialog.handle_callback(callback_data)
-                if response.edit_message:
-                    edit_message(response)
-                else:
-                    send_new_message(response)
-
-            elif update.message.text:
-                response = dialog.handle_text_input(text)
-                if response is None and dialog.is_active:
-                    send_clarifying_message()
-                    resend_keyboard()
-
-    return current_offset
+    return result  # T | DialogResult
 ```
 
 ### 4. Message Sending Flow
 
 ```
-send_messages() ──► TelegramMessage
+send_messages() ──► TelegramMessage.send()
                         │
                         ▼
-                message.send(bot, chat_id, logger)
+            ┌──────────────────────────────┐
+            │  Retry loop (up to 5 attempts)│
+            │  - Retry transient errors    │
+            │  - Exponential backoff       │
+            │  - Handle RetryAfter         │
+            │  - Re-raise BadRequest       │
+            │  - Log permanent errors      │
+            └───────────┬──────────────────┘
                         │
-              ┌─────────┴─────────────┐
-              │  TelegramTextMessage  │
-              │  - Chunk if > 4096    │
-              │  - Send each chunk    │
-              │  - 0.05s delay between│
-              └───────────────────────┘
+                        ▼
+            message._send_impl(bot, chat_id, logger)
+                        │
+              ┌─────────┴──────────────┐
+              │  TelegramTextMessage   │
+              │  - Chunk if > 4096     │
+              │  - Send each chunk     │
+              │  - 0.05s delay between │
+              └────────────────────────┘
 ```
+
+**Architecture:** `TelegramMessage` is an abstract base class (ABC) with:
+- `send()` - Public concrete method that handles errors uniformly with retry logic
+- `_send_impl()` - Abstract method that subclasses override with send logic
+
+All error handling is centralized in the base class `send()` method. Transient errors are handled via `run_with_transient_retry` (shared with polling): `TimedOut` / `NetworkError` retried up to `SEND_MAX_ATTEMPTS` times with exponential backoff + jitter; `RetryAfter` waits for Telegram's duration plus the shared retry default buffer (1.0s) and does not count towards the attempt limit; if wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), `RuntimeError` is raised. `BadRequest` is logged with an `html.escape()` hint and re-raised as a fatal error. All other exceptions are logged at ERROR level and swallowed.
 
 Note: Event logging (event_name) happens at the call site before sending,
 not during message sending.
@@ -469,15 +522,25 @@ not during message sending.
 | `stop_event` | `asyncio.Event` | Shutdown signal |
 | `events` | `List[Event]` | Registered events |
 | `commands` | `List[Command]` | Registered commands |
+| `_running` | `bool` | True while the event loop is active; enables mid-run `register_event()` |
+| `_events_by_name` | `Dict[str, Event]` | Registered events keyed by unique event name |
+| `_event_tasks` | `Dict[str, asyncio.Task]` | Running event tasks keyed by event name, including tasks that are still shutting down after removal |
+| `_task_event_names` | `Dict[asyncio.Task, str]` | Reverse lookup used to map completed tasks back to their event names during supervisor cleanup |
+| `_removed_event_names` | `Set[str]` | Event names intentionally removed while their tasks are unwinding |
+| `_new_event_signal` | `asyncio.Event` | Set when an event is registered or removed mid-run; wakes the supervisor loop |
 
 | Method | Description |
 |--------|-------------|
 | `initialize(token, chat_id, logger)` | Create and initialize the singleton |
 | `get_instance()` | Get the existing singleton |
-| `register_event(event)` | Register an event to run |
+| `register_event(event: Event)` | Register an event to run. Event names must be unique; duplicates raise `ValueError`. If bot is running (`_running`), the event starts immediately and `_new_event_signal` wakes the supervisor. |
+| `remove_event(event_name: str) -> None` | Remove an event by unique name. Missing names raise `KeyError`. Before `run()`, this only updates the registries. During `run()`, only that event task is cancelled and the supervisor treats the cancellation as intentional. |
 | `register_command(command)` | Register a command handler |
 | `send_messages(messages)` | Send message(s) immediately (str, TelegramMessage, or list) |
-| `run()` | Start the bot (blocks until shutdown) |
+| `run(skip_commands=False)` | Start the bot (blocks until shutdown or fatal error). If `skip_commands=True`, CommandsEvent is not registered. |
+| `_register_commands(skip_commands=False)` | Private: Register /commands and optionally CommandsEvent. /terminate is handled globally in UpdatePollerMixin.poll(). |
+| `_initialize_http_session()` | Private: Initialize bot's HTTP session |
+| `_run_event_loop()` | Private: Supervisor loop—starts event tasks, watches for mid-run registration/removal via `_new_event_signal`, and detects fatal task failures |
 
 ### Event Types
 
@@ -515,6 +578,12 @@ These factories encapsulate common condition patterns with internal state manage
 
 ### Message Types
 
+**Base Class:** `TelegramMessage` is an abstract base class (ABC) with:
+- `send()` - Public concrete method that handles errors uniformly
+- `_send_impl()` - Abstract method that subclasses override with send logic
+
+All error handling is centralized in the base class `send()` method. `BadRequest` is treated as fatal (logged with an `html.escape()` hint and re-raised). All other non-transient exceptions are logged at ERROR level and swallowed so the bot keeps running.
+
 | Class | Content | Features |
 |-------|---------|----------|
 | `TelegramTextMessage` | Plain text | Auto-chunking for long messages |
@@ -529,10 +598,10 @@ These factories encapsulate common condition patterns with internal state manage
 
 **Keyboard Message Types:**
 
-- **Inline keyboards** (`TelegramOptionsMessage`): Buttons attached to messages, send `callback_query` events when pressed. Used by `InlineKeyboard*Dialog` classes.
-- **Reply keyboards** (`TelegramReplyKeyboardMessage`): Persistent buttons at bottom of chat, send text messages (button labels) when pressed. Used by `ReplyKeyboard*Dialog` classes. Auto-hide with `one_time_keyboard=True`.
+- **Inline keyboards** (`TelegramOptionsMessage`): Buttons attached to messages, send `callback_query` events when pressed. Used by dialogs with `keyboard_type=KeyboardType.INLINE`.
+- **Reply keyboards** (`TelegramReplyKeyboardMessage`): Persistent buttons at bottom of chat, send text messages (button labels) when pressed. Used by dialogs with `keyboard_type=KeyboardType.REPLY`. Auto-hide with `one_time_keyboard=True`.
 
-**Note:** All message types use `parse_mode=HTML`. If text contains unescaped HTML special characters, an `InvalidHtmlError` is raised with instructions to use `html.escape()`.
+**Note:** All message types use `parse_mode=ParseMode.HTML`. Caption handling is simplified — always passes `parse_mode=ParseMode.HTML`. Invalid HTML triggers `BadRequest` (fatal). The framework logs a hint to use `html.escape()` and re-raises the error.
 
 ## Editable Attributes System
 
@@ -606,7 +675,7 @@ The `validators.py` module provides reusable validation functions for `UserInput
 All validators implement the `Validator` type alias:
 
 ```python
-Validator = Callable[[str], Tuple[bool, str]]
+Validator = Callable[[str], tuple[bool, str]]
 ```
 
 The function signature is:
@@ -615,12 +684,16 @@ The function signature is:
   - `bool`: `True` if valid, `False` if invalid
   - `str`: Error message (empty string `""` on success, descriptive message on failure)
 
+### Shared Helper
+
+**`_validate_positive_numeric(value, parse_fn, positive_error, parse_error)`** - Internal helper used by `validate_positive_float` and `validate_positive_int` to avoid duplication. Validates that input parses to a positive number using the given parser.
+
 ### Basic Validators
 
 The module provides three simple validators:
 
-1. **`validate_positive_float(value: str)`** - Validates that input is a positive decimal number (accepts both integers and decimals like "5", "3.14", "0.5")
-2. **`validate_positive_int(value: str)`** - Validates that input is a positive integer
+1. **`validate_positive_float(value: str)`** - Validates that input is a positive decimal number (accepts both integers and decimals like "5", "3.14", "0.5"). Uses `_validate_positive_numeric` internally.
+2. **`validate_positive_int(value: str)`** - Validates that input is a positive integer. Uses `_validate_positive_numeric` internally.
 3. **`validate_non_empty(value: str)`** - Validates that input is non-empty after stripping whitespace
 
 ### Factory Validators
@@ -653,7 +726,7 @@ Factory functions create validators with custom parameters using closures:
 
 ```python
 def validate_int_range(min_val: int, max_val: int) -> Validator:
-    def validator(value: str) -> Tuple[bool, str]:
+    def validator(value: str) -> tuple[bool, str]:
         # Closure captures min_val and max_val
         try:
             num = int(value)
@@ -671,7 +744,7 @@ def validate_int_range(min_val: int, max_val: int) -> Validator:
 def validate_regex(pattern: str, error_msg: str) -> Validator:
     compiled = re.compile(pattern)  # Compile once
     
-    def validator(value: str) -> Tuple[bool, str]:
+    def validator(value: str) -> tuple[bool, str]:
         if compiled.fullmatch(value):  # Reuse compiled pattern
             return True, ""
         return False, error_msg
@@ -695,6 +768,7 @@ When the user submits text, `UserInputDialog` calls the validator function. If v
 
 The `validators.py` module contains:
 - **`Validator`** - Type alias for validator functions
+- **`_validate_positive_numeric`** - Shared helper for positive numeric validation
 - **Basic validators** - `validate_positive_float`, `validate_positive_int`, `validate_non_empty`
 - **Factory functions** - `validate_int_range`, `validate_float_range`, `validate_date_format`, `validate_regex`
 
@@ -702,7 +776,17 @@ All validators are synchronous functions (no async/await) and are designed to be
 
 ## Utilities Module
 
-The `utilities.py` module provides helper functions for common formatting and message processing tasks. All formatting functions automatically escape HTML special characters to ensure safe display in Telegram messages when using HTML parse mode.
+The `utilities.py` module provides helper functions for common formatting, message processing, and validation tasks. All formatting functions automatically escape HTML special characters to ensure safe display in Telegram messages when using HTML parse mode.
+
+### Callable Validation
+
+**`validate_single_arg_callable(fn: Callable, name: str) -> None`**
+
+Verifies that a callable accepts exactly one required positional argument. Used by dialog classes to validate that dynamic-choices and dynamic-branches callables have the expected `(context) -> ...` signature.
+
+- **Parameters:** `fn` — the callable to inspect; `name` — human-readable label for assertion messages (e.g., `"choices"`, `"branches"`).
+- **Raises:** `AssertionError` if the callable does not have exactly one required parameter.
+- **Usage:** Dialog classes (`ChoiceDialog`, `ChoiceBranchDialog`, etc.) call this when `choices` or `branches` is a callable, ensuring the callable has the correct signature before use.
 
 ### List Formatting Functions
 
@@ -801,52 +885,55 @@ condition_result = await asyncio.to_thread(self.condition.check)
 
 ## Error Handling
 
-### Message Sending
+### Polling Layer Error Handling
+
+The polling layer (`polling.py`) includes comprehensive error handling for transient Telegram network errors to ensure the bot continues operating during network issues:
+
+**`poll_updates()` error handling:**
+
+Uses `run_with_transient_retry` for transient receive errors. On success after a failure streak, `_log_poll_recovery` logs the recovery transition. On failure, `_log_poll_failure` logs with throttling (every Nth failure). Returns an empty list so polling continues.
+
+**`UpdatePollerMixin.poll()` error handling:**
+
+The `poll()` method includes a safety-net around `poll_updates()` call:
 
 ```python
-async def send(self, bot, chat_id, title, logger):
+while not self.should_stop_polling():
     try:
-        await bot.send_message(...)
+        updates = await poll_updates(bot)
     except Exception as exc:
-        if _is_html_parse_error(exc):
-            raise InvalidHtmlError(exc, self.message) from exc
-        logger.error("telegram_send_failed error=%s", exc)
-        await _try_send_error_message(bot, chat_id, title, logger, exc)
+        logger.error("UpdatePollerMixin.poll: poll_updates_failed, retrying in 2s", exc_info=True)
+        await asyncio.sleep(2)
+        continue  # Retry polling
 ```
+
+**Note:** Send-side errors are handled inside `TelegramMessage.send()`. The handler dispatch (`handle_callback_update()`, `handle_text_update()`) is not wrapped in try/except because:
+- Conditions and message builders should never raise (if they do, it's a fatal bug)
+- Send errors are already handled by `TelegramMessage.send()`
+- Fatal errors (like `BadRequest` for invalid HTML) should propagate up and terminate the bot
+
+**Design rationale:**
+- Shared `retry_utilities.run_with_transient_retry` handles transient errors for both send and receive
+- Transient network errors (`TimedOut`, `NetworkError`, `RetryAfter`) are retried with backoff; recovery transitions are logged
+- Send errors are handled uniformly in `TelegramMessage.send()` (fatal `BadRequest` propagates, others are logged)
+- Conditions and message builders are expected to never raise (if they do, it's a fatal bug that terminates the bot)
+- Backoff delays prevent tight retry loops during network issues
+
+### Message Sending
+
+Error handling is centralized in the `TelegramMessage.send()` base class method. It uses `run_with_transient_retry` (shared with `poll_updates`) for transient errors. `BadRequest` is logged with an `html.escape()` hint and re-raised (fatal). Other non-transient exceptions are logged and swallowed.
+
+**Retry Strategy:**
+- **Transient errors** (`TimedOut`, `NetworkError`): Retried up to `SEND_MAX_ATTEMPTS` times with exponential backoff + jitter.
+- **Rate limiting** (`RetryAfter`): Waits for `retry_after` plus the shared retry default buffer (1.0s) to avoid immediate re-hit. Does not count towards the attempt limit. If the total wait exceeds `RATE_LIMIT_MAX_WAIT_SECONDS` (120s), raises `RuntimeError`.
+- **Fatal errors** (`BadRequest`): Logged with HTML-escape hint and re-raised immediately, terminating the bot.
+- **Permanent errors**: Logged at ERROR level and swallowed after first attempt (no retry).
+
+Subclasses override `_send_impl()` with their happy-path send logic. They must NOT add their own try/except blocks (except for expected non-error exceptions like "message is not modified").
 
 ### HTML Parse Errors
 
-All messages are sent with `parse_mode=HTML`. If the text contains invalid HTML (e.g., unescaped `<`, `>`, `&`), Telegram will reject the message. The framework catches these errors and raises an `InvalidHtmlError` to provide clear guidance:
-
-```python
-class InvalidHtmlError(Exception):
-    """Raised when message text contains invalid HTML that Telegram cannot parse."""
-    
-    def __init__(self, original_error: Exception, text: str) -> None:
-        # Message tells user to use html.escape()
-        super().__init__(
-            f"Message contains invalid HTML that Telegram cannot parse. "
-            f"Use html.escape() on your text before passing it to TelegramMessage. "
-            f"Original error: {original_error}. "
-            f"Text (truncated): {text[:100]!r}"
-        )
-        self.original_error = original_error
-        self.text = text
-```
-
-Detection is done via `_is_html_parse_error()` which checks for Telegram's `BadRequest` with "can't parse entities" in the message.
-
-### Graceful Degradation
-
-```python
-async def _try_send_error_message(bot, chat_id, title, logger, exc):
-    """Best-effort error notification without raising."""
-    try:
-        # Sent without parse_mode to avoid HTML issues in error messages
-        await bot.send_message(text=f"Error: {exc}")
-    except Exception as error_exc:
-        logger.error("error_message_also_failed error=%s", error_exc)
-```
+All messages are sent with `parse_mode=HTML`. Invalid HTML (e.g., unescaped `<`, `>`, `&`) triggers `BadRequest` (fatal). The framework logs a hint to use `html.escape()` and re-raises so the bot terminates visibly.
 
 ## Shutdown Sequence
 
@@ -883,12 +970,20 @@ pattern using the Template Method:
 ├─────────────────────────────────────────────────────────────┤
 │  poll() -> result:                                          │
 │      while not should_stop_polling():                       │
-│          updates = poll_updates(bot)                        │
+│          try:                                               │
+│              updates = poll_updates(bot)                    │
+│          except Exception:                                  │
+│              log error, sleep 2s, continue                  │
 │          for update in updates:                             │
-│              if callback_query:                             │
-│                  handle_callback_update(update)             │
-│              elif text_message:                             │
-│                  handle_text_update(update)                 │
+│              try:                                           │
+│                  if callback_query:                         │
+│                      handle_callback_update(update)         │
+│                  elif text_message == "/terminate":         │
+│                      terminate(); return                    │
+│                  elif text_message:                         │
+│                      handle_text_update(update)             │
+│              except Exception:                              │
+│                  log error, continue to next update         │
 │      return _get_poll_result()                              │
 ├─────────────────────────────────────────────────────────────┤
 │  Abstract methods (subclasses implement):                   │
@@ -896,8 +991,15 @@ pattern using the Template Method:
 │    • handle_callback_update(update) -> None                 │
 │    • handle_text_update(update) -> None                     │
 │                                                             │
+│  /terminate is intercepted globally before handlers:         │
+│    • Works anytime (including during active dialogs)         │
+│                                                             │
 │  Update offset is managed globally via:                     │
 │    • get_next_update_id() / set_next_update_id()            │
+│                                                             │
+│  Error handling:                                            │
+│    • poll_updates() catches TimedOut/NetworkError           │
+│    • poll() has safety-nets around polling and handling     │
 │                                                             │
 │  Uses singleton accessors: get_bot(), get_chat_id(),        │
 │  get_logger() for dependencies.                             │
@@ -905,35 +1007,48 @@ pattern using the Template Method:
 ```
 
 Classes that inherit `UpdatePollerMixin`:
-- **Inline Keyboard Leaf Dialogs**: `InlineKeyboardChoiceDialog`, `InlineKeyboardPaginatedChoiceDialog`, `InlineKeyboardConfirmDialog`, `InlineKeyboardChoiceBranchDialog`
-- **Reply Keyboard Leaf Dialogs**: `ReplyKeyboardChoiceDialog`, `ReplyKeyboardPaginatedChoiceDialog`, `ReplyKeyboardConfirmDialog`, `ReplyKeyboardChoiceBranchDialog`
-- **Other Leaf Dialogs**: `UserInputDialog` (uses inline keyboard for cancel button)
-- **Hybrid Dialogs**: `InlineKeyboardChoiceBranchDialog`, `ReplyKeyboardChoiceBranchDialog` (poll for selection, then delegate)
+- **Unified Leaf Dialogs** (with `keyboard_type`): `ChoiceDialog`, `PaginatedChoiceDialog`, `ConfirmDialog`, `ChoiceBranchDialog`
+- **Other Leaf Dialogs**: `UserInputDialog` (Cancel button: inline or reply keyboard based on `keyboard_type`)
+- **Hybrid Dialogs**: `ChoiceBranchDialog` (poll for selection, then delegate to selected branch)
 - **Events**: `CommandsEvent`
 
 Composite dialogs (`SequenceDialog`, `BranchDialog`, `LoopDialog`, `DialogHandler`)
 do NOT inherit `UpdatePollerMixin` - they delegate to children.
 
-**Note**: `EditEventDialog` does NOT inherit `UpdatePollerMixin` - it delegates to child dialogs (`InlineKeyboardChoiceDialog`, `InlineKeyboardConfirmDialog`, `UserInputDialog`).
+**Note**: `EditEventDialog` does NOT inherit `UpdatePollerMixin` - it delegates to child dialogs. It uses `create_choice_dialog`, `create_confirm_dialog`, and `UserInputDialog` internally, passing through its `keyboard_type` parameter so field selection, boolean editing, and text input fields can use either inline or reply keyboard.
 
 ## Dialog System Architecture
 
+The dialog system was split from a single `dialog.py` file into a `dialog/` package. The public API is unchanged — `dialog/__init__.py` re-exports all public classes and functions.
+
+**Package layout:**
+- `base.py` — Dialog base class, KeyboardType, DialogState, shared helpers (`_handle_callback_prelude`, `BUTTON_SELECTION_REMINDER`, `DONE_CALLBACK`)
+- `choice.py` — ChoiceDialog
+- `confirm.py` — ConfirmDialog
+- `paginated.py` — PaginatedChoiceDialog
+- `branch.py` — ChoiceBranchDialog
+- `input.py` — UserInputDialog
+- `composite.py` — SequenceDialog, BranchDialog, LoopDialog, DialogHandler
+- `edit.py` — EditEventDialog
+- `factories.py` — create_choice_dialog, create_confirm_dialog, etc.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                       Dialog (ABC)                          │
-│              start(context) -> DialogResult                 │
+│                    Dialog[T] (ABC, Generic)                  │
+│         start(context) -> T | DialogResult                   │
 ├─────────────────────────────────────────────────────────────┤
 │  Template method:                                           │
 │    start():                                                 │
 │      1. reset() - clean state                               │
 │      2. Set context                                         │
-│      3. _run_dialog() - delegate to subclass              │
+│      3. _run_dialog() - delegate to subclass                │
 │                                                             │
 │  Abstract:                                                  │
-│    • _run_dialog() -> DialogResult                          │
-│    • build_result() -> DialogResult                         │
-│    • handle_callback(data) -> DialogResponse                 │
-│    • handle_text_input(text) -> DialogResponse               │
+│    • _run_dialog() -> T | DialogResult                      │
+│                                                             │
+│  Properties:                                                │
+│    • dialog_result: T | DialogResult (result after complete) │
+│    • cancel() -> None (sets dialog_result=CANCELLED)        │
 └─────────────────────────────────────────────────────────────┘
                               │
           ┌───────────────────┼───────────────────┐
@@ -943,11 +1058,12 @@ do NOT inherit `UpdatePollerMixin` - they delegate to children.
    │Leaf Dialogs│    │Composite Dialogs│   │DialogHandler │
    │(+ Mixin)   │    │                 │   │              │
    ├────────────┤    ├─────────────────┤   ├──────────────┤
-   │ Inline KB  │    │ Sequence        │   │ Wrap dialog  │
-   │ Reply KB   │    │ Branch          │   │ Call callback│
-   │ UserInput  │    │ ChoiceBranch*   │   │ on complete  │
-   │ EditEvent  │    │ Loop            │   └──────────────┘
-   └────────────┘    └─────────────────┘   (* hybrid - has Mixin)
+   │ Choice     │    │ Sequence        │   │ Wrap dialog  │
+   │ Paginated  │    │ Branch          │   │ Call callback│
+   │ Confirm    │    │ ChoiceBranch*   │   │ on complete  │
+   │ UserInput  │    │ Loop            │   └──────────────┘
+   │ EditEvent  │    │                 │   (* hybrid - has Mixin)
+   └────────────┘    └─────────────────┘
 ```
 
 ### Keyboard Type System
@@ -957,9 +1073,9 @@ The framework supports two keyboard types via the `KeyboardType` enum:
 - **`KeyboardType.INLINE`**: Inline keyboards attached to messages (`TelegramOptionsMessage`)
 - **`KeyboardType.REPLY`**: Reply keyboards at bottom of chat (`TelegramReplyKeyboardMessage`)
 
-**Implementation Differences:**
+**Implementation Differences** (per `keyboard_type` in unified classes):
 
-| Aspect | Inline Keyboard Dialogs | Reply Keyboard Dialogs |
+| Aspect | `keyboard_type=INLINE` | `keyboard_type=REPLY` |
 |--------|------------------------|------------------------|
 | **Message Type** | `TelegramOptionsMessage` | `TelegramReplyKeyboardMessage` |
 | **Input Handling** | `handle_callback_update()` processes `callback_query` events | `handle_text_update()` matches text against button labels |
@@ -967,26 +1083,25 @@ The framework supports two keyboard types via the `KeyboardType` enum:
 | **Auto-hide** | Manual removal required | `one_time_keyboard=True` auto-hides after selection |
 | **Button Press** | Sends `callback_query` with `callback_data` | Sends text message with button label text |
 
-**Class Naming Convention:**
+**Unified Classes:**
 
-- **Inline keyboard dialogs**: `InlineKeyboard*Dialog` (e.g., `InlineKeyboardChoiceDialog`)
-- **Reply keyboard dialogs**: `ReplyKeyboard*Dialog` (e.g., `ReplyKeyboardChoiceDialog`)
+All choice-style dialogs are now single classes with a `keyboard_type` parameter. The old separate `InlineKeyboard*` / `ReplyKeyboard*` classes have been removed.
 
 **Factory Functions:**
 
-Factory functions (`create_choice_dialog`, `create_confirm_dialog`, etc.) accept a `keyboard_type` parameter to create the appropriate dialog class:
+Factory functions (`create_choice_dialog`, `create_confirm_dialog`, `create_paginated_choice_dialog`, `create_choice_branch_dialog`, `create_user_input_dialog`) accept a `keyboard_type` parameter and return the unified dialog class configured accordingly:
 
 ```python
 def create_choice_dialog(
     prompt: str,
-    choices: List[Tuple[str, str]],
+    choices: list[tuple[str, str]] | Callable,
     keyboard_type: KeyboardType = KeyboardType.INLINE,
     include_cancel: bool = True,
-) -> Dialog:
-    if keyboard_type == KeyboardType.REPLY:
-        return ReplyKeyboardChoiceDialog(prompt, choices, include_cancel)
-    return InlineKeyboardChoiceDialog(prompt, choices, include_cancel)
+) -> Dialog[str]:
+    return ChoiceDialog(prompt, choices, include_cancel=include_cancel, keyboard_type=keyboard_type)
 ```
+
+**BranchesType and `create_choice_branch_dialog`**: The `BranchesType` type alias is `dict[str, tuple[str, Dialog]] | Callable[[dict[str, Any]], dict[str, tuple[str, Dialog]]]`. `ChoiceBranchDialog` accepts either a static dict or a callable `context -> dict` for `branches`. The `get_branches()` method evaluates the callable when dynamic. The factory `create_choice_branch_dialog(prompt, branches, keyboard_type, include_cancel)` accepts `BranchesType` for `branches`.
 
 ### Cancellation with CANCELLED Sentinel
 
@@ -1005,20 +1120,24 @@ if result is CANCELLED:
     pass
 ```
 
-### DialogResult and build_result()
+### DialogResult Sentinel and dialog_result
 
-Each dialog implements `build_result()` to create standardized nested dictionaries:
+`DialogResult` is a sentinel class for non-value outcomes. `NOT_SET` (internal initial state), `CANCELLED`, and `DONE` are instances of `DialogResult` (exported from `__init__.py`). Use `is_cancelled(result)` or `result is CANCELLED` to detect cancellation.
 
-- **Leaf dialogs**: Return raw `value`
-- **SequenceDialog**: Return `{name: child.build_result()}`
-- **BranchDialog/ChoiceBranchDialog/InlineKeyboardChoiceBranchDialog/ReplyKeyboardChoiceBranchDialog**: Return `{selected_key: branch.build_result()}`
-- **LoopDialog**: Return final `value`
-- **DialogHandler**: Return inner dialog's `build_result()`
-- **EditEventDialog**: Return context dict with all edited field values
+Each dialog stores its result in `_dialog_result` and exposes it via the `dialog_result` property. Composite dialogs store structured results directly:
+
+- **Leaf dialogs**: Store raw value (e.g., `str`, `bool`) or `CANCELLED`
+- **SequenceDialog**: Store `{name: child.dialog_result}` for each child
+- **BranchDialog/ChoiceBranchDialog**: Store `{selected_key: branch.dialog_result}`
+- **LoopDialog**: Store final value from last iteration
+- **DialogHandler**: Store inner dialog's `dialog_result`
+- **EditEventDialog**: Store `{field: value}` dict of staged edits on Done, or `CANCELLED` on Cancel
+
+Unified keyboard dialogs send messages directly via `get_app().send_messages()` (no `_send_response` methods). `cancel()` returns `None`.
 
 ## EditEventDialog Architecture
 
-`EditEventDialog` provides a generic UI for editing any `ActivateOnConditionEvent`'s editable attributes via Telegram inline keyboard.
+`EditEventDialog` provides a generic UI for editing any `ActivateOnConditionEvent`'s editable attributes via Telegram keyboard. It accepts a `keyboard_type: KeyboardType = KeyboardType.INLINE` parameter and delegates to `create_choice_dialog` and `create_confirm_dialog` for field selection and boolean editing, so it supports both inline and reply keyboards.
 
 ### State Machine
 
@@ -1041,24 +1160,24 @@ stateDiagram-v2
 
 ### Key Design: Staged Edits
 
-Edits are staged in the dialog's context dict and only applied to the event when clicking Done:
+Edits are staged in a private `_staged_edits` dict (not the shared context) and only applied to the event when clicking Done. Using a separate dict prevents staged values from bleeding between consecutive edit sessions when editing multiple events in a row.
 
 1. **Field selection**: User clicks a field button, dialog shows editor
 2. **Value entry**: User enters value (text or bool toggle)
 3. **Validation**: Single-field validation, then optional cross-field validation
-4. **Staging**: Valid value stored in context, return to field list
+4. **Staging**: Valid value stored in `_staged_edits`, return to field list
 5. **Done**: All staged edits applied via `event.edit()`, `event.edited = True`
 6. **Cancel from field list**: No edits applied, returns `CANCELLED`
 
 ### Cross-Field Validation
 
-Optional `validator` parameter enables complex validation rules:
+Optional `validator` parameter enables complex validation rules. The validator receives the staged edits dict (the same dict passed to `event.edit()` on Done), not the shared dialog context.
 
 ```python
-def validate_range(context: Dict[str, Any]) -> Tuple[bool, str]:
+def validate_range(staged_edits: dict[str, Any]) -> tuple[bool, str]:
     """Ensure min < max. Called after each field edit."""
-    min_val = context.get("condition.limit_min", event.get("condition.limit_min"))
-    max_val = context.get("condition.limit_max", event.get("condition.limit_max"))
+    min_val = staged_edits.get("condition.limit_min", event.get("condition.limit_min"))
+    max_val = staged_edits.get("condition.limit_max", event.get("condition.limit_max"))
     
     if min_val is not None and max_val is not None:
         if min_val >= max_val:
@@ -1071,6 +1190,15 @@ dialog = EditEventDialog(event, validator=validate_range)
 The validator runs after each field edit. If it fails, the user must fix the value or cancel the field edit.
 
 **Note:** Validation error messages are displayed as HTML. If your error messages contain special characters like `<`, `>`, or `&`, use `html.escape()` to prevent parsing errors.
+
+### Custom Field Editing Hook
+
+Subclasses can override `_edit_custom_field(field_name: str) -> bool` to provide custom editing dialogs for specific fields. The hook is invoked in the edit loop after verifying the field exists in `editable_attributes` but **before** the default bool/text dispatch (`_edit_bool_field` / `_edit_text_field`).
+
+- **Returns `True`** if the field was handled by a custom editor — the loop continues to the field selection screen.
+- **Returns `False`** (default) to fall through to the default bool or text editing.
+
+Use this to substitute a `ChoiceDialog`, `PaginatedChoiceDialog`, or other custom flow instead of the default text input for particular fields (e.g., icon-labeled choices, list pickers). `editable_bot.py` demonstrates `CustomEditDialog` overriding this hook for the `builder.alert_level` field.
 
 ## Extension Points
 
@@ -1100,29 +1228,26 @@ The framework provides built-in dialog types. If you need a custom leaf dialog
 that handles its own polling, inherit from both `Dialog` and `UpdatePollerMixin`:
 
 ```python
-from my_bot_framework import Dialog, UpdatePollerMixin
+from my_bot_framework import Dialog, DialogResult, UpdatePollerMixin, get_app, TelegramOptionsMessage
 
-class CustomDialog(Dialog, UpdatePollerMixin):
-    async def _run_dialog(self) -> DialogResult:
-        # Send initial UI
-        await self._send_response(response)
+class CustomDialog(Dialog[str], UpdatePollerMixin):
+    async def _run_dialog(self) -> str | DialogResult:
+        # Send initial UI directly via get_app().send_messages()
+        await get_app().send_messages(TelegramOptionsMessage("Choose:", keyboard))
         # Poll until complete
         return await self.poll()
-    
-    def build_result(self) -> DialogResult:
-        return self.value
     
     def should_stop_polling(self) -> bool:
         return self.is_complete
     
-    # Uses singleton accessors: get_bot(), get_chat_id(), get_logger()
+    # Uses singleton accessors: get_app(), get_bot(), get_chat_id(), get_logger()
     
     async def handle_callback_update(self, update: Update) -> None:
-        # Handle callback queries
+        # Handle callback queries; set self._dialog_result and self.state
         pass
     
     async def handle_text_update(self, update: Update) -> None:
-        # Handle text input
+        # Handle text input; set self._dialog_result and self.state
         pass
 ```
 

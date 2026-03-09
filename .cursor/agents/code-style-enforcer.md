@@ -23,7 +23,7 @@ You are a code style specialist for the my_bot_framework project. Your role is t
 | Element | Convention | Example |
 |---------|------------|---------|
 | Classes | CamelCase | `BotApplication`, `TimeEvent`, `DialogState` |
-| Methods | snake_case | `register_event`, `send_messages`, `handle_callback` |
+| Methods | snake_case | `register_event`, `send_messages`, `handle_callback_update` |
 | Attributes | snake_case | `stop_event`, `chat_id`, `editable_attributes` |
 | Functions | snake_case | `get_credentials`, `format_message_html` |
 | Variables | snake_case | `event_tasks`, `is_valid`, `error_msg` |
@@ -87,16 +87,16 @@ def simple_function():
 
 ```python
 # ALLOWED - base class defines interface, subclass uses it
-class Dialog(ABC):
+class UpdatePollerMixin(ABC):
     @abstractmethod
-    async def handle_callback(self, data: str) -> DialogResponse:
-        """Handle callback - subclasses implement."""
+    async def handle_callback_update(self, update: Update) -> None:
+        """Handle callback update - subclasses implement."""
         pass
 
-class ChoiceDialog(Dialog):
-    async def handle_callback(self, data: str) -> DialogResponse:
-        self._value = data  # Uses the parameter
-        return DialogResponse(text=f"Selected: {data}")
+class ChoiceDialog(Dialog, UpdatePollerMixin):
+    async def handle_callback_update(self, update: Update) -> None:
+        callback_data = update.callback_query.data  # Uses the parameter
+        self._value = callback_data
 ```
 
 **Variables:** Inline variables when logically equivalent and improves readability.
@@ -368,7 +368,60 @@ raise ValueError("Invalid")
 raise ValueError(f"Expected threshold between 0-100, got {value}")
 ```
 
-### 9. Code Duplication
+### 9. Minimal try/except Scope
+
+Only wrap the code that can actually raise inside `try`. Keep logic that cannot raise (validation, comparisons, returns) outside the `try/except` block.
+
+```python
+# BAD - too much inside try
+try:
+    num = int(value)
+    if num <= 0:
+        return False, "Must be positive"
+    return True, ""
+except ValueError:
+    return False, "Invalid integer"
+
+# GOOD - only the parsing call is wrapped
+try:
+    num = int(value)
+except ValueError:
+    return False, "Invalid integer"
+if num <= 0:
+    return False, "Must be positive"
+return True, ""
+```
+
+### 10. Exception Logging
+
+All logging calls inside `except` blocks MUST include `exc_info=True` to capture the full traceback. Do NOT manually format the exception into the message string.
+
+```python
+# BAD - no traceback, loses stack information
+except Exception as exc:
+    logger.error("ClassName.method: failed error=%s", exc)
+
+# BAD - no exc_info=True
+except NetworkError:
+    logger.warning("ClassName.method: network_error")
+
+# GOOD - full traceback included automatically
+except Exception as exc:
+    logger.error("ClassName.method: failed", exc_info=True)
+
+# GOOD - warning with traceback
+except NetworkError:
+    logger.warning("ClassName.method: network_error", exc_info=True)
+
+# GOOD - critical with traceback
+except Exception:
+    logger.critical("ClassName.method: fatal", exc_info=True)
+    raise
+```
+
+This applies to ALL log levels (`DEBUG`, `WARNING`, `ERROR`, `CRITICAL`) inside `except` blocks.
+
+### 11. Code Duplication
 
 **Flag and extract duplicate code.** When you see similar code blocks repeated 3+ times, consider extracting to a helper function.
 
@@ -440,6 +493,7 @@ After modifying code:
 - [ ] External module usage is commented
 - [ ] All imports at top of file (no inline imports)
 - [ ] No circular dependencies
+- [ ] try/except blocks only wrap code that can raise (no extra logic inside try)
 - [ ] No code duplication (3+ similar blocks → extract to helper)
 - [ ] No trailing whitespace (spaces at end of lines, empty lines at end of file)
 

@@ -17,21 +17,29 @@ All Python code in this project MUST have complete type annotations.
 
 ## Common Patterns
 
+- Prefer `X | Y` over `Union[X, Y]` and `X | None` over `Optional[X]`
+- Use built-in generic types: `list`, `dict`, `tuple`, `set` instead of `List`, `Dict`, `Tuple`, `Set` from typing
+- Add `from __future__ import annotations` at the top of every Python file — this enables `|` syntax and makes all annotations strings at runtime, so forward references do NOT need quotes
+
 ```python
+from __future__ import annotations
+
 # Function with typed parameters and return
-def process_update(self, update: Update, context: Optional[Dict[str, Any]] = None) -> DialogResponse:
+def process_update(self, update: Update, context: dict[str, Any] | None = None) -> None:
     ...
 
 # Optional types
-def find_item(self, name: str, default: Optional[str] = None) -> Optional[str]:
+def find_item(self, name: str, default: str | None = None) -> str | None:
     ...
 
 # Collections with element types
-def process_items(self, items: List[Dict[str, Any]]) -> List[str]:
+def process_items(self, items: list[dict[str, Any]]) -> list[str]:
+    ...
+def get_items(self) -> tuple[str, ...]:
     ...
 
-# Forward references (for circular imports or later-defined classes)
-def get_app() -> "BotApplication":
+# Forward references — no quotes needed with `from __future__ import annotations`
+def get_app() -> BotApplication:
     ...
 ```
 

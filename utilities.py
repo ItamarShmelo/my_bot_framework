@@ -1,10 +1,38 @@
 """Generic utilities for the bot framework."""
 
+from __future__ import annotations
+
 import html
-from typing import List
+import inspect
+from typing import Callable
 
 
-def divide_message_to_chunks(message: str, chunk_size: int) -> List[str]:
+def validate_single_arg_callable(fn: Callable, name: str) -> None:
+    """Verify that *fn* accepts exactly one required positional argument.
+
+    Used by dialog classes to validate that dynamic-choices / dynamic-branches
+    callables have the expected ``(context) -> ...`` signature.
+
+    Args:
+        fn: The callable to inspect.
+        name: Human-readable label used in the assertion message
+            (e.g. ``"choices"``, ``"branches"``).
+
+    Raises:
+        AssertionError: If *fn* does not have exactly one required parameter.
+    """
+    sig = inspect.signature(fn)
+    params = [
+        p for p in sig.parameters.values()
+        if p.default is inspect.Parameter.empty
+    ]
+    assert len(params) == 1, (
+        f"{name} callable must accept exactly 1 argument (context), "
+        f"got {len(params)} required parameters"
+    )
+
+
+def divide_message_to_chunks(message: str, chunk_size: int) -> list[str]:
     """Split a message into fixed-size chunks."""
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")

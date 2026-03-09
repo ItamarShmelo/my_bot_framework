@@ -20,27 +20,37 @@ You are a type hints specialist for the my_bot_framework project. Your role is t
 All functions MUST have complete type hints:
 
 ```python
+from __future__ import annotations
+
 # All parameters typed
 # Return type specified (use -> None for no return)
 def process_update(
     self,
     update: Update,
-    context: Optional[Dict[str, Any]] = None,
-) -> DialogResponse:
+    context: dict[str, Any] | None = None,
+) -> None:
 ```
 
-### 2. Common Patterns
+### 2. Imports
+
+- Add `from __future__ import annotations` at the top of every Python file — this enables `|` syntax and makes all annotations strings at runtime, so forward references do NOT need quotes
+- Do NOT use `from typing import Dict, List, Optional, Tuple, Union` — use built-in generics and `|` syntax instead
+- Still import from `typing` when needed: `Callable`, `Protocol`, `TypeVar`, `Generic`, `TYPE_CHECKING`, `NoReturn`, `Any`
+
+### 3. Common Patterns
 
 | Pattern | Type Hint |
 |---------|-----------|
-| Nullable | `Optional[T]` or `T \| None` |
-| Multiple types | `Union[T1, T2]` or `T1 \| T2` |
-| List | `List[T]` or `list[T]` |
-| Dict | `Dict[K, V]` or `dict[K, V]` |
-| Tuple | `Tuple[T1, T2]` or `tuple[T1, T2]` |
+| Nullable | `T \| None` (preferred over `Optional[T]`) |
+| Multiple types | `T1 \| T2` (preferred over `Union[T1, T2]`) |
+| List | `list[T]` |
+| Dict | `dict[K, V]` |
+| Tuple (fixed) | `tuple[T1, T2]` |
+| Tuple (variable) | `tuple[T, ...]` |
+| Set | `set[T]` |
 | Callable | `Callable[[ArgTypes], ReturnType]` |
 | Any | `Any` (use sparingly) |
-| Forward ref | `"ClassName"` (quoted string) |
+| Forward ref | `ClassName` (no quotes needed with `from __future__ import annotations`) |
 
 ### 3. Return Types
 
@@ -61,19 +71,23 @@ def fatal_error(self, msg: str) -> NoReturn:
 ### 4. Optional Parameters
 
 ```python
-# Use Optional for parameters that can be None
+from __future__ import annotations
+
+# Use X | None for parameters that can be None
 def find_item(
     self,
     name: str,
-    default: Optional[str] = None,
-) -> Optional[str]:
+    default: str | None = None,
+) -> str | None:
 ```
 
 ### 5. Collections
 
 ```python
+from __future__ import annotations
+
 # Be specific about collection contents
-def process_items(self, items: List[Dict[str, Any]]) -> List[str]:
+def process_items(self, items: list[dict[str, Any]]) -> list[str]:
 
 # Use Sequence for read-only, Iterable for iteration-only
 def read_items(self, items: Sequence[str]) -> None:
@@ -92,38 +106,41 @@ def register_callback(
 from typing import Protocol
 
 class Validator(Protocol):
-    def __call__(self, value: Any) -> Tuple[bool, str]: ...
+    def __call__(self, value: Any) -> tuple[bool, str]: ...
 ```
 
 ### 7. Forward References
 
-Use quoted strings for:
+With `from __future__ import annotations`, forward references do NOT need quotes:
 - Circular imports
 - Classes defined later in the file
 - TYPE_CHECKING imports
 
 ```python
+from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .bot_application import BotApplication
 
-def get_app() -> "BotApplication":
+def get_app() -> BotApplication:
     return _instance
 ```
 
 ### 8. Class Attributes
 
 ```python
+from __future__ import annotations
+
 class MyClass:
     # Class attributes with type hints
-    _instance: Optional["MyClass"] = None
+    _instance: MyClass | None = None
     DEFAULT_VALUE: int = 100
     
     def __init__(self) -> None:
         # Instance attributes with type hints
         self.value: str = ""
-        self.items: List[int] = []
+        self.items: list[int] = []
 ```
 
 ### 9. Generic Types
@@ -169,18 +186,20 @@ uv run mypy my_bot_framework/ --strict --ignore-missing-imports
 ### Handling None Checks
 
 ```python
+from __future__ import annotations
+
 # BAD - mypy error: Item "None" has no attribute "id"
-def process(self, query: Optional[CallbackQuery]) -> str:
+def process(self, query: CallbackQuery | None) -> str:
     return query.id  # Error!
 
 # GOOD - explicit None check
-def process(self, query: Optional[CallbackQuery]) -> str:
+def process(self, query: CallbackQuery | None) -> str:
     if query is None:
         return ""
     return query.id
 
 # GOOD - assertion for cases where None is unexpected
-def process(self, query: Optional[CallbackQuery]) -> str:
+def process(self, query: CallbackQuery | None) -> str:
     assert query is not None, "query should not be None here"
     return query.id
 ```
@@ -188,12 +207,14 @@ def process(self, query: Optional[CallbackQuery]) -> str:
 ### Handling Union Types
 
 ```python
+from __future__ import annotations
+
 # BAD - accessing attribute that may not exist
-def get_text(self, msg: Union[str, Message]) -> str:
+def get_text(self, msg: str | Message) -> str:
     return msg.text  # Error if msg is str!
 
 # GOOD - type narrowing
-def get_text(self, msg: Union[str, Message]) -> str:
+def get_text(self, msg: str | Message) -> str:
     if isinstance(msg, str):
         return msg
     return msg.text
@@ -205,9 +226,9 @@ After modifying code:
 
 - [ ] All function parameters have type hints
 - [ ] All function return types are specified
-- [ ] Optional types use `Optional[T]` or `T | None`
+- [ ] Optional types use `T | None`
 - [ ] Collections specify element types
-- [ ] Forward references are quoted
+- [ ] Forward references are unquoted (with `from __future__ import annotations`)
 - [ ] TYPE_CHECKING used for import-only types
 - [ ] `uv run mypy <files> --ignore-missing-imports` passes
 
@@ -226,12 +247,12 @@ Example output:
 
 ### Files Checked
 - dialog.py
-- test_bots/edit_event_dialog_bot.py
+- test_bots/dialog_handler_bot.py
 
 ### New Errors (must fix): 0
 
 ### Pre-existing Errors: 15
-- dialog.py:90: "type[DialogResponse]" has no attribute "NO_CHANGE"
+- dialog.py:90: "type[SomeClass]" has no attribute "some_constant"
 - (... pattern used throughout codebase ...)
 
 ### Summary

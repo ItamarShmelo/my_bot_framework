@@ -147,7 +147,7 @@ def main() -> None:
     # Dialog command to edit CPU threshold
     async def on_cpu_threshold_edited(result: Any) -> None:
         """Handle CPU threshold edit.
-        
+
         Args:
             result: The dialog result containing the new threshold value or CANCELLED.
         """
@@ -184,7 +184,7 @@ def main() -> None:
     # Dialog command to edit memory threshold
     async def on_memory_threshold_edited(result: Any) -> None:
         """Handle memory threshold edit.
-        
+
         Args:
             result: The dialog result containing the new threshold value or CANCELLED.
         """
@@ -245,7 +245,7 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting threshold_bot...")
+        logger.info("send_startup_and_run: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())

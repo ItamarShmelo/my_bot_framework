@@ -5,8 +5,10 @@ This module provides:
 - EditableMixin: Mixin for objects with editable attributes
 """
 
+from __future__ import annotations
+
 from abc import ABC
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable
 
 from .accessors import get_logger
 
@@ -21,11 +23,11 @@ _Bool = bool
 
 def _is_none_string(s: str, include_empty: bool = True) -> bool:
     """Check if a string represents None.
-    
+
     Args:
         s: The string to check.
         include_empty: If True, treat empty string as None.
-    
+
     Returns:
         True if the string represents None.
     """
@@ -37,20 +39,20 @@ def _is_none_string(s: str, include_empty: bool = True) -> bool:
 
 def _make_numeric_validator(
     positive: bool,
-    min_val: Optional[Union[int, float]],
-    max_val: Optional[Union[int, float]],
-) -> Callable[[Optional[Union[int, float]]], Tuple[bool, str]]:
+    min_val: int | float | None,
+    max_val: int | float | None,
+) -> Callable[[int | float | None], tuple[bool, str]]:
     """Create a validator for numeric types (int/float).
-    
+
     Args:
         positive: If True, value must be > 0.
         min_val: Minimum allowed value (inclusive).
         max_val: Maximum allowed value (inclusive).
-    
+
     Returns:
         A validator function that returns (is_valid, error_message).
     """
-    def validator(v: Optional[Union[int, float]]) -> Tuple[bool, str]:
+    def validator(v: int | float | None) -> tuple[bool, str]:
         if v is None:
             return True, ""
         if positive and v <= 0:
@@ -60,17 +62,17 @@ def _make_numeric_validator(
         if max_val is not None and v > max_val:
             return False, f"Must be <= {max_val}"
         return True, ""
-    
+
     return validator
 
 
 class EditableAttribute:
     """A runtime-editable attribute with parsing and validation.
-    
+
     - `parse`: User-provided callable that receives string, returns typed value
     - `value` property: getter returns typed value, setter parses strings and validates
     - `validator`: Optional function that receives typed value, returns (is_valid, error_msg)
-    
+
     Factory methods provide convenient constructors for common types:
     - EditableAttribute.float("name", 1.0, positive=True)
     - EditableAttribute.int("count", 10, min_val=0, max_val=100)
@@ -82,13 +84,13 @@ class EditableAttribute:
     def __init__(
         self,
         name: str,
-        field_type: Union[type, Tuple[type, ...]],
+        field_type: type | tuple[type, ...],
         initial_value: Any,
         parse: Callable[[str], Any],
-        validator: Optional[Callable[[Any], Tuple[bool, str]]] = None,
+        validator: Callable[[Any], tuple[bool, str]] | None = None,
     ) -> None:
         """Initialize an editable attribute.
-        
+
         Args:
             name: Attribute name (used for identification).
             field_type: Expected type(s) for the value. Can be a single type
@@ -104,7 +106,7 @@ class EditableAttribute:
         self.parse = parse
         self.validator = validator
 
-    def validate(self, value: Any) -> Tuple[bool, str]:
+    def validate(self, value: Any) -> tuple[bool, str]:
         """Validate a typed value. Returns (is_valid, error_message)."""
         # Type check - field_type can be a single type or tuple of types
         if not isinstance(value, self.field_type):
@@ -146,15 +148,15 @@ class EditableAttribute:
     def float(
         cls,
         name: str,
-        initial_value: Optional[float],
+        initial_value: float | None,
         *,
         positive: bool = False,
-        min_val: Optional[float] = None,
-        max_val: Optional[float] = None,
+        min_val: float | None = None,
+        max_val: float | None = None,
         optional: bool = False,
-    ) -> "EditableAttribute":
+    ) -> EditableAttribute:
         """Create a float attribute with optional constraints.
-        
+
         Args:
             name: Attribute name.
             initial_value: Starting value (can be None if optional=True).
@@ -162,17 +164,17 @@ class EditableAttribute:
             min_val: Minimum allowed value (inclusive).
             max_val: Maximum allowed value (inclusive).
             optional: If True, allows None values. Parses "none", "null", "" as None.
-        
+
         Examples:
             EditableAttribute.float("rate", 1.0, positive=True)
             EditableAttribute.float("scale", 0.5, min_val=0.0, max_val=1.0)
             EditableAttribute.float("limit", None, optional=True, positive=True)
         """
-        def parse_float(s: str) -> Optional[float]:
+        def parse_float(s: str) -> float | None:
             if optional and _is_none_string(s, include_empty=True):
                 return None
             return float(s)
-        
+
         return cls(
             name=name,
             field_type=(float, type(None)) if optional else float,
@@ -185,15 +187,15 @@ class EditableAttribute:
     def int(
         cls,
         name: str,
-        initial_value: Optional[int],
+        initial_value: int | None,
         *,
         positive: bool = False,
-        min_val: Optional[int] = None,
-        max_val: Optional[int] = None,
+        min_val: int | None = None,
+        max_val: int | None = None,
         optional: bool = False,
-    ) -> "EditableAttribute":
+    ) -> EditableAttribute:
         """Create an int attribute with optional constraints.
-        
+
         Args:
             name: Attribute name.
             initial_value: Starting value (can be None if optional=True).
@@ -201,17 +203,17 @@ class EditableAttribute:
             min_val: Minimum allowed value (inclusive).
             max_val: Maximum allowed value (inclusive).
             optional: If True, allows None values. Parses "none", "null", "" as None.
-        
+
         Examples:
             EditableAttribute.int("count", 10, positive=True)
             EditableAttribute.int("threshold", 90, min_val=0, max_val=100)
             EditableAttribute.int("max_items", None, optional=True, min_val=1)
         """
-        def parse_int(s: str) -> Optional[int]:
+        def parse_int(s: str) -> int | None:
             if optional and _is_none_string(s, include_empty=True):
                 return None
             return int(s)
-        
+
         return cls(
             name=name,
             field_type=(int, type(None)) if optional else int,
@@ -224,24 +226,24 @@ class EditableAttribute:
     def bool(
         cls,
         name: str,
-        initial_value: Optional[bool],
+        initial_value: bool | None,
         *,
         optional: bool = False,  # noqa: A002
-    ) -> "EditableAttribute":
+    ) -> EditableAttribute:
         """Create a boolean attribute.
-        
+
         Parses common boolean strings: true/false, yes/no, 1/0, on/off.
-        
+
         Args:
             name: Attribute name.
             initial_value: Starting value (can be None if optional=True).
             optional: If True, allows None values. Parses "none", "null" as None.
-        
+
         Examples:
             EditableAttribute.bool("enabled", True)
             EditableAttribute.bool("override", None, optional=True)
         """
-        def parse_bool(s: str) -> Optional[bool]:
+        def parse_bool(s: str) -> bool | None:
             if optional and _is_none_string(s, include_empty=False):
                 return None
             s_lower = s.strip().lower()
@@ -250,7 +252,7 @@ class EditableAttribute:
             if s_lower in ("false", "no", "0", "off"):
                 return False
             raise ValueError(f"Cannot parse '{s}' as boolean")
-        
+
         return cls(
             name=name,
             field_type=(bool, type(None)) if optional else bool,
@@ -263,36 +265,36 @@ class EditableAttribute:
     def str(
         cls,
         name: str,
-        initial_value: Optional[str],
+        initial_value: str | None,
         *,
-        choices: Optional[List[str]] = None,
+        choices: list[str] | None = None,
         optional: _Bool = False,
-    ) -> "EditableAttribute":
+    ) -> EditableAttribute:
         """Create a string attribute with optional choices validation.
-        
+
         Args:
             name: Attribute name.
             initial_value: Starting value (can be None if optional=True).
             choices: If provided, value must be one of these strings.
             optional: If True, allows None values. Parses "none", "null" as None.
-        
+
         Examples:
             EditableAttribute.str("mode", "auto", choices=["auto", "manual"])
             EditableAttribute.str("label", "default")
             EditableAttribute.str("prefix", None, optional=True, choices=["A", "B"])
         """
-        def parse_str(s: str) -> Optional[str]:
+        def parse_str(s: str) -> str | None:
             if optional and _is_none_string(s, include_empty=False):
                 return None
             return s
-        
-        def validator(v: Optional[str]) -> Tuple[bool, str]:
+
+        def validator(v: str | None) -> tuple[bool, str]:
             if v is None:
                 return True, ""
             if choices is not None and v not in choices:
                 return False, f"Must be one of: {', '.join(choices)}"
             return True, ""
-        
+
         has_validator = choices is not None or optional
         return cls(
             name=name,
@@ -305,26 +307,26 @@ class EditableAttribute:
 
 class EditableMixin(ABC):
     """Mixin for objects with runtime-editable attributes.
-    
+
     The `edited` property allows signaling that parameters have changed,
     triggering immediate re-processing in events that support it.
     """
-    
+
     _edited: bool = False
 
     @property
-    def editable_attributes(self) -> dict[str, "EditableAttribute"]:
+    def editable_attributes(self) -> dict[str, EditableAttribute]:
         """Mapping of editable attributes."""
         if not hasattr(self, "_editable_attributes"):
-            self._editable_attributes: dict[str, "EditableAttribute"] = {}
+            self._editable_attributes: dict[str, EditableAttribute] = {}
         return self._editable_attributes
 
     @editable_attributes.setter
-    def editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
+    def editable_attributes(self, attributes: list[EditableAttribute]) -> None:
         """Initialize the editable attribute mapping with validation."""
         self._init_editable_attributes(attributes)
 
-    def _init_editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
+    def _init_editable_attributes(self, attributes: list[EditableAttribute]) -> None:
         """Validate and store editable attributes."""
         if not isinstance(attributes, list):
             raise TypeError("attributes must be a list of EditableAttribute")
@@ -348,7 +350,7 @@ class EditableMixin(ABC):
     def edited(self, value: bool) -> None:
         """Set the edited flag."""
         logger = get_logger()
-        logger.info("[%s] edited_flag_set value=%s", type(self).__name__, value)
+        logger.debug("EditableMixin.edited: set value=%s", value)
         self._edited = value
 
     def edit(self, name: str, value: Any) -> None:
@@ -357,7 +359,7 @@ class EditableMixin(ABC):
             raise KeyError(f"Unknown editable attribute: {name}")
         self.editable_attributes[name].value = value
         self.edited = True
-    
+
     def get(self, name: str) -> Any:
         """Get an attribute value by name (fail fast if missing)."""
         if name not in self.editable_attributes:

@@ -8,8 +8,10 @@ A modular, event-driven Telegram bot framework built on `python-telegram-bot`.
 - **Event System** - Time-based and condition-based event triggers
 - **Command Handling** - Simple commands and interactive dialog commands
 - **Direct Message Sending** - Async message sending with automatic chunking
-- **Interactive Dialogs** - Multi-step conversations with inline keyboards
+- **Interactive Dialogs** - Multi-step conversations with inline or reply keyboards (unified `keyboard_type` parameter)
 - **Editable Parameters** - Runtime-configurable event parameters
+- **Resilient Polling** - Automatic handling of transient Telegram network errors with backoff and recovery logging
+- **Dynamic Event Lifecycle** - Register events before or during runtime, remove them by name, and enforce unique event names
 
 ## Installation
 
@@ -60,6 +62,10 @@ app.register_event(TimeEvent(
 
 # Run the bot
 asyncio.run(app.run())
+
+# Or run without command polling (skip_commands=True)
+# Useful when you only want events, not interactive commands
+asyncio.run(app.run(skip_commands=True))
 ```
 
 ## Core Components
@@ -70,7 +76,22 @@ The singleton entry point for the framework. Manages:
 - Bot instance and credentials
 - Direct message sending for outgoing messages
 - Event and command registration
-- Graceful shutdown via `/terminate`
+- Graceful shutdown via `/terminate` (global command, works anytime including during dialogs)
+- Dynamic event lifecycle control: `register_event()` starts newly added events immediately while running, and `remove_event(event_name: str) -> None` removes events by unique name and safely cancels them mid-run
+
+#### Running the Bot
+
+The `run()` method starts the bot and blocks until shutdown:
+
+```python
+# Run with command polling (default)
+await app.run()
+
+# Run without command polling (events only)
+await app.run(skip_commands=True)
+```
+
+When `skip_commands=True`, the `CommandsEvent` is not registered, so commands won't be polled from Telegram. This is useful for bots that only use events and don't need interactive commands.
 
 ```python
 from my_bot_framework import BotApplication, get_app, get_bot, get_logger
@@ -113,9 +134,31 @@ await app.send_messages([
 ])
 ```
 
+**Automatic Retry:** The framework uses a shared retry utility for both send and receive. Message sending retries transient errors (`TimedOut`, `NetworkError`) up to `SEND_MAX_ATTEMPTS` attempts with exponential backoff + jitter. `RetryAfter` waits for Telegram's duration plus a 1s buffer and does not count towards the attempt limit; if the wait exceeds 120s, a `RuntimeError` is raised. Polling uses the same retry logic for receive errors and logs backoff/recovery transitions during outages.
+
 ### Events
 
 Events run continuously and send messages based on triggers.
+You can register events at startup or dynamically while the bot is running.
+- `register_event()` requires a unique event name and raises `ValueError` for duplicates.
+- `remove_event(event_name: str) -> None` removes by name and raises `KeyError` if the name does not exist.
+- Calling `remove_event()` during `run()` intentionally cancels only that event task; the supervisor treats that cancellation as normal and the bot keeps running.
+
+```python
+condition = DiskFullCondition()
+builder = DiskAlertBuilder(condition)
+
+event = ActivateOnConditionEvent(
+    event_name="disk_alert",
+    condition=condition,
+    message_builder=builder,
+)
+
+app.register_event(event)
+app.remove_event("disk_alert")
+```
+
+Removing an event before `run()` simply updates the registration tables. Removing an event during `run()` intentionally cancels only that event task and treats the cancellation as normal rather than fatal.
 
 #### ActivateOnConditionEvent
 
@@ -257,37 +300,35 @@ app.register_command(cmd)
 
 ### Dialogs
 
-The framework provides built-in dialog types for common interactions:
+The framework provides built-in dialog types for common interactions. All dialogs extend `Dialog[T]` (generic base class where `T` is the result type). After completion, the result is available via the `dialog_result` property (`T` or a `DialogResult` sentinel such as `NOT_SET` (internal initial state), `CANCELLED`, or `DONE`).
+
+The dialog module is organized as a `dialog/` subpackage (`base.py`, `choice.py`, `confirm.py`, `paginated.py`, `branch.py`, `input.py`, `composite.py`, `edit.py`, `factories.py`). The public API is unchanged — all imports work from `my_bot_framework.dialog` (or `my_bot_framework`).
 
 **Leaf Dialogs** (atomic single-step):
-- **Inline Keyboard** (attached to message):
-  - `InlineKeyboardChoiceDialog` - User selects from inline keyboard options
-  - `InlineKeyboardPaginatedChoiceDialog` - User selects from paginated inline keyboard options (shows first page as buttons, remaining items as numbered text list)
-  - `InlineKeyboardConfirmDialog` - Yes/No prompt with inline keyboard
-- **Reply Keyboard** (buttons at bottom of chat):
-  - `ReplyKeyboardChoiceDialog` - User selects from reply keyboard options
-  - `ReplyKeyboardPaginatedChoiceDialog` - User selects from paginated reply keyboard options
-  - `ReplyKeyboardConfirmDialog` - Yes/No prompt with reply keyboard
+- **Choice dialogs** (use `keyboard_type=KeyboardType.INLINE` or `KeyboardType.REPLY`):
+  - `ChoiceDialog` - User selects from keyboard options
+  - `PaginatedChoiceDialog` - User selects from paginated keyboard options (all pages show items as buttons; navigate with "< Prev" / "Next >" buttons)
+  - `ConfirmDialog` - Yes/No prompt with keyboard
+  - `ChoiceBranchDialog` - User selects branch via keyboard (static or dynamic branches via callable)
 - **Other Leaf Dialogs**:
-  - `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input)
-  - `EditEventDialog` - Edit an event's editable attributes via inline keyboard
+  - `UserInputDialog` - User enters text (with optional validation; prompt may be callable; keyboard auto-removed on text input). Supports `keyboard_type` (INLINE or REPLY) to control whether the Cancel button appears as an inline keyboard button or a reply keyboard button. Default is INLINE (backward compatible). Class constant `CANCEL_LABEL` for the Cancel button label.
+  - `EditEventDialog` - Edit an event's editable attributes via inline or reply keyboard (configurable via `keyboard_type`)
+
+The old separate `InlineKeyboard*` / `ReplyKeyboard*` classes have been removed.
 
 **Composite Dialogs** (multi-step):
 - `SequenceDialog` - Run dialogs in order
 - `BranchDialog` - Condition-based branching
-- `InlineKeyboardChoiceBranchDialog` - User selects branch via inline keyboard
-- `ReplyKeyboardChoiceBranchDialog` - User selects branch via reply keyboard
+- `ChoiceBranchDialog` - User selects branch via keyboard (static or dynamic branches via callable)
 - `LoopDialog` - Repeat until exit condition
 - `DialogHandler` - Wrap dialog with completion callback
 
 ```python
 from my_bot_framework import (
-    InlineKeyboardChoiceDialog, InlineKeyboardPaginatedChoiceDialog,
-    InlineKeyboardConfirmDialog, UserInputDialog,
-    ReplyKeyboardChoiceDialog, ReplyKeyboardConfirmDialog,
+    ChoiceDialog, PaginatedChoiceDialog, ConfirmDialog, UserInputDialog,
     SequenceDialog, DialogHandler, DialogCommand,
     KeyboardType, create_choice_dialog, create_confirm_dialog,
-    CANCELLED, is_cancelled,
+    DialogResult, is_cancelled,
 )
 
 # Simple inline keyboard choice dialog (default)
@@ -298,11 +339,11 @@ color_dialog = ChoiceDialog("Pick a color:", [
 ])
 
 # Reply keyboard choice dialog (buttons at bottom of chat)
-color_dialog_reply = ReplyKeyboardChoiceDialog("Pick a color:", [
-    ("Red", "red"),
-    ("Green", "green"),
-    ("Blue", "blue"),
-])
+color_dialog_reply = ChoiceDialog(
+    "Pick a color:",
+    [("Red", "red"), ("Green", "green"), ("Blue", "blue")],
+    keyboard_type=KeyboardType.REPLY,
+)
 
 # Using factory function with keyboard type
 color_dialog_factory = create_choice_dialog(
@@ -311,7 +352,7 @@ color_dialog_factory = create_choice_dialog(
     keyboard_type=KeyboardType.REPLY,  # or KeyboardType.INLINE (default)
 )
 
-# Paginated choice dialog (for long lists)
+# Paginated choice dialog (for long lists) — uses next/prev page buttons
 expenses = [
     ("Rent $1200", "1"),
     ("Groceries $95", "2"),
@@ -325,8 +366,8 @@ expenses = [
 expense_dialog = PaginatedChoiceDialog(
     prompt="Select expense to remove:",
     items=expenses,
-    page_size=5,  # Show first 5 as buttons
-    more_label="More...",  # Button label for remaining items
+    page_size=5,  # Items per page; navigate with "< Prev" / "Next >"
+    keyboard_type=KeyboardType.INLINE,  # or KeyboardType.REPLY
 )
 
 # Multi-step sequence with mixed keyboard types
@@ -337,7 +378,7 @@ survey_dialog = SequenceDialog([
         ("4 Stars", "4"),
         ("3 Stars", "3"),
     ])),
-    ("recommend", ReplyKeyboardConfirmDialog("Would you recommend us?")),
+    ("recommend", ConfirmDialog("Would you recommend us?", keyboard_type=KeyboardType.REPLY)),
 ])
 
 # DialogHandler with completion callback
@@ -355,7 +396,7 @@ app.register_command(DialogCommand("/survey", "Take survey", handled_dialog))
 
 #### Factory Functions
 
-Factory functions provide a convenient way to create dialogs with a specified keyboard type:
+Factory functions provide a convenient way to create dialogs with a specified keyboard type. They create instances of the merged classes (`ChoiceDialog`, `ConfirmDialog`, `PaginatedChoiceDialog`, `ChoiceBranchDialog`):
 
 ```python
 from my_bot_framework import (
@@ -364,6 +405,7 @@ from my_bot_framework import (
     create_confirm_dialog,
     create_paginated_choice_dialog,
     create_choice_branch_dialog,
+    create_user_input_dialog,
 )
 
 # Create choice dialog with reply keyboard
@@ -383,17 +425,16 @@ confirm = create_confirm_dialog(
     include_cancel=False,
 )
 
-# Create paginated choice dialog
+# Create paginated choice dialog (next/prev page navigation)
 paginated = create_paginated_choice_dialog(
     prompt="Select item:",
     items=[("Item 1", "1"), ("Item 2", "2"), ...],
     keyboard_type=KeyboardType.REPLY,
     page_size=5,
-    more_label="More...",
     include_cancel=True,
 )
 
-# Create choice branch dialog
+# Create choice branch dialog (static or dynamic branches)
 branch = create_choice_branch_dialog(
     prompt="Select action:",
     branches={
@@ -403,14 +444,22 @@ branch = create_choice_branch_dialog(
     keyboard_type=KeyboardType.INLINE,
     include_cancel=True,
 )
+# For dynamic branches based on context: branches=lambda ctx: {...}
+
+# Create user input dialog with reply keyboard Cancel button
+name_dialog = create_user_input_dialog(
+    prompt="Enter your name:",
+    keyboard_type=KeyboardType.REPLY,
+    validator=validate_non_empty,
+)
 ```
 
 #### EditEventDialog
 
-Edit any event's editable attributes via an inline keyboard interface:
+Edit any event's editable attributes via inline or reply keyboard. Use the `keyboard_type` parameter to choose the keyboard style (default is inline):
 
 ```python
-from my_bot_framework import EditEventDialog, DialogCommand
+from my_bot_framework import EditEventDialog, DialogCommand, KeyboardType
 
 # Create an event with editable attributes
 event = ActivateOnConditionEvent(
@@ -419,8 +468,11 @@ event = ActivateOnConditionEvent(
     message_builder=my_builder,  # Has editable attributes
 )
 
-# Simple usage - edit all fields
+# Simple usage - edit all fields (inline keyboard, default)
 edit_dialog = EditEventDialog(event)
+
+# Reply keyboard (buttons at bottom of chat)
+edit_dialog_reply = EditEventDialog(event, keyboard_type=KeyboardType.REPLY)
 
 # With cross-field validation
 def validate_limits(context):
@@ -437,28 +489,53 @@ validated_dialog = EditEventDialog(event, validator=validate_limits)
 app.register_command(DialogCommand("/edit", "Edit event settings", validated_dialog))
 ```
 
-The dialog shows a field list with current values. Boolean fields use toggle buttons, other fields use text input. Edits are staged and only applied when clicking Done.
+Subclasses can override `_edit_custom_field(field_name: str) -> bool` to provide custom editing dialogs for specific fields. The hook is called after verifying the field exists but before the default bool/text dispatch. Return `True` if the field was handled (loop continues to field selection); return `False` to fall through to the default editor.
+
+```python
+class CustomEditDialog(EditEventDialog):
+    async def _edit_custom_field(self, field_name: str) -> bool:
+        if field_name != "builder.alert_level":
+            return False
+        # Show ChoiceDialog instead of text input for this field
+        result = await create_choice_dialog(...).start(self.context)
+        if is_cancelled(result):
+            return True
+        success, error = self._validate_and_stage_value(field_name, result)
+        if not success:
+            await get_app().send_messages(f"⚠️ {error}")
+        return True  # Handled
+```
+
+The dialog shows a field list with current values. Boolean fields use toggle buttons (Yes/No), other fields use text input. Field selection and boolean editing use either inline or reply keyboard based on `keyboard_type`. Edits are staged and only applied when clicking Done.
 
 #### Cancellation Handling
 
-Use the `CANCELLED` sentinel for unambiguous cancellation detection:
+Use the `DialogResult.CANCELLED` and `DialogResult.DONE` sentinels (`NOT_SET` is internal initial state) for unambiguous outcome detection:
 
 ```python
-from my_bot_framework import CANCELLED, is_cancelled
+from my_bot_framework import DialogResult, is_cancelled
 
 def on_complete(result):
-    # Using helper function
+    # Using helper function for cancellation
     if is_cancelled(result):
         print("Cancelled!")
         return
     
     # Or direct comparison
-    if result is CANCELLED:
+    if result is DialogResult.CANCELLED:
         print("Cancelled!")
+        return
+    
+    # DONE is another DialogResult sentinel (e.g., from EditEventDialog Done button)
+    # NOT_SET is the initial state before dialog completes (internal use)
+    if result is DialogResult.DONE:
+        print("Done without value")
         return
     
     print(f"Got result: {result}")
 ```
+
+Dialogs are generic: `Dialog[T]` where `T` is the result type (e.g., `Dialog[str]`, `Dialog[bool]`, `Dialog[dict[str, Any]]`). After completion, access the result via the `dialog_result` property.
 
 #### Validators
 
@@ -607,26 +684,16 @@ All messages are sent with `parse_mode=HTML`. If your text contains HTML special
 
 ```python
 import html
-from my_bot_framework import TelegramTextMessage, InvalidHtmlError
+from my_bot_framework import TelegramTextMessage
 
 # Text with HTML special characters - MUST escape
 user_input = "Use <script> tags for JavaScript"
 safe_text = html.escape(user_input)  # "Use &lt;script&gt; tags for JavaScript"
 message = TelegramTextMessage(safe_text)
-
-# If you forget to escape, InvalidHtmlError is raised
-try:
-    message = TelegramTextMessage("Invalid <unclosed tag")
-    await app.send_messages(message)
-except InvalidHtmlError as e:
-    print(f"HTML error: {e}")
-    # Fix: html.escape() your text
+await app.send_messages(message)
 ```
 
-The `InvalidHtmlError` exception provides:
-- The original Telegram API error
-- The offending text (truncated for display)
-- Clear instructions to use `html.escape()`
+**Important:** Invalid HTML triggers a fatal `BadRequest` on send. The framework logs a hint to use `html.escape()` and re-raises the exception so the bot terminates visibly.
 
 ## Group Chat Setup
 
@@ -669,7 +736,7 @@ After disabling privacy mode, your bot will receive all messages in group chats,
 
 The framework automatically registers:
 
-- `/terminate` - Gracefully shut down the bot
+- `/terminate` - Gracefully shut down the bot (global command; can be invoked anytime, including during active dialogs)
 - `/commands` - List all available commands
 
 ## Message Builders
@@ -753,6 +820,25 @@ from my_bot_framework import divide_message_to_chunks
 
 chunks = divide_message_to_chunks(long_text, chunk_size=4000)
 ```
+
+### Callable Validation
+
+When passing dynamic choices or branches callables to dialogs (e.g., `choices=lambda ctx: [...]` or `branches=lambda ctx: {...}`), the callable must accept exactly one argument (the context). Use `validate_single_arg_callable()` to verify this at setup time:
+
+```python
+from my_bot_framework import validate_single_arg_callable
+
+def my_choices(context):
+    return [("A", "a"), ("B", "b")]
+
+validate_single_arg_callable(my_choices, "choices")  # Raises AssertionError if signature is wrong
+```
+
+**Parameters:**
+- `fn` — The callable to inspect.
+- `name` — Human-readable label for error messages (e.g., `"choices"`, `"branches"`).
+
+**Raises:** `AssertionError` if the callable does not have exactly one required parameter.
 
 ### List Formatting
 

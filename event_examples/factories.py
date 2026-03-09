@@ -6,10 +6,13 @@ common use cases, reducing boilerplate.
 For class-based approaches, see TimeEvent and ThresholdEvent in this package.
 """
 
+from __future__ import annotations
+
 import os
 import time
-from typing import Any, Callable, List, Union
+from typing import Any, Callable
 
+from ..accessors import get_logger
 from ..event import (
     ActivateOnConditionEvent,
     EditableAttribute,
@@ -24,14 +27,14 @@ def create_threshold_event(
     event_name: str,
     value_getter: Callable[[], float],
     threshold: float,
-    message_builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
+    message_builder: Callable[[], None | TelegramMessage | str | list[TelegramMessage]],
     above: bool = True,
     poll_seconds: float = 10.0,
     cooldown_seconds: float = 60.0,
     fire_when_edited: bool = False,
 ) -> ActivateOnConditionEvent:
     """Create an event that fires when a value crosses a threshold.
-    
+
     Args:
         event_name: Unique identifier for the event.
         value_getter: Callable that returns the current value to check.
@@ -41,14 +44,14 @@ def create_threshold_event(
         poll_seconds: How often to check the condition.
         cooldown_seconds: Minimum time between fires to prevent spam.
         fire_when_edited: If True, fire immediately when edited (even if condition is False).
-        
+
     Returns:
         An ActivateOnConditionEvent configured for threshold monitoring.
-        
+
     Example:
         >>> def get_cpu_usage():
         ...     return psutil.cpu_percent()
-        >>> 
+        >>>
         >>> event = create_threshold_event(
         ...     event_name="high_cpu_alert",
         ...     value_getter=get_cpu_usage,
@@ -71,30 +74,30 @@ def create_threshold_event(
             self._state: dict[str, Any] = {
                 "last_fire_time": None,
             }
-        
+
         def check(self) -> bool:
             """Return True when value crosses threshold (with cooldown)."""
             now = time.time()
-            
+
             # Check cooldown
             if self._state["last_fire_time"] is not None:
                 elapsed = now - self._state["last_fire_time"]
                 if elapsed < cooldown_seconds:
                     return False
-            
+
             value = value_getter()
             current_threshold = self.get("threshold")
-            
+
             if above:
                 triggered = value > current_threshold
             else:
                 triggered = value < current_threshold
-            
+
             if triggered:
                 self._state["last_fire_time"] = now
-            
+
             return triggered
-    
+
     condition = ThresholdCondition()
     builder = FunctionMessageBuilder(
         builder=message_builder,
@@ -118,15 +121,15 @@ def _validate_file_exists(path: str) -> tuple[bool, str]:
 def create_file_change_event(
     event_name: str,
     file_path: str,
-    message_builder: Callable[[str], Union[None, TelegramMessage, str, List[TelegramMessage]]],
+    message_builder: Callable[[str], None | TelegramMessage | str | list[TelegramMessage]],
     poll_seconds: float = 30.0,
     fire_when_edited: bool = False,
 ) -> ActivateOnConditionEvent:
     """Create an event that fires when a file is modified.
-    
+
     Monitors a file's modification time and fires when it changes.
     The file path is editable at runtime.
-    
+
     Args:
         event_name: Unique identifier for the event.
         file_path: Path to the file to monitor. Editable at runtime.
@@ -136,7 +139,7 @@ def create_file_change_event(
     Returns:
         An ActivateOnConditionEvent configured for file monitoring.
         The event has an editable `file_path` field.
-        
+
     Example:
         >>> event = create_file_change_event(
         ...     event_name="config_changed",
@@ -161,43 +164,48 @@ def create_file_change_event(
                 "last_mtime": None,
                 "last_path": file_path,  # Track path changes
             }
-        
+
         def check(self) -> bool:
             """Return True when file modification time changes."""
             current_path = self.get("file_path")
-            
+
             # If path changed, reset state
             if current_path != self._state["last_path"]:
                 self._state["last_path"] = current_path
                 self._state["last_mtime"] = None
-            
+
             try:
                 current_mtime = os.path.getmtime(current_path)
             except OSError:
                 # File doesn't exist or not accessible
+                get_logger().debug(
+                    "FileChangeCondition.check: path_inaccessible path=%s",
+                    current_path,
+                    exc_info=True,
+                )
                 return False
-            
+
             if self._state["last_mtime"] is None:
                 # First check - record initial state, don't fire
                 self._state["last_mtime"] = current_mtime
                 return False
-            
+
             if current_mtime != self._state["last_mtime"]:
                 self._state["last_mtime"] = current_mtime
                 return True
-            
+
             return False
-    
+
     class FileChangeMessageBuilder(MessageBuilder):
         def __init__(self, condition: FileChangeCondition) -> None:
             self.editable_attributes = []
             self._edited = False
             self._condition = condition
-        
-        def build(self) -> Union[None, TelegramMessage, str, List[TelegramMessage]]:
+
+        def build(self) -> None | TelegramMessage | str | list[TelegramMessage]:
             current_path = self._condition.get("file_path")
             return message_builder(current_path)
-    
+
     condition = FileChangeCondition()
     builder = FileChangeMessageBuilder(condition)
     return ActivateOnConditionEvent(

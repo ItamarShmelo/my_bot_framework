@@ -1,9 +1,11 @@
 """Event system for the bot framework."""
 
+from __future__ import annotations
+
 import asyncio
 import inspect
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Coroutine, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from telegram import Update
 
@@ -18,14 +20,12 @@ from .polling import UpdatePollerMixin, set_next_update_id
 from .editable import EditableAttribute, EditableMixin
 
 if TYPE_CHECKING:
-    from .dialog import Dialog, DialogResponse
-
-MINIMAL_TIME_BETWEEN_MESSAGES = 5.0 / 60.0
+    from .dialog import Dialog
 
 
 class Condition(EditableMixin, ABC):
     """Editable condition interface for ActivateOnConditionEvent."""
-    
+
     @abstractmethod
     def check(self) -> bool:
         """Return True when the condition is satisfied."""
@@ -34,26 +34,25 @@ class Condition(EditableMixin, ABC):
 
 class MessageBuilder(EditableMixin, ABC):
     """Editable message builder interface for ActivateOnConditionEvent."""
-    
+
     @abstractmethod
-    def build(self) -> Union[None, TelegramMessage, str, List[TelegramMessage]]:
+    def build(self) -> None | TelegramMessage | str | list[TelegramMessage]:
         """Build message content for enqueueing."""
         ...
 
 
 class FunctionCondition(Condition):
     """Condition wrapper for no-arg callables."""
-    
-    def __init__(
-        self,
-        func: Callable[[], Any],
-    ) -> None:
+
+    _func: Callable[[], Any]
+
+    def __init__(self, func: Callable[[], Any]) -> None:
         """Initialize a function-based condition.
-        
+
         Args:
             func: No-argument callable that returns a truthy/falsy value.
                 The result is converted to bool via bool(func()).
-        
+
         Raises:
             TypeError: If func is not callable.
             ValueError: If func has any parameters.
@@ -64,9 +63,8 @@ class FunctionCondition(Condition):
         if signature.parameters:
             raise ValueError("FunctionCondition requires a no-arg callable")
         self.editable_attributes = []
-        self._edited = False
         self._func = func
-    
+
     def check(self) -> bool:
         """Check if the condition is satisfied."""
         return bool(self._func())
@@ -74,17 +72,19 @@ class FunctionCondition(Condition):
 
 class FunctionMessageBuilder(MessageBuilder):
     """Message builder wrapper for no-arg callables."""
-    
+
+    _builder: Callable[[], None | TelegramMessage | str | list[TelegramMessage]]
+
     def __init__(
         self,
-        builder: Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
+        builder: Callable[[], None | TelegramMessage | str | list[TelegramMessage]],
     ) -> None:
         """Initialize a function-based message builder.
-        
+
         Args:
             builder: No-argument callable that returns a message or None.
-                Can return str, TelegramMessage, List[TelegramMessage], or None.
-        
+                Can return str, TelegramMessage, list[TelegramMessage], or None.
+
         Raises:
             TypeError: If builder is not callable.
             ValueError: If builder has any parameters.
@@ -95,17 +95,27 @@ class FunctionMessageBuilder(MessageBuilder):
         if signature.parameters:
             raise ValueError("FunctionMessageBuilder requires a no-arg callable")
         self.editable_attributes = []
-        self._edited = False
         self._builder = builder
-    
-    def build(self) -> Union[None, TelegramMessage, str, List[TelegramMessage]]:
+
+    def build(self) -> None | TelegramMessage | str | list[TelegramMessage]:
         """Build the message content."""
         return self._builder()
 
 
 class Event:
-    """Base class for monitoring events."""
+    """Base class for monitoring events.
+
+    Each event must have a unique `event_name` within a `BotApplication`.
+    """
+
+    event_name: str
+
     def __init__(self, event_name: str) -> None:
+        """Initialize the event with its unique application-level name.
+
+        Args:
+            event_name: Unique event name within the owning application.
+        """
         self.event_name = event_name
 
     async def submit(self, stop_event: asyncio.Event) -> None:
@@ -115,23 +125,29 @@ class Event:
 
 class ActivateOnConditionEvent(Event, EditableMixin):
     """Poll a condition and enqueue messages when it becomes truthy.
-    
+
     Implements Editable mixin for runtime parameter editing.
     """
+
+    condition: Condition
+    message_builder: MessageBuilder
+    poll_seconds: float
+    fire_when_edited: bool
+    _editable_attributes: dict[str, EditableAttribute]
 
     def __init__(
         self,
         event_name: str,
         condition: Condition,
         message_builder: MessageBuilder,
-        editable_attributes: Optional[List[EditableAttribute]] = None,
+        editable_attributes: list[EditableAttribute] | None = None,
         poll_seconds: float = 5.0,
         fire_when_edited: bool = True,
     ) -> None:
         """Initialize the condition event.
-        
+
         Args:
-            event_name: Unique identifier for the event.
+            event_name: Unique identifier for the event within the application.
             condition: Condition instance to check.
             message_builder: MessageBuilder instance for creating messages.
             editable_attributes: Optional list of editable attributes for the event itself.
@@ -147,14 +163,13 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         self.condition = condition
         self.message_builder = message_builder
         self.editable_attributes = editable_attributes or []
-        self._edited = False  # Initialize instance-level edited flag
         self.poll_seconds = poll_seconds
         self.fire_when_edited = fire_when_edited
 
     @property
-    def editable_attributes(self) -> dict[str, "EditableAttribute"]:
+    def editable_attributes(self) -> dict[str, EditableAttribute]:
         """Combined editable attributes from event, condition, and builder.
-        
+
         Returns a dict with:
         - Event's own attributes (no prefix)
         - Condition attributes with 'condition.' prefix
@@ -173,7 +188,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         return combined
 
     @editable_attributes.setter
-    def editable_attributes(self, attributes: List["EditableAttribute"]) -> None:
+    def editable_attributes(self, attributes: list[EditableAttribute]) -> None:
         """Initialize the event's own editable attributes (not condition/builder)."""
         self._init_editable_attributes(attributes)
 
@@ -193,7 +208,7 @@ class ActivateOnConditionEvent(Event, EditableMixin):
         raise KeyError(
             "Unknown editable attribute. Use 'condition.<name>' or 'builder.<name>'."
         )
-    
+
     def get(self, name: str) -> Any:
         """Get an attribute value from event, condition, or builder."""
         if name.startswith("condition."):
@@ -208,36 +223,42 @@ class ActivateOnConditionEvent(Event, EditableMixin):
 
     async def submit(self, stop_event: asyncio.Event) -> None:
         logger = get_logger()
-        logger.info("[%s] event_started poll_seconds=%.1f", self.event_name, self.poll_seconds)
-        
+        logger.info("ActivateOnConditionEvent.submit: started event=%s poll_seconds=%.1f", self.event_name, self.poll_seconds)
+
         while not stop_event.is_set():
-            logger.debug("[%s] checking_condition", self.event_name)
-            
+            logger.debug("ActivateOnConditionEvent.submit: checking_condition event=%s", self.event_name)
+
             was_edited = self.edited
             if was_edited:
                 self.edited = False
-            
-            condition_result = await asyncio.to_thread(
-                self.condition.check,
-            )
-            
+
+            condition_result = await asyncio.to_thread(self.condition.check)
+
             # Fire if condition is true, or if edited and fire_when_edited is enabled
             should_fire = condition_result or (was_edited and self.fire_when_edited)
+            logger.debug(
+                "ActivateOnConditionEvent.submit: condition_checked event=%s condition_result=%s was_edited=%s should_fire=%s",
+                self.event_name,
+                condition_result,
+                was_edited,
+                should_fire,
+            )
             if should_fire:
                 message = await _maybe_await(self.message_builder.build)
                 if message:
-                    logger.info("event_message_queued event_name=%s", self.event_name)
+                    logger.debug("ActivateOnConditionEvent.submit: sending event=%s", self.event_name)
                     await get_app().send_messages(message)
+                    logger.info("ActivateOnConditionEvent.submit: sent event=%s", self.event_name)
                 else:
-                    logger.warning("[%s] message_builder_returned_none", self.event_name)
+                    logger.warning("ActivateOnConditionEvent.submit: message_builder_returned_none event=%s", self.event_name)
             await _wait_or_stop(stop_event, self.poll_seconds)
-        
-        logger.info("[%s] event_stopped", self.event_name)
+
+        logger.info("ActivateOnConditionEvent.submit: stopped event=%s", self.event_name)
 
 
 class CommandsEvent(Event, UpdatePollerMixin):
     """Listen for Telegram commands and enqueue responses.
-    
+
     Inherits UpdatePollerMixin to use the standardized polling pattern.
     This is a simple router that:
     1. Polls for updates using UpdatePollerMixin.poll()
@@ -247,16 +268,27 @@ class CommandsEvent(Event, UpdatePollerMixin):
     5. Ignores non-command messages (no "/" prefix)
     """
 
+    commands: list[Command]
+    poll_seconds: float
+    _stop_event: asyncio.Event | None
+
     def __init__(
         self,
         event_name: str,
-        commands: List["Command"],
+        commands: list[Command],
         poll_seconds: float = 2.0,
     ) -> None:
+        """Initialize the commands event.
+
+        Args:
+            event_name: Unique identifier for the event.
+            commands: List of Command instances to handle.
+            poll_seconds: How often to poll for updates (default 2.0).
+        """
         super().__init__(event_name)
         self.commands = commands
         self.poll_seconds = poll_seconds
-        self._stop_event: Optional[asyncio.Event] = None
+        self._stop_event = None
 
     # UpdatePollerMixin abstract methods
     def should_stop_polling(self) -> bool:
@@ -268,13 +300,13 @@ class CommandsEvent(Event, UpdatePollerMixin):
         callback_query = update.callback_query
         if callback_query is None:
             return
-        logger.debug("stale_callback_received id=%s", callback_query.id)
-        
+        logger.debug("CommandsEvent.handle_callback_update: stale_callback id=%s", callback_query.id)
+
         await get_app().send_messages(TelegramCallbackAnswerMessage(
             callback_query.id,
             text="No active session.",
         ))
-        
+
         if callback_query.message:
             await get_app().send_messages(
                 TelegramRemoveKeyboardMessage(callback_query.message.message_id)
@@ -285,21 +317,19 @@ class CommandsEvent(Event, UpdatePollerMixin):
         if update.message is None or update.message.text is None:
             return
         text = update.message.text.strip()
-        
+
         if not text.startswith("/"):
             return
-        
+
         command = self._match_command(text)
+        logger = get_logger()
         if command:
-            logger = get_logger()
-            logger.info("command_matched command=%s", command.command)
+            logger.info("CommandsEvent.handle_text_update: matched command=%s", command.command)
             # Set offset past this command before running, so command won't see itself as input
             set_next_update_id(update.update_id + 1)
             await command.run()
         else:
-            logger = get_logger()
-            logger.info("unknown_command text=%s", text)
-            logger.info("event_message_queued event_name=%s", self.event_name)
+            logger.info("CommandsEvent.handle_text_update: unknown_command text=%s", text)
             await get_app().send_messages(
                 TelegramTextMessage(self._commands_help_text(text)),
             )
@@ -309,7 +339,7 @@ class CommandsEvent(Event, UpdatePollerMixin):
         self._stop_event = stop_event
         await self.poll()
 
-    def _match_command(self, text: str) -> Optional["Command"]:
+    def _match_command(self, text: str) -> Command | None:
         """Match the first token against known commands."""
         command_token = text.split(maxsplit=1)[0]
         for command in self.commands:
@@ -325,6 +355,7 @@ class CommandsEvent(Event, UpdatePollerMixin):
         ]
         for command in self.commands:
             lines.append(f"{command.command}: {command.description}")
+        lines.append("/terminate: Terminate the bot and shut down. (can be invoked anytime)")
         return "\n".join(lines)
 
 
@@ -335,11 +366,18 @@ async def _wait_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=seconds)
     except asyncio.TimeoutError:
+        # NOTE: intentionally omitting exc_info=True here — the TimeoutError
+        # traceback is noise for an expected timeout.  This deviates from the
+        # project logging guideline; do NOT re-add exc_info in later edits.
+        get_logger().debug(
+            "_wait_or_stop: timeout_expired seconds=%.1f (expected)",
+            seconds,
+        )
         return
 
 
 async def _maybe_await(
-    func: Union[Callable[..., Any], Callable[..., Coroutine[Any, Any, Any]]],
+    func: Callable[..., Any] | Callable[..., Coroutine[Any, Any, Any]],
     *args: Any,
     **kwargs: Any,
 ) -> Any:
@@ -352,19 +390,28 @@ async def _maybe_await(
 
 class Command(ABC):
     """Base class for Telegram commands (async).
-    
+
     Commands run asynchronously until complete. Simple commands complete
     immediately, dialog commands run their own update loop.
     """
 
+    command: str
+    description: str
+
     def __init__(self, command: str, description: str) -> None:
+        """Initialize the command.
+
+        Args:
+            command: The command string (e.g., "/start").
+            description: Human-readable description for help text.
+        """
         self.command = command
         self.description = description
 
     @abstractmethod
     async def run(self) -> Any:
         """Run the command until completion.
-        
+
         Returns:
             Result (command-specific, or None).
         """
@@ -373,63 +420,83 @@ class Command(ABC):
 
 class SimpleCommand(Command):
     """Command that completes immediately by sending a result.
-    
+
     The message_builder must be a callable that takes no arguments and returns
     a message (str, TelegramMessage, list of messages, or None).
     """
+
+    message_builder: (
+        Callable[[], None | TelegramMessage | str | list[TelegramMessage]]
+        | Callable[[], Coroutine[Any, Any, None | TelegramMessage | str | list[TelegramMessage]]]
+    )
 
     def __init__(
         self,
         command: str,
         description: str,
-        message_builder: Union[
-            Callable[[], Union[None, TelegramMessage, str, List[TelegramMessage]]],
-            Callable[[], Coroutine[Any, Any, Union[None, TelegramMessage, str, List[TelegramMessage]]]],
-        ],
+        message_builder: (
+            Callable[[], None | TelegramMessage | str | list[TelegramMessage]]
+            | Callable[[], Coroutine[Any, Any, None | TelegramMessage | str | list[TelegramMessage]]]
+        ),
     ) -> None:
+        """Initialize the simple command.
+
+        Args:
+            command: The command string (e.g., "/start").
+            description: Human-readable description for help text.
+            message_builder: Callable returning message content (sync or async).
+        """
         super().__init__(command, description)
         self.message_builder = message_builder
 
     async def run(self) -> Any:
         """Execute message builder and send result, then complete."""
         logger = get_logger()
-        logger.info("simple_command_executed command=%s", self.command)
+        logger.info("SimpleCommand.run: executed command=%s", self.command)
         result = await _maybe_await(self.message_builder)
         if result:
-            logger.info("command_message_sent command=%s", self.command)
+            logger.debug("SimpleCommand.run: sending message command=%s", self.command)
             await get_app().send_messages(result)
+            logger.info("SimpleCommand.run: sent command=%s", self.command)
         return None
 
 
 class DialogCommand(Command):
     """Command that runs an interactive dialog.
-    
+
     The dialog handles its own update polling via UpdatePollerMixin.
     DialogCommand simply calls dialog.start() and returns the final offset.
     """
+
+    dialog: Dialog
 
     def __init__(
         self,
         command: str,
         description: str,
-        dialog: "Dialog",
+        dialog: Dialog,
     ) -> None:
+        """Initialize the dialog command.
+
+        Args:
+            command: The command string (e.g., "/setup").
+            description: Human-readable description for help text.
+            dialog: The Dialog instance to run when command is invoked.
+        """
         super().__init__(command, description)
         self.dialog = dialog
 
     async def run(self) -> Any:
         """Run the dialog until complete.
-        
+
         The dialog handles its own polling via start().
-        
+
         Returns:
             DialogResult.
         """
         logger = get_logger()
-        logger.info("dialog_command_started command=%s", self.command)
-        
+        logger.info("DialogCommand.run: started command=%s", self.command)
         # start() handles reset internally - no need to call reset() explicitly
         result = await self.dialog.start({})
-        
-        logger.info("dialog_command_completed command=%s result=%s", self.command, result)
+        logger.info("DialogCommand.run: completed command=%s result=%s", self.command, result)
         return result

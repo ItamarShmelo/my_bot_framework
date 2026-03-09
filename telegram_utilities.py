@@ -1,59 +1,51 @@
 """Telegram message wrappers for sending various message types."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
+from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Final, Optional
+from typing import Final
 
 from telegram import Bot, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import MessageLimit, ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError, TimedOut
 
+from .retry_utilities import (
+    DEFAULT_RETRY_MAX_ATTEMPTS,
+    DEFAULT_RETRY_AFTER_MAX_WAIT_SECONDS,
+    DEFAULT_RETRY_BASE_DELAY_SECONDS,
+    RetryAfterExceededError,
+    run_with_transient_retry,
+)
 from .utilities import divide_message_to_chunks
 
 
 # Delay between sending message chunks to avoid rate limiting
-MESSAGE_SEND_DELAY_SECONDS = 0.05
+MESSAGE_SEND_DELAY_SECONDS = 0.2
 
 # Reserved space for chunk prefix like "(99/99):\n" to avoid exceeding message limits
 CHUNK_PREFIX_OVERHEAD = 20
 
+# Maximum number of send attempts for transient send errors
+SEND_MAX_ATTEMPTS: int = DEFAULT_RETRY_MAX_ATTEMPTS
 
-class InvalidHtmlError(Exception):
-    """Raised when message text contains invalid HTML that Telegram cannot parse.
+# Base delay in seconds for exponential backoff with jitter (delay = base * 2^(attempt-1) + uniform jitter)
+SEND_RETRY_BASE_DELAY_SECONDS: float = DEFAULT_RETRY_BASE_DELAY_SECONDS
 
-    Users should escape their text using html.escape() before passing it to
-    TelegramMessage classes if the text may contain HTML special characters.
+# Maximum retry_after wait we're willing to tolerate before raising
+RATE_LIMIT_MAX_WAIT_SECONDS: float = DEFAULT_RETRY_AFTER_MAX_WAIT_SECONDS
+
+
+class TelegramMessage(ABC):
+    """Abstract base class for Telegram messages with a send method.
+
+    Subclasses must override ``_send_impl()`` with their happy-path send logic.
+    ``BadRequest`` is treated as fatal and is re-raised (after logging with an
+    HTML-escape hint). All other non-transient exceptions are logged at ERROR
+    level and swallowed so the bot keeps running.
     """
-
-    def __init__(self, original_error: Exception, text: str) -> None:
-        """Create an InvalidHtmlError with context about the failure.
-
-        Args:
-            original_error: The original Telegram API error.
-            text: The text that caused the parsing error (truncated for display).
-        """
-        truncated_text = text[:100] + "..." if len(text) > 100 else text
-        super().__init__(
-            f"Message contains invalid HTML that Telegram cannot parse. "
-            f"Use html.escape() on your text before passing it to TelegramMessage. "
-            f"Original error: {original_error}. "
-            f"Text (truncated): {truncated_text!r}"
-        )
-        self.original_error = original_error
-        self.text = text
-
-
-def _is_html_parse_error(exc: Exception) -> bool:
-    """Check if an exception is an HTML parsing error from Telegram."""
-    if not isinstance(exc, BadRequest):
-        return False
-    error_msg = str(exc).lower()
-    return "can't parse entities" in error_msg or "parse entities" in error_msg
-
-
-class TelegramMessage:
-    """Base class for Telegram messages with a send method."""
 
     async def send(
         self,
@@ -61,8 +53,82 @@ class TelegramMessage:
         chat_id: str,
         logger: logging.Logger,
     ) -> None:
-        """Send this message via a provided bot and chat id."""
-        raise NotImplementedError
+        """Send this message, handling errors uniformly with retry logic.
+
+        Transient errors (``NetworkError``, ``TimedOut``) are retried up to
+        ``SEND_MAX_ATTEMPTS`` times with exponential backoff (attempts start
+        at 1). When all retries are exhausted, they are logged at ERROR level
+        and swallowed. ``RetryAfter`` errors wait the duration specified by
+        Telegram plus the configured default buffer
+        (``DEFAULT_RETRY_AFTER_BUFFER_SECONDS``) before retrying and do
+        **not** count towards the attempt limit; if the wait exceeds
+        ``RATE_LIMIT_MAX_WAIT_SECONDS``, a RuntimeError is raised.
+        ``BadRequest`` is re-raised as a fatal error after logging with an
+        HTML-escape hint. All other non-transient exceptions are logged at
+        ERROR level and swallowed so the bot keeps running.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID to send the message to.
+            logger: Logger for recording send status.
+        """
+        class_name: str = type(self).__name__
+
+        logger.debug("%s.send: attempting_send attempt=1/%d", class_name, SEND_MAX_ATTEMPTS)
+
+        try:
+            await run_with_transient_retry(
+                lambda: self._send_impl(bot, chat_id, logger),
+            )
+        except RetryAfterExceededError:
+            logger.error(
+                "%s.send: rate_limit_exceeded max_wait=%.1fs",
+                class_name,
+                RATE_LIMIT_MAX_WAIT_SECONDS,
+                exc_info=True,
+            )
+            raise RuntimeError(
+                f"{class_name}.send: rate limit exceeded max wait "
+                f"{RATE_LIMIT_MAX_WAIT_SECONDS:.1f}s"
+            )
+        except BadRequest:
+            logger.error(
+                "%s.send: bad_request Did you send an invalid HTML message? "
+                "Try using html.escape().",
+                class_name,
+                exc_info=True,
+            )
+            raise
+        except (TimedOut, NetworkError):
+            logger.error(
+                "%s.send: all_attempts_exhausted max_attempts=%d",
+                class_name,
+                SEND_MAX_ATTEMPTS,
+                exc_info=True,
+            )
+        except Exception:
+            logger.error(
+                "%s.send: permanent_error_swallowed",
+                class_name,
+                exc_info=True,
+            )
+            return
+
+    @abstractmethod
+    async def _send_impl(
+        self,
+        bot: Bot,
+        chat_id: str,
+        logger: logging.Logger,
+    ) -> None:
+        """Subclasses override this with the actual send logic.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID to send the message to.
+            logger: Logger for recording send status.
+        """
+        ...
 
 
 class TelegramTextMessage(TelegramMessage):
@@ -74,46 +140,50 @@ class TelegramTextMessage(TelegramMessage):
         """Create a text message payload."""
         self.message = message
 
-    async def send(
+    async def _send_impl(
         self,
         bot: Bot,
         chat_id: str,
         logger: logging.Logger,
     ) -> None:
-        """Send a chunked text message."""
-        try:
-            max_chunk_size: Final[int] = MessageLimit.MAX_TEXT_LENGTH - CHUNK_PREFIX_OVERHEAD
-            chunks = divide_message_to_chunks(self.message, max_chunk_size)
+        """Send a chunked text message.
 
-            if not chunks:
-                chunks = [""]
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID to send the message to.
+            logger: Logger for recording send status.
+        """
+        max_chunk_size: Final[int] = MessageLimit.MAX_TEXT_LENGTH - CHUNK_PREFIX_OVERHEAD
+        chunks = divide_message_to_chunks(self.message, max_chunk_size)
 
-            # Add part numbers for multi-chunk messages
-            if len(chunks) > 1:
-                total = len(chunks)
-                chunks = [
-                    f"({index}/{total}):\n{chunk}"
-                    for index, chunk in enumerate(chunks, start=1)
-                ]
+        if not chunks:
+            chunks = [""]
 
-            for chunk in chunks:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=chunk,
-                    parse_mode=ParseMode.HTML,
-                )
-                await asyncio.sleep(MESSAGE_SEND_DELAY_SECONDS)
+        # Add part numbers for multi-chunk messages
+        if len(chunks) > 1:
+            total = len(chunks)
+            chunks = [
+                f"({index}/{total}):\n{chunk}"
+                for index, chunk in enumerate(chunks, start=1)
+            ]
 
-            logger.info(
-                'message_sent chunks=%d message="%s"',
-                len(chunks),
-                self.message[:200],
+        logger.debug(
+            "TelegramTextMessage._send_impl: sending chunks=%d",
+            len(chunks),
+        )
+        for chunk in chunks:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=chunk,
+                parse_mode=ParseMode.HTML,
             )
-        except Exception as exc:
-            if _is_html_parse_error(exc):
-                raise InvalidHtmlError(exc, self.message) from exc
-            logger.error("telegram_send_message_failed error=%s", exc)
-            await _try_send_error_message(bot, chat_id, logger, exc)
+            await asyncio.sleep(MESSAGE_SEND_DELAY_SECONDS)
+
+        logger.info(
+            'TelegramTextMessage._send_impl: sent chunks=%d message="%.200s"',
+            len(chunks),
+            self.message,
+        )
 
 
 class TelegramImageMessage(TelegramMessage):
@@ -127,30 +197,30 @@ class TelegramImageMessage(TelegramMessage):
         self.image_path = image_path
         self.caption = caption
 
-    async def send(
+    async def _send_impl(
         self,
         bot: Bot,
         chat_id: str,
         logger: logging.Logger,
     ) -> None:
-        """Send an image with optional caption."""
-        try:
-            image_path = Path(self.image_path)
-            logger.debug('image_send_start path="%s"', image_path)
-            with image_path.open("rb") as handle:
-                caption_text = self.caption or ""
-                await bot.send_photo(
-                    chat_id=chat_id,
-                    photo=handle,
-                    caption=caption_text if caption_text else None,
-                    parse_mode=ParseMode.HTML if caption_text else None,
-                )
-            logger.info('image_sent path="%s"', image_path)
-        except Exception as exc:
-            if _is_html_parse_error(exc):
-                raise InvalidHtmlError(exc, self.caption or "") from exc
-            logger.error("telegram_send_photo_failed error=%s", exc)
-            await _try_send_error_message(bot, chat_id, logger, exc)
+        """Send an image with optional caption.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID to send the image to.
+            logger: Logger for recording send status.
+        """
+        image_path = Path(self.image_path)
+        logger.debug('TelegramImageMessage._send_impl: sending path="%s"', image_path)
+        with image_path.open("rb") as handle:
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=handle,
+                caption=self.caption,
+                parse_mode=ParseMode.HTML,
+                write_timeout=60,
+            )
+        logger.info('TelegramImageMessage._send_impl: sent path="%s"', image_path)
 
 
 class TelegramDocumentMessage(TelegramMessage):
@@ -169,7 +239,7 @@ class TelegramDocumentMessage(TelegramMessage):
         self.file_path = file_path
         self.caption = caption
 
-    async def send(
+    async def _send_impl(
         self,
         bot: Bot,
         chat_id: str,
@@ -182,72 +252,75 @@ class TelegramDocumentMessage(TelegramMessage):
             chat_id: The chat ID to send the document to.
             logger: Logger for recording send status.
         """
-        try:
-            document_path = Path(self.file_path)
-            logger.debug('document_send_start path="%s"', document_path)
-            with document_path.open("rb") as handle:
-                caption_text = self.caption or ""
-                await bot.send_document(
-                    chat_id=chat_id,
-                    document=handle,
-                    caption=caption_text if caption_text else None,
-                    parse_mode=ParseMode.HTML if caption_text else None,
-                )
-            logger.info('document_sent path="%s"', document_path)
-        except Exception as exc:
-            if _is_html_parse_error(exc):
-                raise InvalidHtmlError(exc, self.caption or "") from exc
-            logger.error("telegram_send_document_failed error=%s", exc)
-            await _try_send_error_message(bot, chat_id, logger, exc)
+        document_path = Path(self.file_path)
+        logger.debug('TelegramDocumentMessage._send_impl: sending path="%s"', document_path)
+        with document_path.open("rb") as handle:
+            await bot.send_document(
+                chat_id=chat_id,
+                document=handle,
+                caption=self.caption,
+                parse_mode=ParseMode.HTML,
+                write_timeout=120,
+            )
+        logger.info('TelegramDocumentMessage._send_impl: sent path="%s"', document_path)
 
 
 class TelegramOptionsMessage(TelegramMessage):
     """Message with inline keyboard buttons."""
 
+    text: str
+    reply_markup: InlineKeyboardMarkup
+    sent_message: Message | None
+
     def __init__(self, text: str, reply_markup: InlineKeyboardMarkup) -> None:
         """Create a message with inline keyboard.
-        
+
         Args:
             text: The message text.
             reply_markup: InlineKeyboardMarkup for the buttons.
         """
         self.text = text
         self.reply_markup = reply_markup
-        self.sent_message: Optional[Message] = None
+        self.sent_message = None
 
-    async def send(
+    async def _send_impl(
         self,
         bot: Bot,
         chat_id: str,
         logger: logging.Logger,
     ) -> None:
-        """Send a message with inline keyboard buttons."""
-        try:
-            self.sent_message = await bot.send_message(
-                chat_id=chat_id,
-                text=self.text,
-                reply_markup=self.reply_markup,
-                parse_mode=ParseMode.HTML,
-            )
-            logger.info('options_message_sent')
-        except Exception as exc:
-            if _is_html_parse_error(exc):
-                raise InvalidHtmlError(exc, self.text) from exc
-            logger.error("telegram_options_message_failed error=%s", exc)
-            await _try_send_error_message(bot, chat_id, logger, exc)
+        """Send a message with inline keyboard buttons.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID to send the message to.
+            logger: Logger for recording send status.
+        """
+        logger.debug("TelegramOptionsMessage._send_impl: sending")
+        self.sent_message = await bot.send_message(
+            chat_id=chat_id,
+            text=self.text,
+            reply_markup=self.reply_markup,
+            parse_mode=ParseMode.HTML,
+        )
+        logger.info("TelegramOptionsMessage._send_impl: sent")
 
 
 class TelegramEditMessage(TelegramMessage):
     """Edit an existing message (update text and/or keyboard)."""
 
+    message_id: int
+    text: str
+    reply_markup: InlineKeyboardMarkup | None
+
     def __init__(
         self,
         message_id: int,
         text: str,
-        reply_markup: Optional[InlineKeyboardMarkup] = None,
+        reply_markup: InlineKeyboardMarkup | None = None,
     ) -> None:
         """Create an edit message payload.
-        
+
         Args:
             message_id: The ID of the message to edit.
             text: The new text content.
@@ -257,32 +330,37 @@ class TelegramEditMessage(TelegramMessage):
         self.text = text
         self.reply_markup = reply_markup
 
-    async def send(
+    async def _send_impl(
         self,
         bot: Bot,
         chat_id: str,
         logger: logging.Logger,
     ) -> None:
-        """Edit an existing message's text and/or keyboard."""
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=self.message_id,
-                text=self.text,
-                reply_markup=self.reply_markup,
-                parse_mode=ParseMode.HTML,
-            )
-            logger.info('message_edited message_id=%d', self.message_id)
-        except Exception as exc:
-            if _is_html_parse_error(exc):
-                raise InvalidHtmlError(exc, self.text) from exc
-            logger.error("telegram_edit_message_failed error=%s", exc)
+        """Edit an existing message's text and/or keyboard.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID of the message to edit.
+            logger: Logger for recording send status.
+        """
+        logger.debug("TelegramEditMessage._send_impl: editing message_id=%d", self.message_id)
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=self.message_id,
+            text=self.text,
+            reply_markup=self.reply_markup,
+            parse_mode=ParseMode.HTML,
+        )
+        logger.info("TelegramEditMessage._send_impl: edited message_id=%d", self.message_id)
 
 
 class TelegramCallbackAnswerMessage(TelegramMessage):
     """Answer a callback query (acknowledge button press)."""
 
-    def __init__(self, callback_query_id: str, text: Optional[str] = None) -> None:
+    callback_query_id: str
+    text: str | None
+
+    def __init__(self, callback_query_id: str, text: str | None = None) -> None:
         """Create a callback answer payload.
 
         Args:
@@ -292,25 +370,37 @@ class TelegramCallbackAnswerMessage(TelegramMessage):
         self.callback_query_id = callback_query_id
         self.text = text
 
-    async def send(
+    async def _send_impl(
         self,
         bot: Bot,
         chat_id: str,
         logger: logging.Logger,
     ) -> None:
-        """Answer a callback query to acknowledge button press."""
-        try:
-            await bot.answer_callback_query(
-                callback_query_id=self.callback_query_id,
-                text=self.text,
-            )
-            logger.debug('callback_answered id=%s', self.callback_query_id)
-        except Exception as exc:
-            logger.error("telegram_callback_answer_failed error=%s", exc)
+        """Answer a callback query to acknowledge button press.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID (unused for callback answers).
+            logger: Logger for recording send status.
+        """
+        logger.debug(
+            "TelegramCallbackAnswerMessage._send_impl: answering callback_query_id=%s",
+            self.callback_query_id,
+        )
+        await bot.answer_callback_query(
+            callback_query_id=self.callback_query_id,
+            text=self.text,
+        )
+        logger.info(
+            "TelegramCallbackAnswerMessage._send_impl: answered id=%s",
+            self.callback_query_id,
+        )
 
 
 class TelegramRemoveKeyboardMessage(TelegramMessage):
     """Remove inline keyboard from an existing message."""
+
+    message_id: int
 
     def __init__(self, message_id: int) -> None:
         """Create a remove keyboard payload.
@@ -320,24 +410,42 @@ class TelegramRemoveKeyboardMessage(TelegramMessage):
         """
         self.message_id = message_id
 
-    async def send(
+    async def _send_impl(
         self,
         bot: Bot,
         chat_id: str,
         logger: logging.Logger,
     ) -> None:
-        """Remove the inline keyboard from a message."""
+        """Remove the inline keyboard from a message.
+
+        Suppresses 'message is not modified' errors since the keyboard
+        may already have been removed. Re-raises all other errors for
+        the base class to handle.
+
+        Args:
+            bot: The Telegram Bot instance.
+            chat_id: The chat ID of the message.
+            logger: Logger for recording send status.
+        """
         try:
             await bot.edit_message_reply_markup(
                 chat_id=chat_id,
                 message_id=self.message_id,
                 reply_markup=None,
             )
-            logger.debug('keyboard_removed message_id=%d', self.message_id)
+            logger.debug(
+                "TelegramRemoveKeyboardMessage._send_impl: removed message_id=%d",
+                self.message_id,
+            )
         except Exception as exc:
-            # Ignore "message not modified" errors (keyboard already removed)
-            if "message is not modified" not in str(exc).lower():
-                logger.error("telegram_remove_keyboard_failed error=%s", exc)
+            if "message is not modified" in str(exc).lower():
+                logger.debug(
+                    "TelegramRemoveKeyboardMessage._send_impl: message_not_modified message_id=%d (expected)",
+                    self.message_id,
+                    exc_info=True,
+                )
+                return  # Expected -- keyboard was already removed
+            raise  # Let the base class handle other errors
 
 
 class TelegramReplyKeyboardMessage(TelegramMessage):
@@ -347,7 +455,7 @@ class TelegramReplyKeyboardMessage(TelegramMessage):
     keyboard: list[list[str]]
     resize_keyboard: bool
     one_time_keyboard: bool
-    sent_message: Optional[Message]
+    sent_message: Message | None
 
     def __init__(
         self,
@@ -370,7 +478,7 @@ class TelegramReplyKeyboardMessage(TelegramMessage):
         self.one_time_keyboard = one_time_keyboard
         self.sent_message = None
 
-    async def send(
+    async def _send_impl(
         self,
         bot: Bot,
         chat_id: str,
@@ -383,31 +491,26 @@ class TelegramReplyKeyboardMessage(TelegramMessage):
             chat_id: The chat ID to send the message to.
             logger: Logger for recording send status.
         """
-        try:
-            reply_markup = ReplyKeyboardMarkup(
-                self.keyboard,
-                resize_keyboard=self.resize_keyboard,
-                one_time_keyboard=self.one_time_keyboard,
-            )
-            self.sent_message = await bot.send_message(
-                chat_id=chat_id,
-                text=self.text,
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.HTML,
-            )
-            logger.info('reply_keyboard_message_sent')
-        except Exception as exc:
-            if _is_html_parse_error(exc):
-                raise InvalidHtmlError(exc, self.text) from exc
-            logger.error("telegram_reply_keyboard_message_failed error=%s", exc)
-            await _try_send_error_message(bot, chat_id, logger, exc)
+        logger.debug("TelegramReplyKeyboardMessage._send_impl: sending")
+        reply_markup = ReplyKeyboardMarkup(
+            self.keyboard,
+            resize_keyboard=self.resize_keyboard,
+            one_time_keyboard=self.one_time_keyboard,
+        )
+        self.sent_message = await bot.send_message(
+            chat_id=chat_id,
+            text=self.text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML,
+        )
+        logger.info("TelegramReplyKeyboardMessage._send_impl: sent")
 
 
 class TelegramRemoveReplyKeyboardMessage(TelegramMessage):
     """Remove the persistent reply keyboard."""
 
     text: str
-    sent_message: Optional[Message]
+    sent_message: Message | None
 
     def __init__(self, text: str = "Keyboard removed.") -> None:
         """Create a message that removes the reply keyboard.
@@ -418,7 +521,7 @@ class TelegramRemoveReplyKeyboardMessage(TelegramMessage):
         self.text = text
         self.sent_message = None
 
-    async def send(
+    async def _send_impl(
         self,
         bot: Bot,
         chat_id: str,
@@ -431,33 +534,11 @@ class TelegramRemoveReplyKeyboardMessage(TelegramMessage):
             chat_id: The chat ID to send the message to.
             logger: Logger for recording send status.
         """
-        try:
-            self.sent_message = await bot.send_message(
-                chat_id=chat_id,
-                text=self.text,
-                reply_markup=ReplyKeyboardRemove(),
-                parse_mode=ParseMode.HTML,
-            )
-            logger.info('reply_keyboard_removed')
-        except Exception as exc:
-            if _is_html_parse_error(exc):
-                raise InvalidHtmlError(exc, self.text) from exc
-            logger.error("telegram_remove_reply_keyboard_failed error=%s", exc)
-            await _try_send_error_message(bot, chat_id, logger, exc)
-
-
-async def _try_send_error_message(
-    bot: Bot,
-    chat_id: str,
-    logger: logging.Logger,
-    exc: Exception,
-) -> None:
-    """Best-effort error notification without raising further errors."""
-    try:
-        # Send without parse_mode to avoid any HTML parsing issues in error messages
-        await bot.send_message(
+        logger.debug("TelegramRemoveReplyKeyboardMessage._send_impl: sending")
+        self.sent_message = await bot.send_message(
             chat_id=chat_id,
-            text=f"Error while sending message: {exc}",
+            text=self.text,
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode=ParseMode.HTML,
         )
-    except Exception as error_exc:
-        logger.error("telegram_error_message_failed error=%s", error_exc)
+        logger.info("TelegramRemoveReplyKeyboardMessage._send_impl: sent")

@@ -12,12 +12,20 @@ Usage:
         logger=your_logger,
     )
     app.register_event(my_event)
+    app.remove_event("my_event_name")  # Raises KeyError if missing
     app.register_command(my_command)
     await app.run()
+
+Event names must be unique within a BotApplication instance.
+`register_event()` raises ValueError for duplicates, and `remove_event()`
+raises KeyError when the event name does not exist. Calling
+`remove_event()` during `run()` intentionally cancels only that event's
+task and is treated as normal lifecycle management rather than a fatal
+error.
 """
 
-from .bot_application import (
-    BotApplication,
+from .bot_application import BotApplication
+from .accessors import (
     get_app,
     get_bot,
     get_chat_id,
@@ -59,25 +67,21 @@ from .telegram_utilities import (
     TelegramRemoveKeyboardMessage,
     TelegramReplyKeyboardMessage,
     TelegramRemoveReplyKeyboardMessage,
-    InvalidHtmlError,
+    SEND_MAX_ATTEMPTS,
+    SEND_RETRY_BASE_DELAY_SECONDS,
 )
 from .dialog import (
     Dialog,
     DialogState,
-    DialogResponse,
     DialogResult,
     DialogHandler,
     KeyboardType,
-    # Inline keyboard dialogs (new names)
-    InlineKeyboardChoiceDialog,
-    InlineKeyboardConfirmDialog,
-    InlineKeyboardPaginatedChoiceDialog,
-    InlineKeyboardChoiceBranchDialog,
-    # Reply keyboard dialogs
-    ReplyKeyboardChoiceDialog,
-    ReplyKeyboardConfirmDialog,
-    ReplyKeyboardPaginatedChoiceDialog,
-    ReplyKeyboardChoiceBranchDialog,
+    BranchesType,
+    # Dialog classes
+    ChoiceDialog,
+    ConfirmDialog,
+    PaginatedChoiceDialog,
+    ChoiceBranchDialog,
     # Other dialogs
     UserInputDialog,
     SequenceDialog,
@@ -89,13 +93,14 @@ from .dialog import (
     create_confirm_dialog,
     create_paginated_choice_dialog,
     create_choice_branch_dialog,
+    create_user_input_dialog,
     # Sentinels and debug
-    CANCELLED,
     is_cancelled,
     DIALOG_DEBUG,
     set_dialog_debug,
 )
 from .utilities import (
+    validate_single_arg_callable,
     divide_message_to_chunks,
     format_numbered_list,
     format_bullet_list,
@@ -151,24 +156,20 @@ __all__ = [
     "TelegramRemoveKeyboardMessage",
     "TelegramReplyKeyboardMessage",
     "TelegramRemoveReplyKeyboardMessage",
-    "InvalidHtmlError",
+    "SEND_MAX_ATTEMPTS",
+    "SEND_RETRY_BASE_DELAY_SECONDS",
     # Dialog
     "Dialog",
     "DialogState",
-    "DialogResponse",
     "DialogResult",
     "DialogHandler",
     "KeyboardType",
-    # Inline keyboard dialogs (new names)
-    "InlineKeyboardChoiceDialog",
-    "InlineKeyboardConfirmDialog",
-    "InlineKeyboardPaginatedChoiceDialog",
-    "InlineKeyboardChoiceBranchDialog",
-    # Reply keyboard dialogs
-    "ReplyKeyboardChoiceDialog",
-    "ReplyKeyboardConfirmDialog",
-    "ReplyKeyboardPaginatedChoiceDialog",
-    "ReplyKeyboardChoiceBranchDialog",
+    "BranchesType",
+    # Dialog classes
+    "ChoiceDialog",
+    "ConfirmDialog",
+    "PaginatedChoiceDialog",
+    "ChoiceBranchDialog",
     # Other dialogs
     "UserInputDialog",
     "SequenceDialog",
@@ -180,14 +181,15 @@ __all__ = [
     "create_confirm_dialog",
     "create_paginated_choice_dialog",
     "create_choice_branch_dialog",
+    "create_user_input_dialog",
     # Mixins
     "UpdatePollerMixin",
     # Sentinels and Debug
-    "CANCELLED",
     "is_cancelled",
     "DIALOG_DEBUG",
     "set_dialog_debug",
     # Utilities
+    "validate_single_arg_callable",
     "divide_message_to_chunks",
     "format_numbered_list",
     "format_bullet_list",

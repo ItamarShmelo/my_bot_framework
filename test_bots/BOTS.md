@@ -16,6 +16,8 @@ echo "your_chat_id" > test_bots/.chat_id
 
 **Note:** These files are gitignored to prevent accidental commits of credentials.
 
+The built-in `/terminate` command is global: it is intercepted at the polling level and works anytime, including during active dialogs.
+
 ## Available Bots
 
 ### basic_bot.py
@@ -26,7 +28,7 @@ echo "your_chat_id" > test_bots/.chat_id
 - `BotApplication` initialization and lifecycle
 - `TimeEvent` with `fire_on_first_check`
 - `SimpleCommand` registration
-- Built-in `/terminate` and `/commands`
+- Built-in `/terminate` (global, works anytime including during dialogs) and `/commands`
 
 **Commands:**
 | Command | Description |
@@ -35,7 +37,7 @@ echo "your_chat_id" > test_bots/.chat_id
 | `/status` | Shows bot status |
 | `/info` | Shows what this bot tests |
 | `/commands` | Lists all commands (built-in) |
-| `/terminate` | Shuts down the bot (built-in) |
+| `/terminate` | Shuts down the bot (built-in; global, can be invoked anytime) |
 
 **Events:**
 - Heartbeat every 5 minutes
@@ -43,6 +45,47 @@ echo "your_chat_id" > test_bots/.chat_id
 **Run:**
 ```bash
 python test_bots/basic_bot.py
+```
+
+---
+
+### dynamic_event_bot.py
+
+**Purpose:** Demonstrates strict heartbeat event lifecycle management before startup and while the bot is running.
+
+**Features tested:**
+- Startup registration via `BotApplication.register_event()` before `run()`
+- Pre-run removal via `BotApplication.remove_event(event_name)` before any event tasks exist
+- Mid-run registration via `BotApplication.register_event()` while the bot is already running
+- Targeted runtime removal via `BotApplication.remove_event(event_name)` for a specific named heartbeat
+- Bulk runtime removal via `BotApplication.remove_event(event_name)` across all tracked heartbeats
+- `ActivateOnConditionEvent` created at startup and at runtime, with strict unique event names
+- Intentional runtime removal cancels only the selected heartbeat task and keeps the bot running
+- Multiple heartbeat events coexisting and being removed one-by-one or in bulk
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/add_heartbeat` | Register a new heartbeat event while the bot is running (fires every 10 s) |
+| `/remove_startup_heartbeat` | Remove the startup heartbeat by its exact event name while the bot is running |
+| `/remove_last_heartbeat` | Remove the most recently registered heartbeat event while the bot is running |
+| `/remove_all_heartbeats` | Remove all currently registered heartbeat events while the bot is running |
+| `/list_heartbeats` | List all currently registered heartbeat events |
+| `/info` | Shows what this bot tests |
+| `/commands` | Lists all commands (built-in) |
+| `/terminate` | Shuts down the bot (built-in) |
+
+**Events:**
+- `startup_heartbeat_1` is registered before `run()` and remains active at startup
+- `startup_heartbeat_removed_before_run` is registered then removed before `run()` to test pre-start removal
+- Additional events are added dynamically via `/add_heartbeat`
+- Targeted runtime removal is demonstrated via `/remove_startup_heartbeat`
+- Runtime removal of the newest dynamic heartbeat is demonstrated via `/remove_last_heartbeat`
+- Bulk runtime removal is demonstrated via `/remove_all_heartbeats`
+
+**Run:**
+```bash
+python test_bots/dynamic_event_bot.py
 ```
 
 ---
@@ -78,24 +121,26 @@ python test_bots/condition_bot.py
 **Purpose:** Tests the Dialog Composite system.
 
 **Features tested:**
-- `InlineKeyboardChoiceDialog` - Inline keyboard selection with static and dynamic choices
-- `UserInputDialog` - Text input with optional validation
-- `InlineKeyboardConfirmDialog` - Yes/No prompts with inline keyboard
+- `ChoiceDialog` - Inline keyboard selection with static and dynamic choices (default `keyboard_type=INLINE`)
+- `UserInputDialog` - Text input with optional validation (inline and reply keyboard Cancel via `keyboard_type`)
+- `ConfirmDialog` - Yes/No prompts with inline keyboard
 - `SequenceDialog` - Sequential dialogs with named values
 - `BranchDialog` - Condition-based branching
-- `InlineKeyboardChoiceBranchDialog` - Inline keyboard-driven branching
+- `ChoiceBranchDialog` - Inline keyboard-driven branching (static or dynamic branches)
 - `LoopDialog` - Repeat until exit condition (with exit_value and exit_condition)
 - Shared context across all dialogs
-- Dynamic choices via callable functions
+- Dynamic choices and dynamic branches via callable functions
 
 **Commands:**
 | Command | Description |
 |---------|-------------|
 | `/simple` | SequenceDialog: name + mood selection |
-| `/confirm` | InlineKeyboardConfirmDialog with custom labels |
+| `/confirm` | ConfirmDialog with custom labels |
 | `/validated` | UserInputDialog with validation (1-100) |
+| `/validated_reply` | UserInputDialog with validation (1-100), reply keyboard Cancel |
 | `/dynamic` | Dynamic choices based on previous selection |
-| `/branch` | InlineKeyboardChoiceBranchDialog (quick vs full setup) |
+| `/branch` | ChoiceBranchDialog (quick vs full setup) |
+| `/dynamic_branch` | ChoiceBranchDialog with dynamic callable branches |
 | `/condition` | BranchDialog with age-based condition |
 | `/loop` | LoopDialog until 'done' entered |
 | `/loopvalid` | LoopDialog until valid email (max 5) |
@@ -106,12 +151,12 @@ python test_bots/condition_bot.py
 
 | Dialog Type | Description |
 |-------------|-------------|
-| `InlineKeyboardChoiceDialog` | Static/dynamic inline keyboard options |
+| `ChoiceDialog` | Static/dynamic inline keyboard options |
 | `UserInputDialog` | Text input with validator |
-| `InlineKeyboardConfirmDialog` | Yes/No with custom labels |
+| `ConfirmDialog` | Yes/No with custom labels |
 | `SequenceDialog` | Named dialogs in sequence |
 | `BranchDialog` | Condition function branching |
-| `InlineKeyboardChoiceBranchDialog` | User-driven branching |
+| `ChoiceBranchDialog` | User-driven branching (static/dynamic branches) |
 | `LoopDialog` | Exit by value/condition/max |
 
 **Run:**
@@ -127,12 +172,14 @@ python test_bots/dialog_bot.py
 
 **Features tested:**
 - `DialogHandler` - Wrap dialogs with on_complete callback
-- `CANCELLED` sentinel - Unambiguous cancellation detection
+- `CANCELLED` sentinel - Unambiguous cancellation detection (instance of `DialogResult`)
+- `DONE` sentinel - Non-value outcome (instance of `DialogResult`)
+- `NOT_SET` sentinel - Internal initial state before dialog completes (instance of `DialogResult`)
 - `is_cancelled()` - Helper function for checking cancellation
 - Nested `DialogHandler` - Multiple handlers in a chain
-- `DialogResult` - Standardized result structure from `build_result()`
+- `dialog_result` property - Result after completion (T or DialogResult sentinel)
 - Async `on_complete` callbacks
-- Integration with `InlineKeyboardChoiceDialog` and `InlineKeyboardConfirmDialog`
+- Integration with `ChoiceDialog` and `ConfirmDialog`
 - Integration with `SequenceDialog`
 
 **Commands:**
@@ -150,9 +197,11 @@ python test_bots/dialog_bot.py
 | Feature | Description |
 |---------|-------------|
 | `DialogHandler` | Composite that runs a dialog and calls on_complete |
-| `CANCELLED` | Sentinel object for unambiguous cancellation |
+| `CANCELLED` | DialogResult sentinel for unambiguous cancellation |
+| `DONE` | DialogResult sentinel for non-value outcomes |
+| `NOT_SET` | DialogResult sentinel for internal initial state (before completion) |
 | `is_cancelled()` | Helper to check if result is CANCELLED |
-| `build_result()` | Polymorphic method for standardized results |
+| `dialog_result` | Property exposing result (T or DialogResult) |
 
 **Run:**
 ```bash
@@ -171,6 +220,9 @@ python test_bots/dialog_handler_bot.py
 - `DialogCommand` with `DialogHandler` for editing
 - Condition/MessageBuilder edit routing
 - `ActivateOnConditionEvent` with editable parameters
+- `EditEventDialog` with inline and reply keyboards
+- `KeyboardType` for choosing keyboard style in EditEventDialog
+- `EditEventDialog._edit_custom_field` hook via `CustomEditDialog` subclass
 
 **Commands:**
 | Command | Description |
@@ -178,8 +230,11 @@ python test_bots/dialog_handler_bot.py
 | `/sensor` | Show current simulated sensor value |
 | `/settings` | Show current threshold and alert level |
 | `/edit_threshold` | Edit threshold via UserInputDialog |
-| `/edit_level` | Edit alert level via InlineKeyboardChoiceDialog |
+| `/edit_level` | Edit alert level via ChoiceDialog |
 | `/edit_all` | Edit all settings via SequenceDialog |
+| `/edit_inline` | Edit all settings via EditEventDialog (inline keyboard) |
+| `/edit_reply` | Edit all settings via EditEventDialog (reply keyboard) |
+| `/edit_custom` | Edit all settings via CustomEditDialog (custom alert_level ChoiceDialog) |
 | `/info` | Shows what this bot tests |
 
 **Events:**
@@ -334,15 +389,14 @@ python test_bots/document_bot.py
 
 ### paginated_dialog_bot.py
 
-**Purpose:** Tests the InlineKeyboardPaginatedChoiceDialog class for displaying long lists with pagination.
+**Purpose:** Tests the PaginatedChoiceDialog class for displaying long lists with pagination.
 
 **Features tested:**
-- `InlineKeyboardPaginatedChoiceDialog` - Paginated inline keyboard selection
+- `PaginatedChoiceDialog` - Paginated inline keyboard selection
 - Static items list
 - Dynamic items via callable
 - Different page sizes (3, 4, 5 items per page)
-- "More..." button behavior (only shown when items exceed page_size)
-- Text input selection for remaining items (numbered list)
+- Next/prev page navigation (shown when items exceed page_size)
 - Cancel functionality (with and without cancel button)
 - Integration with `DialogHandler` for result processing
 
@@ -351,7 +405,7 @@ python test_bots/document_bot.py
 |---------|-------------|
 | `/info` | Shows what this bot tests |
 | `/start` | Show available commands |
-| `/short` | Test short list (no More button) |
+| `/short` | Test short list (no pagination) |
 | `/expenses` | Test expense list with pagination (5 items/page) |
 | `/countries` | Test country list with small page size (3 items/page) |
 | `/tasks` | Test dynamic items via callable |
@@ -361,8 +415,8 @@ python test_bots/document_bot.py
 
 **Test Scenarios:**
 
-| Scenario | Page Size | Items | Has "More..." |
-|----------|-----------|-------|---------------|
+| Scenario | Page Size | Items | Has Pagination |
+|----------|-----------|-------|----------------|
 | `/short` | 5 | 3 fruits | No |
 | `/expenses` | 5 | 12 expenses | Yes |
 | `/countries` | 3 | 20 countries | Yes |
@@ -454,13 +508,13 @@ python test_bots/reply_keyboard_bot.py
 
 ### reply_keyboard_dialog_bot.py
 
-**Purpose:** Tests the reply keyboard dialog classes that use Telegram's reply keyboard instead of inline keyboard.
+**Purpose:** Tests dialog classes with `keyboard_type=REPLY`, using Telegram's reply keyboard instead of inline keyboard.
 
 **Features tested:**
-- `ReplyKeyboardChoiceDialog` - Choice dialog using reply keyboard
-- `ReplyKeyboardConfirmDialog` - Confirm dialog using reply keyboard (with and without cancel)
-- `ReplyKeyboardPaginatedChoiceDialog` - Paginated choice dialog using reply keyboard
-- `ReplyKeyboardChoiceBranchDialog` - Choice branch dialog using reply keyboard
+- `ChoiceDialog` with `keyboard_type=REPLY` - Choice dialog using reply keyboard
+- `ConfirmDialog` with `keyboard_type=REPLY` - Confirm dialog using reply keyboard (with and without cancel)
+- `PaginatedChoiceDialog` with `keyboard_type=REPLY` - Paginated choice dialog using reply keyboard
+- `ChoiceBranchDialog` with `keyboard_type=REPLY` - Choice branch dialog using reply keyboard (static or dynamic branches)
 - Factory functions with `keyboard_type=KeyboardType.REPLY`:
   - `create_choice_dialog()` with `KeyboardType.REPLY`
   - `create_confirm_dialog()` with `KeyboardType.REPLY`
@@ -468,7 +522,7 @@ python test_bots/reply_keyboard_bot.py
   - `create_choice_branch_dialog()` with `KeyboardType.REPLY`
 - Text matching for button labels (reply keyboards send text messages)
 - Cancel functionality (with `include_cancel` parameter)
-- Dynamic choices via callable functions
+- Dynamic choices and dynamic branches via callable functions
 - Integration with `DialogHandler` and `SequenceDialog`
 - Custom yes/no labels for confirm dialogs
 
@@ -476,31 +530,147 @@ python test_bots/reply_keyboard_bot.py
 | Command | Description |
 |---------|-------------|
 | `/info` | Shows what this bot tests |
-| `/choice` | Test ReplyKeyboardChoiceDialog (direct class) |
+| `/choice` | Test ChoiceDialog with keyboard_type=REPLY (direct class) |
 | `/choice_factory` | Test create_choice_dialog with KeyboardType.REPLY |
-| `/confirm` | Test ReplyKeyboardConfirmDialog (direct class) |
-| `/confirm_cancel` | Test ReplyKeyboardConfirmDialog with cancel button |
+| `/confirm` | Test ConfirmDialog with keyboard_type=REPLY (direct class) |
+| `/confirm_cancel` | Test ConfirmDialog with keyboard_type=REPLY and cancel button |
 | `/confirm_factory` | Test create_confirm_dialog with KeyboardType.REPLY |
-| `/paginated` | Test ReplyKeyboardPaginatedChoiceDialog (direct class) |
+| `/paginated` | Test PaginatedChoiceDialog with keyboard_type=REPLY (direct class) |
 | `/paginated_factory` | Test create_paginated_choice_dialog with KeyboardType.REPLY |
 | `/dynamic_choice` | Test dynamic choices via callable |
-| `/branch` | Test ReplyKeyboardChoiceBranchDialog (direct class) |
+| `/branch` | Test ChoiceBranchDialog with keyboard_type=REPLY (direct class) |
 | `/branch_factory` | Test create_choice_branch_dialog with KeyboardType.REPLY |
-| `/choice_handler` | Test ReplyKeyboardChoiceDialog with DialogHandler |
-| `/confirm_handler` | Test ReplyKeyboardConfirmDialog with DialogHandler |
+| `/dynamic_branch` | Test dynamic branches via callable |
+| `/choice_handler` | Test ChoiceDialog with keyboard_type=REPLY and DialogHandler |
+| `/confirm_handler` | Test ConfirmDialog with keyboard_type=REPLY and DialogHandler |
 
 **Dialog Types Tested:**
 
 | Dialog Type | Description |
 |-------------|-------------|
-| `ReplyKeyboardChoiceDialog` | Static/dynamic keyboard options using reply keyboard |
-| `ReplyKeyboardConfirmDialog` | Yes/No with custom labels using reply keyboard |
-| `ReplyKeyboardPaginatedChoiceDialog` | Paginated options with "More..." button using reply keyboard |
-| `ReplyKeyboardChoiceBranchDialog` | User-driven branching using reply keyboard |
+| `ChoiceDialog` (keyboard_type=REPLY) | Static/dynamic keyboard options using reply keyboard |
+| `ConfirmDialog` (keyboard_type=REPLY) | Yes/No with custom labels using reply keyboard |
+| `PaginatedChoiceDialog` (keyboard_type=REPLY) | Paginated options with next/prev navigation using reply keyboard |
+| `ChoiceBranchDialog` (keyboard_type=REPLY) | User-driven branching using reply keyboard (static/dynamic branches) |
 
 **Run:**
 ```bash
 python test_bots/reply_keyboard_dialog_bot.py
+```
+
+---
+
+### bad_html_bot.py
+
+**Purpose:** Tests fatal `BadRequest` handling for invalid HTML. The framework does not use `InvalidHtmlError`; invalid HTML triggers `BadRequest`, which is logged with an `html.escape()` hint and re-raised (fatal path).
+
+**Features tested:**
+- Invalid HTML triggers `BadRequest` (fatal)
+- Send path logs `html.escape()` hint before re-raising
+- Fatal error propagates up and terminates the bot
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/info` | Shows what this bot tests |
+| `/bad_html` | Send a message with invalid HTML (triggers fatal BadRequest) |
+
+**Usage:**
+Start the bot and send `/bad_html`. The bot will attempt to send a message containing raw '<' and '>' characters, which Telegram cannot parse as HTML. This triggers `BadRequest`; the send path logs a hint to use `html.escape()`, then re-raises, terminating the bot with a CRITICAL log and full traceback.
+
+**Run:**
+```bash
+python test_bots/bad_html_bot.py
+```
+
+---
+
+### network_error_bot.py
+
+**Purpose:** Tests exception safety and retry/recovery behavior of the polling layer by monkey-patching `bot.get_updates` to inject intermittent failures. Includes outage/recovery commands to simulate prolonged outages and observe recovery transitions.
+
+**Features tested:**
+- **Startup flush retry:** First 3 `get_updates` calls fail (during `flush_pending_updates`), then succeed after retries with backoff; validates shared retry defaults via `run_with_transient_retry`
+- **Polling receive retry/backoff:** `poll_updates()` uses `run_with_transient_retry` for `TimedOut`/`NetworkError`; returns `[]` when attempts exhausted; uses shared default max attempts with exponential backoff + jitter
+- **Recovery transition logging:** `_log_poll_recovery` emits when polling resumes after failure streak; `_log_poll_failure` throttles logs during outages
+- **Exception handling:** `poll_updates()` catches `TimedOut`, `NetworkError`, `RetryAfter`; `UpdatePollerMixin.poll()` safety net catches unexpected errors (e.g., `RuntimeError`)
+- **Outage/recovery commands:** `/outage5`, `/outage10`, `/recovery_test`, `/burst_status` to simulate prolonged outages and observe recovery
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/stats` | Show error injection statistics (poll cycles, injected error counts) |
+| `/hello` | Say hello (proves bot is responsive despite errors) |
+| `/outage5` | Inject 5 consecutive NetworkError poll failures (outage simulation) |
+| `/outage10` | Inject 10 consecutive NetworkError poll failures (outage simulation) |
+| `/recovery_test` | Inject 7 consecutive failures to observe recovery transition |
+| `/burst_status` | Show outage burst and recovery-transition status |
+| `/info` | Show what this bot tests |
+| `/commands` | Lists all commands (built-in) |
+| `/terminate` | Shuts down the bot (built-in) |
+
+**Events:**
+- Heartbeat every 5 minutes (proves bot continues running despite errors)
+
+**Error Injection Schedule:**
+- **Initial burst:** First 3 `get_updates` calls fail (tests startup flush retry)
+- Every 3rd poll cycle: `TimedOut` error
+- Every 5th poll cycle: `NetworkError` error
+- Every 11th poll cycle: `RuntimeError` (unexpected error)
+- On-demand outage bursts: consecutive `NetworkError` via `/outage5`, `/outage10`, or `/recovery_test`
+
+**Usage:**
+The bot injects an initial burst of 3 failures (startup flush retry), then intermittent errors on a fixed schedule, and can inject prolonged outages on demand. Use `/stats` and `/burst_status` to verify the bot survives prolonged failures and cleanly transitions back to healthy polling.
+
+**Run:**
+```bash
+python test_bots/network_error_bot.py
+```
+
+---
+
+### send_retry_bot.py
+
+**Purpose:** Tests retry logic in `TelegramMessage.send()` for transient send errors.
+
+**Features tested:**
+- Retry logic with exponential backoff for `TimedOut` errors
+- Retry logic with exponential backoff for `NetworkError` errors
+- `RetryAfter` error handling (respects retry_after + buffer; does not count towards attempt limit; raises RuntimeError if exceeded)
+- Exhausting attempts after `SEND_MAX_ATTEMPTS` (5 attempts, backoff 2s, 4s, 8s, 16s, 32s)
+- Retry behavior across different message types (`TelegramTextMessage`, `TelegramImageMessage`, `TelegramDocumentMessage`, `TelegramOptionsMessage`)
+- Constants: `SEND_MAX_ATTEMPTS`, `SEND_RETRY_BASE_DELAY_SECONDS`, `RATE_LIMIT_MAX_WAIT_SECONDS`; retry defaults (buffer, max attempts) from `retry_utilities`
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `/test_timedout` | Test TimedOut retry (succeeds after 1 retry) |
+| `/test_network_error` | Test NetworkError retry (succeeds after 1 retry) |
+| `/test_retry_after` | Test RetryAfter handling (waits 2 seconds, then succeeds) |
+| `/test_multiple_retries` | Test multiple retries with exponential backoff (fails 2x, succeeds on 3rd) |
+| `/test_exhaust_retries` | Test exhausting attempts (fails SEND_MAX_ATTEMPTS times, error logged) |
+| `/test_image` | Test retry with TelegramImageMessage |
+| `/test_document` | Test retry with TelegramDocumentMessage |
+| `/test_options` | Test retry with TelegramOptionsMessage |
+| `/stats` | Show send retry test statistics and configuration |
+| `/info` | Show what this bot tests |
+| `/commands` | Lists all commands (built-in) |
+| `/terminate` | Shuts down the bot (built-in) |
+
+**Error Injection Schedule:**
+The bot monkey-patches Telegram API send methods (`bot.send_message`, `bot.send_photo`, `bot.send_document`) to inject failures:
+- Call 1: `TimedOut` error (succeeds on retry)
+- Call 2: `NetworkError` error (succeeds on retry)
+- Call 3: `RetryAfter` error with 2 second wait (succeeds after wait; includes buffer; does not count towards attempt limit)
+- Calls 4-5: Multiple `TimedOut` errors (succeeds on 3rd attempt, tests exponential backoff)
+- Calls 7-11: Exhaust attempts (all `SEND_MAX_ATTEMPTS` attempts fail, `all_attempts_exhausted` error logged)
+
+**Usage:**
+Run each `/test_*` command to trigger different retry scenarios. Check logs to see retry attempts, exponential backoff delays (2s, 4s, 8s, 16s, 32s), and RetryAfter waits. The `/test_exhaust_retries` command demonstrates what happens when all attempts are exhausted (error logged, bot continues running).
+
+**Run:**
+```bash
+python test_bots/send_retry_bot.py
 ```
 
 ---

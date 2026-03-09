@@ -8,6 +8,8 @@ importing bot_application.py directly.
 The singleton instance is set by BotApplication.initialize().
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from typing import TYPE_CHECKING
@@ -18,16 +20,16 @@ if TYPE_CHECKING:
 
 
 # The singleton instance, set by BotApplication
-_instance: "BotApplication | None" = None
+_instance: BotApplication | None = None
 
 
-def _set_instance(app: "BotApplication") -> None:
+def _set_instance(app: BotApplication) -> None:
     """Set the singleton instance. Called by BotApplication.initialize()."""
     global _instance
     _instance = app
 
 
-def _get_instance() -> "BotApplication":
+def _get_instance() -> BotApplication:
     """Get the singleton instance, raising if not initialized."""
     if _instance is None:
         raise RuntimeError(
@@ -36,12 +38,12 @@ def _get_instance() -> "BotApplication":
     return _instance
 
 
-def get_app() -> "BotApplication":
+def get_app() -> BotApplication:
     """Get the BotApplication singleton instance."""
     return _get_instance()
 
 
-def get_bot() -> "Bot":
+def get_bot() -> Bot:
     """Get the Bot instance from the singleton."""
     return _get_instance().bot
 

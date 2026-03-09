@@ -5,14 +5,19 @@ Tests:
 - Editing fields via DialogCommand
 - EditableMixin.edited flag for immediate re-check
 - Dynamic kwargs from editable fields
+- EditEventDialog with inline keyboard (/edit_inline)
+- EditEventDialog with reply keyboard (/edit_reply)
+- EditEventDialog._edit_custom_field hook via CustomEditDialog (/edit_custom)
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
 import random
 import sys
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, cast
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -23,14 +28,18 @@ from my_bot_framework import (
     DialogCommand,
     ActivateOnConditionEvent,
     EditableAttribute,
+    EditEventDialog,
     Condition,
     MessageBuilder,
-    InlineKeyboardChoiceDialog,
+    KeyboardType,
+    ChoiceDialog,
     UserInputDialog,
     SequenceDialog,
     DialogHandler,
+    create_choice_dialog,
     is_cancelled,
     get_app,
+    get_logger,
 )
 
 
@@ -91,7 +100,8 @@ class SensorCondition(Condition):
     def check(self) -> bool:
         """Check if sensor value exceeds threshold."""
         value = get_sensor_value()
-        return value > self.get("threshold")
+        threshold: int = cast(int, self.get("threshold"))
+        return value > threshold
 
 
 class AlertMessageBuilder(MessageBuilder):
@@ -113,7 +123,7 @@ class AlertMessageBuilder(MessageBuilder):
         self._condition = condition
         self._alert_count = 0
 
-    def build(self) -> Optional[str]:
+    def build(self) -> str | None:
         """Build alert message with current value and level."""
         max_alerts = self.get("max_alerts")
 
@@ -134,6 +144,71 @@ class AlertMessageBuilder(MessageBuilder):
             f"Sensor value: <code>{_sensor_value}</code>\n"
             f"Threshold: <code>{threshold}</code>"
         )
+
+
+class CustomEditDialog(EditEventDialog):
+    """EditEventDialog subclass demonstrating the _edit_custom_field hook.
+
+    Intercepts the ``builder.alert_level`` field and shows a ChoiceDialog
+    with labeled icon buttons instead of the default text input. All other
+    fields fall through to the default bool/text editing.
+    """
+
+    async def _edit_custom_field(self, field_name: str) -> bool:
+        """Show a ChoiceDialog for alert_level instead of a text input.
+
+        Args:
+            field_name: Name of the editable attribute selected by the user.
+
+        Returns:
+            True if the field was handled, False to fall through to default.
+        """
+        logger = get_logger()
+        if field_name != "builder.alert_level":
+            logger.debug(
+                "CustomEditDialog._edit_custom_field: fallthrough field=%s (not custom)",
+                field_name,
+            )
+            return False
+
+        logger.debug(
+            "CustomEditDialog._edit_custom_field: custom_edit field=%s",
+            field_name,
+        )
+        level_dialog = create_choice_dialog(
+            prompt="Select alert level:",
+            choices=[
+                ("\u2139\ufe0f Info", "info"),
+                ("\u26a0\ufe0f Warning", "warning"),
+                ("\U0001f6a8 Critical", "critical"),
+            ],
+            keyboard_type=self.keyboard_type,
+            include_cancel=True,
+        )
+        result = await level_dialog.start(self.context)
+
+        if is_cancelled(result):
+            logger.info(
+                "CustomEditDialog._edit_custom_field: cancelled field=%s",
+                field_name,
+            )
+            return True
+
+        success, error = self._validate_and_stage_value(field_name, result)
+        if success:
+            logger.info(
+                "CustomEditDialog._edit_custom_field: staged field=%s value=%s",
+                field_name,
+                result,
+            )
+        else:
+            logger.info(
+                "CustomEditDialog._edit_custom_field: validation_failed field=%s error=%s",
+                field_name,
+                error,
+            )
+            await get_app().send_messages(f"\u26a0\ufe0f {error}")
+        return True
 
 
 def main() -> None:
@@ -193,7 +268,7 @@ def main() -> None:
 
     async def on_threshold_edited(result: Any) -> None:
         """Handle threshold edit completion.
-        
+
         Args:
             result: The dialog result containing the new threshold value or CANCELLED.
         """
@@ -207,6 +282,11 @@ def main() -> None:
                 f"✅ Threshold updated to <code>{sensor_event.get('condition.threshold')}</code>"
             )
         except ValueError as e:
+            get_logger().warning(
+                "on_threshold_edited: validation_failed result=%r",
+                result,
+                exc_info=True,
+            )
             await get_app().send_messages(f"❌ Invalid threshold: {e}")
 
     threshold_dialog = DialogHandler(
@@ -233,7 +313,7 @@ def main() -> None:
 
     async def on_level_edited(result: Any) -> None:
         """Handle alert level edit completion.
-        
+
         Args:
             result: The dialog result containing the new alert level or CANCELLED.
         """
@@ -250,7 +330,7 @@ def main() -> None:
         )
 
     level_dialog = DialogHandler(
-        InlineKeyboardChoiceDialog("Select alert level:", [
+        ChoiceDialog("Select alert level:", [
             ("ℹ️ Info", "info"),
             ("⚠️ Warning", "warning"),
             ("🚨 Critical", "critical"),
@@ -268,7 +348,7 @@ def main() -> None:
 
     async def on_all_edited(result: Any) -> None:
         """Handle combined settings edit.
-        
+
         Args:
             result: The dialog result containing edited fields as a dict or CANCELLED.
         """
@@ -285,12 +365,22 @@ def main() -> None:
             try:
                 sensor_event.edit("condition.threshold", new_threshold)
             except ValueError as e:
+                get_logger().warning(
+                    "on_all_edited: threshold_validation_failed value=%r",
+                    new_threshold,
+                    exc_info=True,
+                )
                 errors.append(f"Threshold: {e}")
 
         if new_level:
             try:
                 sensor_event.edit("builder.alert_level", new_level)
             except ValueError as e:
+                get_logger().warning(
+                    "on_all_edited: alert_level_validation_failed value=%r",
+                    new_level,
+                    exc_info=True,
+                )
                 errors.append(f"Alert Level: {e}")
 
         # Build confirmation message
@@ -316,7 +406,7 @@ def main() -> None:
                     "Enter a number between 0 and 100"
                 ),
             )),
-            ("level", InlineKeyboardChoiceDialog("Select alert level:", [
+            ("level", ChoiceDialog("Select alert level:", [
                 ("ℹ️ Info", "info"),
                 ("⚠️ Warning", "warning"),
                 ("🚨 Critical", "critical"),
@@ -331,6 +421,54 @@ def main() -> None:
         dialog=combined_dialog,
     ))
 
+    # --- EditEventDialog commands (inline vs reply keyboard) ---
+
+    async def on_event_edited(result: Any) -> None:
+        """Handle EditEventDialog completion.
+
+        Args:
+            result: The dialog result (dict of edits or CANCELLED).
+        """
+        logger = get_logger()
+        if is_cancelled(result):
+            logger.info("on_event_edited: cancelled")
+            await get_app().send_messages("❌ Event edit cancelled.")
+            return
+        logger.info("on_event_edited: completed edits=%s", result)
+        await get_app().send_messages(f"✅ Settings updated:\n{get_settings_text()}")
+
+    inline_edit_dialog = DialogHandler(
+        EditEventDialog(sensor_event),
+        on_complete=on_event_edited,
+    )
+    app.register_command(DialogCommand(
+        command="/edit_inline",
+        description="Edit settings (inline keyboard)",
+        dialog=inline_edit_dialog,
+    ))
+
+    reply_edit_dialog = DialogHandler(
+        EditEventDialog(sensor_event, keyboard_type=KeyboardType.REPLY),
+        on_complete=on_event_edited,
+    )
+    app.register_command(DialogCommand(
+        command="/edit_reply",
+        description="Edit settings (reply keyboard)",
+        dialog=reply_edit_dialog,
+    ))
+
+    # --- CustomEditDialog command (demonstrates _edit_custom_field hook) ---
+
+    custom_edit_dialog = DialogHandler(
+        CustomEditDialog(sensor_event),
+        on_complete=on_event_edited,
+    )
+    app.register_command(DialogCommand(
+        command="/edit_custom",
+        description="Edit settings (custom alert_level editor)",
+        dialog=custom_edit_dialog,
+    ))
+
     # --- Info command ---
 
     info_text = (
@@ -338,13 +476,18 @@ def main() -> None:
         "Tests runtime-editable parameters:\n"
         "• <code>EditableAttribute</code> factory methods (int, str, optional=True)\n"
         "• <code>EditableMixin</code> - Edited flag for immediate re-check\n"
-        "• Dialog-based editing of event parameters\n\n"
+        "• Dialog-based editing of event parameters\n"
+        "• <code>EditEventDialog</code> with inline and reply keyboards\n"
+        "• <code>_edit_custom_field</code> hook via CustomEditDialog\n\n"
         "<b>Commands:</b>\n"
         "/sensor - Show current sensor value\n"
         "/settings - Show current settings\n"
         "/edit_threshold - Edit threshold via dialog\n"
         "/edit_level - Edit alert level via dialog\n"
-        "/edit_all - Edit all settings at once"
+        "/edit_all - Edit all settings at once\n"
+        "/edit_inline - Edit all settings (inline keyboard)\n"
+        "/edit_reply - Edit all settings (reply keyboard)\n"
+        "/edit_custom - Edit settings (custom alert_level editor)"
     )
     app.register_command(SimpleCommand(
         command="/info",
@@ -359,13 +502,11 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting editable_bot...")
+        logger.info("send_startup_and_run: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())
 
 
-if __name__ == "__main__":
-    main()
 if __name__ == "__main__":
     main()

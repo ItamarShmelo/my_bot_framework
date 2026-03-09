@@ -13,11 +13,13 @@ Tests:
 - validate_regex - Validate regex patterns
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -41,7 +43,7 @@ from my_bot_framework import (
 )
 
 
-def get_credentials() -> Tuple[str, str]:
+def get_credentials() -> tuple[str, str]:
     """Get bot credentials from .token and .chat_id files in test_bots directory.
 
     Returns:
@@ -168,7 +170,7 @@ def main() -> None:
     async def on_validate_int_complete(result: Any) -> None:
         """Handle validate_int dialog completion."""
         await app.send_messages(f"✅ Valid positive integer: <b>{result}</b>")
-    
+
     app.register_command(DialogCommand(
         command="/validate_int",
         description="Test validate_positive_int on user input",
@@ -180,12 +182,12 @@ def main() -> None:
             on_complete=on_validate_int_complete,
         ),
     ))
-    
+
     # /validate_float - Test validate_positive_float
     async def on_validate_float_complete(result: Any) -> None:
         """Handle validate_float dialog completion."""
         await app.send_messages(f"✅ Valid positive float: <b>{result}</b>")
-    
+
     app.register_command(DialogCommand(
         command="/validate_float",
         description="Test validate_positive_float on user input",
@@ -197,12 +199,12 @@ def main() -> None:
             on_complete=on_validate_float_complete,
         ),
     ))
-    
+
     # /validate_range - Test validate_int_range(1, 100)
     async def on_validate_range_complete(result: Any) -> None:
         """Handle validate_range dialog completion."""
         await app.send_messages(f"✅ Valid integer in range [1, 100]: <b>{result}</b>")
-    
+
     app.register_command(DialogCommand(
         command="/validate_range",
         description="Test validate_int_range(1, 100) on user input",
@@ -214,12 +216,12 @@ def main() -> None:
             on_complete=on_validate_range_complete,
         ),
     ))
-    
+
     # /validate_float_range - Test validate_float_range(0.0, 1.0)
     async def on_validate_float_range_complete(result: Any) -> None:
         """Handle validate_float_range dialog completion."""
         await app.send_messages(f"✅ Valid float in range [0.0, 1.0]: <b>{result}</b>")
-    
+
     app.register_command(DialogCommand(
         command="/validate_float_range",
         description="Test validate_float_range(0.0, 1.0) on user input",
@@ -231,12 +233,12 @@ def main() -> None:
             on_complete=on_validate_float_range_complete,
         ),
     ))
-    
+
     # /validate_date - Test validate_date_format("%Y-%m-%d")
     async def on_validate_date_complete(result: Any) -> None:
         """Handle validate_date dialog completion."""
         await app.send_messages(f"✅ Valid date (YYYY-MM-DD): <b>{result}</b>")
-    
+
     app.register_command(DialogCommand(
         command="/validate_date",
         description="Test validate_date_format('%Y-%m-%d') on user input",
@@ -248,17 +250,17 @@ def main() -> None:
             on_complete=on_validate_date_complete,
         ),
     ))
-    
+
     # /validate_email - Test validate_regex with email pattern
     email_validator = validate_regex(
         pattern=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
         error_msg="Invalid email format. Please enter a valid email address.",
     )
-    
+
     async def on_validate_email_complete(result: Any) -> None:
         """Handle validate_email dialog completion."""
         await app.send_messages(f"✅ Valid email address: <b>{result}</b>")
-    
+
     app.register_command(DialogCommand(
         command="/validate_email",
         description="Test validate_regex with email pattern on user input",
@@ -278,7 +280,7 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting utilities_bot...")
+        logger.info("send_startup_and_run: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())

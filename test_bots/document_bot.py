@@ -7,11 +7,12 @@ Tests:
 - Error handling for missing files
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Tuple
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -23,7 +24,7 @@ from my_bot_framework import (
 )
 
 
-def get_credentials() -> Tuple[str, str]:
+def get_credentials() -> tuple[str, str]:
     """Get bot credentials from .token and .chat_id files in test_bots directory."""
     test_bots_dir = Path(__file__).resolve().parent
     token_file = test_bots_dir / ".token"
@@ -70,7 +71,7 @@ def main() -> None:
 
     # Create test file
     test_file = create_test_file()
-    logger.info("Created test file at %s", test_file)
+    logger.info("create_test_file: created path=%s", test_file)
 
     # Initialize the bot
     app = BotApplication.initialize(
@@ -170,7 +171,7 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting document_bot...")
+        logger.info("send_startup_and_run: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())

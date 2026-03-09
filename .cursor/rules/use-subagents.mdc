@@ -13,8 +13,10 @@ You MUST delegate to the appropriate subagent when performing tasks that fall un
 |----------|-----------|----------------------|
 | `code-style-enforcer` | Naming conventions, docstrings, code formatting | After modifying Python code |
 | `type-hints-enforcer` | Type annotations, mypy verification | After modifying Python code |
+| `logging-enforcer` | Comprehensive traceable logging | After modifying Python code |
 | `docs-updater` | README.md, IMPLEMENTATION.md, BOTS.md | After changes affecting API, architecture, or test bots |
 | `test-bots-maintainer` | Test bot creation and maintenance | After adding features or changing APIs |
+| `code-smell-detector` | Code duplication, refactoring, dead code | Occasionally, when it seems appropriate (readonly — reports only) |
 
 ## When to Invoke Each Subagent
 
@@ -32,6 +34,15 @@ You MUST invoke when:
 - Adding or modifying function signatures
 - Working with complex types (generics, protocols, etc.)
 
+### logging-enforcer
+
+You MUST invoke when:
+- Creating new Python files
+- Modifying methods or functions (ensure logging is added/updated)
+- Adding or modifying error handling (except blocks)
+- Adding or modifying async operations
+- Working in polling loops or event handlers
+
 ### docs-updater
 
 You MUST invoke when:
@@ -47,10 +58,18 @@ You MUST invoke when:
 - Modifying APIs used by existing test bots
 - Creating new test bots for new features
 
+### code-smell-detector
+
+Use occasionally when it seems appropriate — e.g., after significant code changes, large refactors, or adding new classes. Use your judgment; it does not need to run on every edit.
+
+**Note:** This subagent is readonly. It reports findings and suggests fixes but does NOT make changes. Present its findings to the user for decision.
+
 ## Checklist
 
 After Python code changes, you MUST:
 - [ ] Use `code-style-enforcer` for style enforcement
 - [ ] Use `type-hints-enforcer` for type hints
+- [ ] Use `logging-enforcer` for logging standards
+- [ ] Consider using `code-smell-detector` if the changes are significant (readonly, occasional)
 - [ ] Use `docs-updater` if documentation is affected
 - [ ] Use `test-bots-maintainer` if test bots need updates

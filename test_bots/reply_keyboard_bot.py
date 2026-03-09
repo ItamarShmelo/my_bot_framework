@@ -11,11 +11,12 @@ Tests:
 - Keyboard removal
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Tuple
 
 # Add grandparent directory to path for imports (to find my_bot_framework package)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -28,7 +29,7 @@ from my_bot_framework import (
 )
 
 
-def get_credentials() -> Tuple[str, str]:
+def get_credentials() -> tuple[str, str]:
     """Get bot credentials from .token and .chat_id files in test_bots directory."""
     test_bots_dir = Path(__file__).resolve().parent
     token_file = test_bots_dir / ".token"
@@ -251,7 +252,7 @@ def main() -> None:
             f"{info_text}\n\n"
             f"💡 Type /commands to see all available commands."
         )
-        logger.info("Starting reply_keyboard_bot...")
+        logger.info("send_startup_and_run: starting")
         await app.run()
 
     asyncio.run(send_startup_and_run())
