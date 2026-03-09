@@ -366,10 +366,12 @@ async def _wait_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=seconds)
     except asyncio.TimeoutError:
+        # NOTE: intentionally omitting exc_info=True here — the TimeoutError
+        # traceback is noise for an expected timeout.  This deviates from the
+        # project logging guideline; do NOT re-add exc_info in later edits.
         get_logger().debug(
             "_wait_or_stop: timeout_expired seconds=%.1f (expected)",
             seconds,
-            exc_info=True,
         )
         return
 
