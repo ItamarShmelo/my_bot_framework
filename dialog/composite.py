@@ -6,7 +6,7 @@ import asyncio
 from typing import Any, Callable
 
 from ..accessors import get_logger
-from .base import Dialog, DialogResult, DialogState
+from .base import Dialog, DialogResult, DialogState, is_cancelled
 
 
 class SequenceDialog(Dialog[dict[str, Any]]):
@@ -59,7 +59,7 @@ class SequenceDialog(Dialog[dict[str, Any]]):
             self.context[name] = result
             self._current_index += 1
 
-            if isinstance(result, DialogResult):
+            if is_cancelled(result):
                 self._dialog_result = DialogResult.CANCELLED
                 self.state = DialogState.COMPLETE
                 get_logger().info(
@@ -215,7 +215,7 @@ class LoopDialog(Dialog[Any]):
         while True:
             result = await self.dialog.start(self.context)
 
-            if isinstance(result, DialogResult):
+            if is_cancelled(result):
                 self._dialog_result = DialogResult.CANCELLED
                 self.state = DialogState.COMPLETE
                 get_logger().info(
@@ -244,7 +244,7 @@ class LoopDialog(Dialog[Any]):
 
     def _should_exit(self, result: Any) -> bool:
         """Check if the loop should exit based on result."""
-        if isinstance(result, DialogResult):
+        if is_cancelled(result):
             return True
         if self.exit_value is not None and result == self.exit_value:
             return True

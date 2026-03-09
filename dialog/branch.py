@@ -23,6 +23,7 @@ from .base import (
     DialogState,
     KeyboardType,
     _handle_callback_prelude,
+    is_cancelled,
 )
 
 
@@ -99,11 +100,15 @@ class ChoiceBranchDialog(Dialog[dict[str, Any] | None], UpdatePollerMixin):
 
         poll_result = await self.poll()
 
-        if isinstance(poll_result, DialogResult):
+        if is_cancelled(poll_result):
             self.state = DialogState.COMPLETE
+            get_logger().info("ChoiceBranchDialog._run_dialog: cancelled")
             return DialogResult.CANCELLED
 
         if self._active_branch is None:
+            get_logger().warning(
+                "ChoiceBranchDialog._run_dialog: no_branch_selected returning_cancelled"
+            )
             self._dialog_result = DialogResult.CANCELLED
             self.state = DialogState.COMPLETE
             return DialogResult.CANCELLED
@@ -265,4 +270,3 @@ class ChoiceBranchDialog(Dialog[dict[str, Any] | None], UpdatePollerMixin):
         if not callable(self._branches):
             for _label, dialog in self._branches.values():
                 dialog.reset()
-
